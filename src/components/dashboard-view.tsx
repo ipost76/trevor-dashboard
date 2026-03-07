@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { TrendingUp, TrendingDown, Activity, Zap, Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, DollarSign, Target, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
+import { usePolling } from "@/lib/use-polling";
 
 type LiveData = {
   xp: number;
@@ -94,11 +95,7 @@ export function DashboardView() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchData();
-    const i = setInterval(fetchData, 30000);
-    return () => clearInterval(i);
-  }, [fetchData]);
+  usePolling(fetchData, 30000);
 
   if (loading) {
     return (

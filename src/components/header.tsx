@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Wifi, WifiOff, KeyRound, LogOut, Zap } from "lucide-react";
+import { WifiOff, KeyRound, LogOut, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
+import { usePolling } from "@/lib/use-polling";
 import { ChangePasswordModal } from "@/components/change-password-modal";
 
 type StatusData = { ok: boolean; trevor: { running: boolean; pid: number }; xp: number; rank: string };
@@ -22,14 +23,9 @@ export function Header() {
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    const fetchStatus = () => {
-      safeFetch<StatusData | null>("/api/status", null).then(setStatus);
-    };
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  usePolling(() => {
+    safeFetch<StatusData | null>("/api/status", null).then(setStatus);
+  }, 30000);
 
   const handleLogout = async () => {
     await fetch("/api/auth", {

@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { Activity, CheckCircle, XCircle, Clock, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Activity, CheckCircle, XCircle, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
+import { usePolling } from "@/lib/use-polling";
 
 type Signal = {
   id: number; ticker: string; signal_type: string; confidence: number;
@@ -18,7 +19,6 @@ export default function SignalsPage() {
   const pageSize = 50;
 
   const fetchSignals = useCallback(async () => {
-    setLoading(true);
     const offset = (page - 1) * pageSize;
     const d = await safeFetch<{ records?: Signal[]; total?: number }>(
       `/api/signals?limit=${pageSize}&offset=${offset}`, {}
@@ -28,13 +28,7 @@ export default function SignalsPage() {
     setLoading(false);
   }, [page]);
 
-  useEffect(() => { fetchSignals(); }, [fetchSignals]);
-
-  // Auto-refresh every 60s
-  useEffect(() => {
-    const i = setInterval(fetchSignals, 60000);
-    return () => clearInterval(i);
-  }, [fetchSignals]);
+  usePolling(fetchSignals, 60000);
 
   const totalPages = Math.ceil(total / pageSize);
 
