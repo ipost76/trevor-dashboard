@@ -126,3 +126,30 @@ sudo systemctl restart trevor-dashboard
 ## Git History
 - `365af64` â€” Hub v3.1: full diagnostic, performance overhaul, visual remodel (56 files)
 - `bcc9497` â€” Phase 3: error boundaries, visibility-aware polling, training timeout (17 files)
+
+## Hub v3.2 — Training + Watchlist Fix (2026-03-07)
+
+### Training Page
+- Removed Records tab (was loading 1.6M rows) and Vectors tab (duplicate)
+- Single scrollable page: summary cards + 4 Recharts charts + strategy table
+- Frontend field mapping: `totalRecords`, `winRate`, `topTickers`, `strategyBreakdown`, `outcomes`, `timeframes`, `dateRange`, `distinctTickers`
+- API: existing `/api/training?scope=summary` (calls `query_training.py summary`)
+
+### training_trades Column Mapping
+| Column | Values |
+|--------|--------|
+| `outcome_result` | WIN, LOSS, SCRATCH |
+| `signal_type` | OBV_CONFIRM_LONG, OBV_CONFIRM_SHORT, EMA_STACK_PULLBACK, etc (20+) |
+| `direction` | LONG, SHORT |
+| `regime_trend` | BEARISH, BULLISH, CHOPPY, bear_trend, bull_trend, crash, high_vol, low_vol, ranging, squeeze |
+| `date` | timestamp field (1962 to 2034 range — synthetic data) |
+
+### Watchlist Revamp
+- Hub-side metadata: `data/watchlist-meta.json` (24 ticker entries with category + description)
+- New route: `/api/watchlist/meta` — GET (merged DB+meta), PUT (edit description), POST (batch cleanup)
+- Categories: crypto_perp, crypto_spot, equity, etf, speculative
+- Grouped collapsible view, inline editing, inline delete confirmation
+- watchlist table columns: `id`, `ticker`, `reason`, `priority`, `earnings_date`, `alert_threshold_pct`, `notes`, `last_checked`, `added_at`, `asset_type`, `mode`
+
+### Git
+- `0c1b8a7` — Hub v3.2: Training page rebuild + Watchlist revamp (3 files, 711 ins, 292 del)
