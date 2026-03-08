@@ -267,3 +267,28 @@ body::before {
   background: rgba(0, 255, 136, 0.2);
   color: #fff;
 }
+
+/* Skeleton loading animation */
+.animate-skeleton {
+  background: linear-gradient(90deg, rgba(0,255,136,0.03) 25%, rgba(0,255,136,0.08) 50%, rgba(0,255,136,0.03) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s infinite;
+}
+
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Mobile responsive dashboard grid */
+@media (max-width: 1024px) {
+  .flex-1.grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+    height: auto !important;
+  }
+  .flex-1.grid > * {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+}
