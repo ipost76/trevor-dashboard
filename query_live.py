@@ -29,7 +29,7 @@ try:
             "SELECT COUNT(*), "
             "SUM(CASE WHEN exit_reason='WIN' THEN 1 ELSE 0 END), "
             "SUM(CASE WHEN exit_reason='LOSS' THEN 1 ELSE 0 END) "
-            "FROM trade_outcomes"
+            "FROM trade_outcomes WHERE excluded = 0 OR excluded IS NULL"
         ).fetchone()
         result["outcomes"] = {"decided": rows[0] or 0, "wins": int(rows[1] or 0), "losses": int(rows[2] or 0)}
     except Exception:
