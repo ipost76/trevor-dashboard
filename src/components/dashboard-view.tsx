@@ -307,12 +307,14 @@ export function DashboardView() {
   const [trades, setTrades] = useState<ActiveTrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [tradesLoading, setTradesLoading] = useState(true);
+  const [portfolioSummary, setPortfolioSummary] = useState<{ total_value: number; total_unrealized_pnl: number; total_unrealized_pnl_pct: number; position_count: number; by_category: Record<string, { count: number; value: number; pnl: number }> } | null>(null);
   const [error, setError] = useState(false);
 
   const fetchData = useCallback(async () => {
-    const [raw, tradesRaw] = await Promise.all([
+    const [raw, tradesRaw, portfolioRaw] = await Promise.all([
       safeFetch<Record<string, unknown> | null>("/api/live", null),
       safeFetch<{ trades?: ActiveTrade[] } | null>("/api/active-trades", null),
+      safeFetch<{ summary?: { total_value: number; total_unrealized_pnl: number; total_unrealized_pnl_pct: number; position_count: number; by_category: Record<string, { count: number; value: number; pnl: number }> } } | null>("/api/portfolio", null),
     ]);
     if (raw) {
       setData({
@@ -347,6 +349,7 @@ export function DashboardView() {
       setError(true);
     }
     setTrades(tradesRaw?.trades ?? []);
+    setPortfolioSummary(portfolioRaw?.summary ?? null);
     setLoading(false);
     setTradesLoading(false);
   }, []);
@@ -411,6 +414,43 @@ export function DashboardView() {
           <WatchlistWidget watchlist={data?.watchlist || []} loading={loading} />
         </WidgetCard>
       </div>
+
+      {/* Portfolio summary */}
+      <div className="panel p-0 overflow-hidden" style={{ maxWidth: 400 }}>
+        <div className="panel-header">💼 PORTFOLIO</div>
+        <PortfolioWidget summary={portfolioSummary} loading={loading} />
+      </div>
+    </div>
+  );
+}
+
+/* ── Portfolio Widget ──────────────────────────────────────────── */
+
+function PortfolioWidget({ summary, loading }: { summary: { total_value: number; total_unrealized_pnl: number; total_unrealized_pnl_pct: number; position_count: number; by_category: Record<string, { count: number; value: number; pnl: number }> } | null; loading: boolean }) {
+  if (loading) return <Skeleton rows={3} />;
+  if (!summary || summary.position_count === 0) {
+    return <div className="p-3 text-[10px] text-muted-foreground">No positions. Use <code>!add</code> in Discord.</div>;
+  }
+  const pnl = summary.total_unrealized_pnl;
+  const pct = summary.total_unrealized_pnl_pct;
+  const pnlColor = pnl > 0 ? "neon-green" : pnl < 0 ? "text-[var(--neon-red)]" : "text-muted-foreground";
+  const sign = pnl >= 0 ? "+" : "";
+  const cats = summary.by_category || {};
+  return (
+    <div className="space-y-2 p-1">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] text-muted-foreground">{summary.position_count} positions</span>
+        <span className="stat-value text-sm">${summary.total_value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+      </div>
+      <div className={cn("text-[11px] font-medium", pnlColor)}>
+        P&L: {sign}${Math.abs(pnl).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({sign}{pct.toFixed(2)}%)
+      </div>
+      <div className="flex gap-3 text-[9px] text-muted-foreground">
+        {(cats.stocks_etfs?.count || cats.stock?.count || 0) > 0 && <span>Stocks: {sign}${Math.abs(cats.stocks_etfs?.pnl || cats.stock?.pnl || 0).toFixed(0)}</span>}
+        {(cats.crypto_spot?.count || 0) > 0 && <span>Crypto: {sign}${Math.abs(cats.crypto_spot?.pnl || 0).toFixed(0)}</span>}
+        {(cats.crypto_perps?.count || 0) > 0 && <span>Perps: {sign}${Math.abs(cats.crypto_perps?.pnl || 0).toFixed(0)}</span>}
+      </div>
+      <a href="/portfolio" className="text-[9px] neon-green hover:underline block text-right">View All →</a>
     </div>
   );
 }

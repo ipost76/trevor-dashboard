@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Activity, ArrowLeftRight, Terminal,
+  LayoutDashboard, Activity, ArrowLeftRight, Terminal, Briefcase,
   ChevronLeft, ChevronRight, Shield, BookOpen,
   Search, MessageSquare, Brain, MoreHorizontal
 } from "lucide-react";
@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { group: "COMMAND", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Signals", icon: Activity, href: "/signals" },
   { label: "Trades", icon: ArrowLeftRight, href: "/trades" },
+  { label: "Portfolio", icon: Briefcase, href: "/portfolio" },
   { group: "INTEL", label: "Research", icon: Search, href: "/research" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
   { group: "SYSTEM", label: "Brain", icon: Brain, href: "/brain" },
