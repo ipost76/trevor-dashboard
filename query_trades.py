@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
-"""Trade data query helper for Mission Control dashboard. READ ONLY."""
+"""Trade data query helper for Mission Control dashboard."""
 import sqlite3, json, sys, os
 
 def main():
     scope = sys.argv[1] if len(sys.argv) > 1 else "active"
-    db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
+    trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
+    db_path = os.environ.get("TREVOR_DB_PATH", os.path.join(trevor_dir, "trevor.db"))
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
     if scope == "active":
-        result = {"trades": [], "stats": {}, "recentSignals": []}
+        # Active trades from trade_insights where status is open/active
+        result = {"trades": [], "stats": {}}
+        try:
+            rows = conn.execute("""
+                SELECT ticker, direction, entry_price, current_price, stop_loss, take_profit,
+                       leverage, pnl_pct, confidence, timestamp, status, trade_type
+                FROM trade_insights
+                WHERE status IN ('open', 'active', 'OPEN', 'ACTIVE')
+                ORDER BY timestamp DESC
+            """).fetchall()
+            result["trades"] = [dict(r) for r in rows]
+        except Exception:
+            pass
 
         # Stats from trade_outcomes
         try:
             row = conn.execute("""
                 SELECT COUNT(*) as total,
-                       SUM(CASE WHEN exit_reason='WIN' THEN 1 ELSE 0 END) as wins,
-                       SUM(CASE WHEN exit_reason='LOSS' THEN 1 ELSE 0 END) as losses,
-                       SUM(CASE WHEN exit_reason='SCRATCH' THEN 1 ELSE 0 END) as scratches,
-                       COALESCE(AVG(pnl_pct), 0) as avg_pnl,
-                       COALESCE(SUM(pnl_pct), 0) as total_pnl
+                       SUM(CASE WHEN outcome='WIN' THEN 1 ELSE 0 END) as wins,
+                       SUM(CASE WHEN outcome='LOSS' THEN 1 ELSE 0 END) as losses,
+                       SUM(CASE WHEN outcome='SCRATCH' THEN 1 ELSE 0 END) as scratches,
+                       AVG(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct ELSE 0 END) as avg_pnl,
+                       SUM(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct ELSE 0 END) as total_pnl
                 FROM trade_outcomes
             """).fetchone()
             if row:
@@ -29,25 +42,29 @@ def main():
                 losses = row["losses"] or 0
                 decided = wins + losses
                 result["stats"] = {
-                    "total": total, "wins": wins, "losses": losses,
+                    "total": total,
+                    "wins": wins,
+                    "losses": losses,
                     "scratches": row["scratches"] or 0,
                     "winRate": round((wins / decided) * 100, 1) if decided > 0 else 0,
                     "avgPnl": round(float(row["avg_pnl"] or 0), 2),
                     "totalPnl": round(float(row["total_pnl"] or 0), 2),
+                    "activeCount": len(result["trades"]),
                 }
         except Exception:
-            result["stats"] = {"total": 0, "wins": 0, "losses": 0, "scratches": 0, "winRate": 0, "avgPnl": 0, "totalPnl": 0}
+            result["stats"] = {"total": 0, "wins": 0, "losses": 0, "scratches": 0, "winRate": 0, "avgPnl": 0, "totalPnl": 0, "activeCount": 0}
 
-        # Recent trade insights as signals
+        # Recent signals
         try:
             rows = conn.execute("""
-                SELECT id, ticker, signal_type, confidence, entry_price,
-                       target_price, stop_price, strategy, timeframe, outcome, created_at
-                FROM trade_insights ORDER BY created_at DESC LIMIT 10
+                SELECT ticker, direction, signal_type, confidence, timestamp, mode
+                FROM alert_outcomes
+                ORDER BY timestamp DESC
+                LIMIT 10
             """).fetchall()
             result["recentSignals"] = [dict(r) for r in rows]
         except Exception:
-            pass
+            result["recentSignals"] = []
 
         conn.close()
         print(json.dumps(result))
@@ -61,27 +78,24 @@ def main():
         if filters.get("ticker"):
             conditions.append(f"ticker='{filters['ticker']}'")
         if filters.get("outcome"):
-            conditions.append(f"exit_reason='{filters['outcome']}'")
+            conditions.append(f"outcome='{filters['outcome']}'")
         if filters.get("direction"):
             conditions.append(f"direction='{filters['direction']}'")
+        if filters.get("search"):
+            s = filters["search"].replace("'", "''")
+            conditions.append(f"(ticker LIKE '%{s}%' OR notes LIKE '%{s}%')")
 
         where = " AND ".join(conditions)
 
         try:
             total = conn.execute(f"SELECT COUNT(*) FROM trade_outcomes WHERE {where}").fetchone()[0]
             rows = conn.execute(f"""
-                SELECT id, ticker, direction, entry_price, exit_price, open_price, close_price,
-                       pnl_pct, leverage, raw_pnl_pct, leveraged_pnl_pct,
-                       exit_reason, lessons, created_at
+                SELECT ticker, direction, entry_price, exit_price, pnl_pct,
+                       leverage, outcome, trade_type, timestamp, notes, mode
                 FROM trade_outcomes WHERE {where}
-                ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}
+                ORDER BY timestamp DESC LIMIT {limit} OFFSET {offset}
             """).fetchall()
-            records = []
-            for r in rows:
-                d = dict(r)
-                d["entry_price"] = d["entry_price"] or d["open_price"]
-                d["exit_price"] = d["exit_price"] or d["close_price"]
-                records.append(d)
+            records = [dict(r) for r in rows]
         except Exception:
             total = 0
             records = []
@@ -92,8 +106,9 @@ def main():
     elif scope == "watchlist":
         try:
             rows = conn.execute("""
-                SELECT id, ticker, reason, priority, mode, asset_type, notes, last_checked, added_at
-                FROM watchlist ORDER BY mode, ticker
+                SELECT ticker, mode, added_at, notes
+                FROM watchlist
+                ORDER BY mode, ticker
             """).fetchall()
             items = [dict(r) for r in rows]
         except Exception:
@@ -101,41 +116,90 @@ def main():
         conn.close()
         print(json.dumps({"items": items}))
 
-    elif scope == "signals":
-        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-        offset = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-        filters = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
-
-        conditions = ["1=1"]
-        if filters.get("ticker"):
-            conditions.append(f"ticker='{filters['ticker']}'")
-        if filters.get("signal_type"):
-            conditions.append(f"signal_type='{filters['signal_type']}'")
-
-        where = " AND ".join(conditions)
-
-        try:
-            total = conn.execute(f"SELECT COUNT(*) FROM trade_insights WHERE {where}").fetchone()[0]
-            rows = conn.execute(f"""
-                SELECT id, ticker, signal_type, confidence, entry_price,
-                       target_price, stop_price, strategy, timeframe,
-                       outcome, actual_result_pct, created_at
-                FROM trade_insights WHERE {where}
-                ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}
-            """).fetchall()
-            records = []
-            for r in rows:
-                d = dict(r)
-                conf = d.get("confidence")
-                if conf is not None and conf <= 1:
-                    d["confidence"] = round(float(conf) * 100)
-                records.append(d)
-        except Exception:
-            total = 0
-            records = []
-
+    elif scope == "annotate":
+        data = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+        trade_id = data.get("id")
+        notes = data.get("notes")
+        training_status = data.get("training_status")
+        if trade_id is None:
+            conn.close()
+            print(json.dumps({"error": "Missing trade id"}))
+            return
         conn.close()
-        print(json.dumps({"records": records, "total": total}))
+        conn_rw = sqlite3.connect(db_path)
+        try:
+            conn_rw.execute(
+                "UPDATE trade_outcomes SET notes=?, training_status=? WHERE rowid=?",
+                (notes, training_status, int(trade_id))
+            )
+            conn_rw.commit()
+            print(json.dumps({"ok": True, "updated": trade_id}))
+        except Exception as e:
+            print(json.dumps({"error": str(e)}))
+        finally:
+            conn_rw.close()
+
+    elif scope == "delete_trade":
+        trade_id = int(sys.argv[2]) if len(sys.argv) > 2 else None
+        if trade_id is None:
+            conn.close()
+            print(json.dumps({"error": "Missing trade id"}))
+            return
+        # Read ticker before deleting (conn is read-only, fine for SELECT)
+        try:
+            row = conn.execute("SELECT ticker FROM trade_outcomes WHERE rowid=?", (trade_id,)).fetchone()
+            ticker = row["ticker"] if row else None
+        except Exception:
+            ticker = None
+        conn.close()
+        conn_rw = sqlite3.connect(db_path)
+        try:
+            conn_rw.execute("DELETE FROM trade_outcomes WHERE rowid=?", (trade_id,))
+            conn_rw.commit()
+        except Exception as e:
+            conn_rw.close()
+            print(json.dumps({"error": str(e)}))
+            return
+        conn_rw.close()
+        # Attempt ChromaDB cleanup
+        try:
+            import chromadb
+            client = chromadb.PersistentClient(path=os.path.join(trevor_dir, "vectordb"))
+            for col_name in ["trade-learnings", "trade_patterns"]:
+                try:
+                    col = client.get_collection(col_name)
+                    results = col.get(where={"trade_id": str(trade_id)})
+                    if results and results["ids"]:
+                        col.delete(ids=results["ids"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        print(json.dumps({"ok": True, "deleted": trade_id, "ticker": ticker}))
+
+    elif scope == "bulk_update":
+        ids_json = sys.argv[2] if len(sys.argv) > 2 else "[]"
+        status = sys.argv[3] if len(sys.argv) > 3 else "REVIEWED"
+        ids = json.loads(ids_json)
+        if not ids:
+            conn.close()
+            print(json.dumps({"error": "No ids provided"}))
+            return
+        conn.close()
+        conn_rw = sqlite3.connect(db_path)
+        try:
+            placeholders = ",".join("?" for _ in ids)
+            conn_rw.execute(
+                f"UPDATE trade_outcomes SET training_status=? WHERE rowid IN ({placeholders})",
+                [status] + [int(i) for i in ids]
+            )
+            conn_rw.commit()
+            updated = conn_rw.total_changes
+            print(json.dumps({"ok": True, "updated": updated}))
+        except Exception as e:
+            print(json.dumps({"error": str(e)}))
+        finally:
+            conn_rw.close()
 
     else:
         conn.close()

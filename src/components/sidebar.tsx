@@ -3,10 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, TrendingUp, ArrowLeftRight, Terminal,
+  LayoutDashboard, ArrowLeftRight, Terminal,
   Menu, X, ChevronLeft, ChevronRight, Shield, BookOpen,
-  Search, MessageSquare, Brain, Activity, Target,
-  Database, Calendar, Network
+  Search, MessageSquare, Activity, Briefcase, Settings,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -14,18 +13,13 @@ type NavItem = { label: string; icon: React.ComponentType<{ className?: string }
 
 const navItems: NavItem[] = [
   { group: "COMMAND", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Signals", icon: Activity, href: "/signals" },
+  { label: "Holdings", icon: Briefcase, href: "/holdings" },
   { label: "Trades", icon: ArrowLeftRight, href: "/trades" },
-  { label: "Signal Quality", icon: Target, href: "/signal-quality" },
-  { group: "INTEL", label: "Research", icon: Search, href: "/research" },
-  { label: "Knowledge Base", icon: Database, href: "/knowledge" },
-  { label: "Memory", icon: Brain, href: "/memory" },
+  { group: "INTEL", label: "Signals", icon: Activity, href: "/signals" },
+  { label: "Research", icon: Search, href: "/research" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
-  { group: "SYSTEM", label: "System Map", icon: Network, href: "/system" },
-  { label: "Schedule", icon: Calendar, href: "/schedule" },
+  { group: "SYSTEM", label: "Control Panel", icon: Settings, href: "/control" },
   { label: "Training", icon: BookOpen, href: "/training" },
-  { label: "Logs", icon: Terminal, href: "/logs" },
-  { label: "Security", icon: Shield, href: "/security" },
 ];
 
 export function Sidebar() {
@@ -50,7 +44,7 @@ export function Sidebar() {
         {!collapsed && (
           <div className="min-w-0">
             <div className="text-xs font-bold tracking-[0.15em] neon-text">TREVOR</div>
-            <div className="text-[9px] tracking-[0.1em] text-muted-foreground uppercase">Trading Terminal</div>
+            <div className="text-[9px] tracking-[0.1em] text-muted-foreground uppercase">Mission Control</div>
           </div>
         )}
       </div>

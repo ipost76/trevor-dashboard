@@ -2,23 +2,6 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const RANK_THRESHOLDS: [number, string][] = [
-  [0, "Intern Quant"], [500, "Junior Analyst"], [1500, "Desk Analyst"],
-  [3500, "Senior Analyst"], [7000, "Lead Strategist"], [12000, "Risk Officer"],
-  [20000, "Portfolio Manager"], [32000, "Head of Alpha"], [50000, "Quant Director"],
-  [75000, "Chief Analyst"], [110000, "Managing Director"], [160000, "Partner"],
-  [220000, "CIO"], [300000, "Co-Founder"], [400000, "CEO"],
-];
-
-function rankForXP(xp: number): string {
-  let rank = "Intern Quant";
-  for (const [threshold, name] of RANK_THRESHOLDS) {
-    if (xp >= threshold) rank = name;
-    else break;
-  }
-  return rank;
-}
-
 export async function GET() {
   const start = Date.now();
   const trevorService = process.env.TREVOR_SERVICE_NAME || "trevor.service";
@@ -27,12 +10,14 @@ export async function GET() {
   let trevorPid = 0;
   let trevorRunning = false;
   let xp = 0;
-  let rank = "Intern Quant";
-  const signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
+  let rank = "Apprentice";
+  let signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
+  let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
 
   try {
     const { execSync } = await import("child_process");
 
+    // Get TREVOR PID
     try {
       const pidResult = execSync(
         `systemctl show ${trevorService} --property=MainPID --value 2>/dev/null || echo "0"`,
@@ -42,27 +27,31 @@ export async function GET() {
       trevorRunning = trevorPid > 0;
     } catch { /* graceful */ }
 
+    // Query DB via Python (sqlite3 CLI not installed)
     try {
       const pyScript = `
 import sqlite3, json
 conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
 result = {}
+
+# XP
 try:
-    result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0] or 0)
+    xp = conn.execute("SELECT COALESCE(SUM(xp),0) FROM xp_ledger").fetchone()[0]
+    result["xp"] = int(xp)
 except: result["xp"] = 0
+
+# Trade insights as signal proxy
 try:
-    result["total"] = conn.execute("SELECT COUNT(*) FROM trade_insights").fetchone()[0]
+    rows = conn.execute("SELECT COUNT(*) FROM trade_insights").fetchone()
+    result["total"] = rows[0] if rows else 0
 except: result["total"] = 0
+
+# Recent trade insights
 try:
-    r = conn.execute("SELECT SUM(CASE WHEN exit_reason='WIN' THEN 1 ELSE 0 END), SUM(CASE WHEN exit_reason='LOSS' THEN 1 ELSE 0 END) FROM trade_outcomes").fetchone()
-    result["wins"] = int(r[0] or 0)
-    result["losses"] = int(r[1] or 0)
-except:
-    result["wins"] = 0
-    result["losses"] = 0
-try:
-    result["costToday"] = round(float(conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM cost_tracking WHERE date=date('now')").fetchone()[0] or 0), 4)
-except: result["costToday"] = 0
+    rows = conn.execute("SELECT ticker, direction, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 5").fetchall()
+    result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2]*100) if r[2] and r[2] <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
+except: result["recent"] = []
+
 conn.close()
 print(json.dumps(result))
 `;
@@ -73,19 +62,22 @@ print(json.dumps(result))
       const dbData = JSON.parse(pyResult);
       xp = dbData.xp || 0;
       signalStats.total = dbData.total || 0;
-      signalStats.wins = dbData.wins || 0;
-      signalStats.losses = dbData.losses || 0;
-    } catch { /* DB query failed */ }
+      recentSignals = dbData.recent || [];
+    } catch { /* DB query failed — graceful */ }
 
-    rank = rankForXP(xp);
+    // Derive rank
+    if (xp >= 500) rank = "Legend";
+    else if (xp >= 300) rank = "Expert";
+    else if (xp >= 150) rank = "Analyst";
+    else if (xp >= 50) rank = "Trader";
 
     return NextResponse.json({
       ok: true,
       trevor: { running: trevorRunning, pid: trevorPid },
       signals: signalStats,
+      recentSignals,
       xp,
       rank,
-      costToday: 0,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
     });
@@ -94,8 +86,9 @@ print(json.dumps(result))
       ok: false,
       trevor: { running: false, pid: 0 },
       signals: signalStats,
+      recentSignals,
       xp: 0,
-      rank: "Intern Quant",
+      rank: "Unknown",
       error: String(err),
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,

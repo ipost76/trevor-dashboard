@@ -16,12 +16,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex flex-1 overflow-hidden pb-14 md:pb-0">
+        <main className="flex flex-1 overflow-hidden">
           {children}
         </main>
-        <div className="hidden md:block">
-          <StatusBar />
-        </div>
+        <StatusBar />
       </div>
     </div>
   );

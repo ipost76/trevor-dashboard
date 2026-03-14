@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
         `${pythonPath} ${scriptPath} chroma "${query.replace(/"/g, '\\"')}" "${collection}"`,
         {
           encoding: "utf-8",
-          timeout: 60000,
+          timeout: 30000,
           cwd: trevorDir,
           env: { ...process.env, HOME: "/home/trevor" },
         }

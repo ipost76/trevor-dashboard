@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Send, RefreshCw, Terminal } from "lucide-react";
+import { Send, RefreshCw, Wifi, WifiOff, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { TypingDots } from "@/components/typing-dots";
@@ -17,18 +17,8 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    safeFetch<{ online?: boolean }>("/api/chat?action=health", {}).then(d =>
-      setHealth(d.online ? "ok" : "down")
-    );
-    safeFetch<{ messages?: Message[] }>("/api/chat?action=history&sessionId=default", {}).then(d =>
-      setMessages(d.messages || [])
-    );
-    const interval = setInterval(() => {
-      safeFetch<{ online?: boolean }>("/api/chat?action=health", {}).then(d =>
-        setHealth(d.online ? "ok" : "down")
-      );
-    }, 30000);
-    return () => clearInterval(interval);
+    safeFetch<{ ok?: boolean }>("/api/chat?scope=health", {}).then(d => setHealth(d.ok ? "ok" : "down"));
+    safeFetch<{ messages?: Message[] }>("/api/chat?scope=history", {}).then(d => setMessages(d.messages || []));
   }, []);
 
   useEffect(() => {
@@ -40,13 +30,12 @@ export default function ChatPage() {
     if (!msg || sending) return;
     setInput("");
     setSending(true);
-    const userMsg: Message = { role: "user", content: msg, timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, { role: "user", content: msg, timestamp: new Date().toISOString() }]);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, sessionId: "default" }),
+        body: JSON.stringify({ message: msg }),
       });
       if (!res.ok) {
         setMessages(prev => [...prev, { role: "assistant", content: "[Server error]", timestamp: new Date().toISOString() }]);
@@ -71,15 +60,16 @@ export default function ChatPage() {
           </div>
           <div className="flex items-center gap-1.5">
             {health === "ok" ? (
-              <><div className="h-2 w-2 rounded-full bg-[var(--neon-green)] pulse-live" /><span className="text-[9px] neon-green">ONLINE</span></>
+              <><Wifi className="h-2.5 w-2.5 text-[var(--neon-green)]" /><span className="text-[9px] neon-green">CONNECTED</span></>
             ) : health === "down" ? (
-              <><div className="h-2 w-2 rounded-full bg-[var(--neon-red)]" /><span className="text-[9px] neon-red">OFFLINE</span></>
+              <><WifiOff className="h-2.5 w-2.5 text-[var(--neon-red)]" /><span className="text-[9px] neon-red">OFFLINE</span></>
             ) : (
               <><RefreshCw className="h-2.5 w-2.5 animate-spin text-muted-foreground" /><span className="text-[9px] text-muted-foreground">CONNECTING</span></>
             )}
           </div>
         </div>
 
+        {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-auto p-3 space-y-3">
           {messages.length === 0 && !sending && (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
@@ -93,8 +83,8 @@ export default function ChatPage() {
               <div className={cn(
                 "max-w-[80%] rounded px-3 py-2 text-[12px] font-mono",
                 m.role === "user"
-                  ? "bg-[rgba(0,240,255,0.08)] border-r-2 border-[var(--neon-cyan)] border-t border-b border-l border-[var(--border)]"
-                  : "bg-[var(--card)] border-l-2 border-[var(--neon-green)] border-t border-b border-r border-[var(--border)]"
+                  ? "bg-[rgba(0,240,255,0.08)] border border-[rgba(0,240,255,0.15)] text-foreground"
+                  : "bg-[var(--card)] border border-[var(--border)] text-foreground"
               )}>
                 <div className="whitespace-pre-wrap break-words">{m.content}</div>
                 {m.timestamp && (
@@ -107,13 +97,14 @@ export default function ChatPage() {
           ))}
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-[var(--card)] border-l-2 border-[var(--neon-green)] border border-[var(--border)] rounded px-3 py-2">
+              <div className="bg-[var(--card)] border border-[var(--border)] rounded px-3 py-2">
                 <TypingDots size="sm" className="text-[var(--neon-cyan)]" />
               </div>
             </div>
           )}
         </div>
 
+        {/* Input */}
         <div className="border-t border-[var(--border)] p-2">
           <div className="flex items-center gap-2">
             <span className="text-[var(--neon-cyan)] text-xs font-bold">&gt;</span>
@@ -122,7 +113,7 @@ export default function ChatPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && send()}
-              placeholder={health === "down" ? "TREVOR offline..." : "Enter command..."}
+              placeholder="Enter command..."
               disabled={sending || health === "down"}
               className="input-terminal flex-1"
               autoFocus

@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { join } from "path";
+import { runPython, safeJsonParse } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -80,5 +81,58 @@ export async function GET() {
     return NextResponse.json({ jobs });
   } catch (err) {
     return NextResponse.json({ jobs: [], error: String(err) }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const jobName = body.job_name;
+    const enabled = body.enabled;
+
+    if (!jobName || typeof enabled !== "boolean") {
+      return NextResponse.json(
+        { error: "job_name (string) and enabled (boolean) required" },
+        { status: 400 }
+      );
+    }
+
+    const raw = runPython("manage_schedule.py", [
+      "toggle",
+      jobName,
+      String(enabled),
+    ]);
+    const result = safeJsonParse(raw, { error: "Failed to parse response" });
+
+    if (result.error) {
+      return NextResponse.json(result, { status: 500 });
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const jobName = body.job_name;
+
+    if (!jobName) {
+      return NextResponse.json(
+        { error: "job_name required" },
+        { status: 400 }
+      );
+    }
+
+    const raw = runPython("manage_schedule.py", ["trigger", jobName]);
+    const result = safeJsonParse(raw, { error: "Failed to parse response" });
+
+    if (result.error) {
+      return NextResponse.json(result, { status: 500 });
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

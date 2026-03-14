@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Brain file & ChromaDB management helper for Mission Control dashboard. READ-WRITE."""
+import json, sys, os, time, shutil
+from datetime import datetime
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else ""
+    trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
+    brain_dir = os.path.join(trevor_dir, "brain")
+    vectordb_path = os.path.join(trevor_dir, "vectordb")
+
+    try:
+        if action == "write_file":
+            name = sys.argv[2] if len(sys.argv) > 2 else ""
+            content = sys.argv[3] if len(sys.argv) > 3 else ""
+            if not name:
+                print(json.dumps({"error": "File name required"}))
+                return
+
+            file_path = os.path.join(brain_dir, name)
+
+            # Backup existing file if it exists
+            backup_name = None
+            if os.path.exists(file_path):
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                backup_name = f"{name}.backup.{timestamp}"
+                backup_path = os.path.join(brain_dir, backup_name)
+                shutil.copy2(file_path, backup_path)
+
+            # Write new content
+            with open(file_path, "w", encoding="utf-8") as f:
+                written = f.write(content)
+
+            result = {"ok": True, "written": written}
+            if backup_name:
+                result["backup"] = backup_name
+            print(json.dumps(result))
+
+        elif action == "chroma_browse":
+            collection_name = sys.argv[2] if len(sys.argv) > 2 else ""
+            limit = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+            offset = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+
+            if not collection_name:
+                print(json.dumps({"error": "Collection name required"}))
+                return
+
+            import chromadb
+            client = chromadb.PersistentClient(path=vectordb_path)
+            collection = client.get_collection(name=collection_name)
+            total = collection.count()
+
+            if total == 0:
+                print(json.dumps({"entries": [], "total": 0, "collection": collection_name}))
+                return
+
+            # ChromaDB get() supports limit and offset
+            result_data = collection.get(
+                limit=limit,
+                offset=offset,
+                include=["documents", "metadatas"]
+            )
+
+            entries = []
+            ids = result_data.get("ids", [])
+            documents = result_data.get("documents", [])
+            metadatas = result_data.get("metadatas", [])
+
+            for i, entry_id in enumerate(ids):
+                entry = {"id": entry_id}
+                if documents and i < len(documents):
+                    entry["document"] = documents[i]
+                if metadatas and i < len(metadatas):
+                    entry["metadata"] = metadatas[i]
+                entries.append(entry)
+
+            print(json.dumps({"entries": entries, "total": total, "collection": collection_name}))
+
+        elif action == "chroma_search":
+            collection_name = sys.argv[2] if len(sys.argv) > 2 else ""
+            query = sys.argv[3] if len(sys.argv) > 3 else ""
+            limit = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+
+            if not collection_name:
+                print(json.dumps({"error": "Collection name required"}))
+                return
+            if not query:
+                print(json.dumps({"error": "Query text required"}))
+                return
+
+            import chromadb
+            client = chromadb.PersistentClient(path=vectordb_path)
+            collection = client.get_collection(name=collection_name)
+
+            result_data = collection.query(
+                query_texts=[query],
+                n_results=limit,
+                include=["documents", "metadatas", "distances"]
+            )
+
+            results = []
+            ids = result_data.get("ids", [[]])[0]
+            documents = result_data.get("documents", [[]])[0]
+            metadatas = result_data.get("metadatas", [[]])[0]
+            distances = result_data.get("distances", [[]])[0]
+
+            for i, entry_id in enumerate(ids):
+                entry = {"id": entry_id}
+                if i < len(documents):
+                    entry["document"] = documents[i]
+                if i < len(metadatas):
+                    entry["metadata"] = metadatas[i]
+                if i < len(distances):
+                    entry["distance"] = distances[i]
+                results.append(entry)
+
+            print(json.dumps({"results": results, "query": query, "collection": collection_name}))
+
+        elif action == "chroma_add":
+            collection_name = sys.argv[2] if len(sys.argv) > 2 else ""
+            document = sys.argv[3] if len(sys.argv) > 3 else ""
+            metadata_json = sys.argv[4] if len(sys.argv) > 4 else "{}"
+
+            if not collection_name:
+                print(json.dumps({"error": "Collection name required"}))
+                return
+            if not document:
+                print(json.dumps({"error": "Document text required"}))
+                return
+
+            metadata = json.loads(metadata_json)
+
+            import chromadb
+            client = chromadb.PersistentClient(path=vectordb_path)
+            collection = client.get_or_create_collection(name=collection_name)
+
+            entry_id = f"hub_{int(time.time() * 1000)}"
+            collection.add(
+                ids=[entry_id],
+                documents=[document],
+                metadatas=[metadata]
+            )
+
+            print(json.dumps({"ok": True, "id": entry_id}))
+
+        elif action == "chroma_delete":
+            collection_name = sys.argv[2] if len(sys.argv) > 2 else ""
+            entry_id = sys.argv[3] if len(sys.argv) > 3 else ""
+
+            if not collection_name:
+                print(json.dumps({"error": "Collection name required"}))
+                return
+            if not entry_id:
+                print(json.dumps({"error": "Entry ID required"}))
+                return
+
+            import chromadb
+            client = chromadb.PersistentClient(path=vectordb_path)
+            collection = client.get_collection(name=collection_name)
+            collection.delete(ids=[entry_id])
+
+            print(json.dumps({"ok": True, "deleted": entry_id}))
+
+        else:
+            print(json.dumps({"error": f"Unknown action: {action}"}))
+
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+
+
+if __name__ == "__main__":
+    main()
