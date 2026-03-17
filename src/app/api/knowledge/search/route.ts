@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
 
 export const dynamic = "force-dynamic";
+
+const SIDECAR_URL = "http://127.0.0.1:5100";
 
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q") || "";
@@ -9,34 +10,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ results: [], query: "" });
   }
 
-  // Sanitize query — strip dangerous chars for shell injection prevention
   const sanitized = q.replace(/[`$;'"\\|&<>{}()!#\n\r]/g, "").trim().slice(0, 200);
   if (!sanitized) {
     return NextResponse.json({ results: [], query: q });
   }
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-
   try {
-    const { execSync } = await import("child_process");
+    const sidecarRes = await fetch(`${SIDECAR_URL}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collection: "knowledge_base",
+        query: sanitized,
+        n_results: 10,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
 
-    const pyScript = `
-import json, sys
-sys.path.insert(0, "${trevorDir}")
-from knowledge_base import KnowledgeBase
-kb = KnowledgeBase()
-results = kb.search("${sanitized}", n_results=10)
-print(json.dumps(results if results else []))
-`;
-    const raw = execSync(
-      `${pythonPath} -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-      { encoding: "utf-8", timeout: 30000, cwd: trevorDir }
-    ).trim();
+    if (!sidecarRes.ok) {
+      const err = await sidecarRes.text();
+      return NextResponse.json(
+        { results: [], query: sanitized, error: `Sidecar error: ${sidecarRes.status} ${err}` },
+        { status: 502 }
+      );
+    }
 
-    const results = JSON.parse(raw);
-    return NextResponse.json({ results, query: sanitized });
+    const data = await sidecarRes.json();
+    return NextResponse.json({ results: data.results || [], query: sanitized });
   } catch (err) {
-    return NextResponse.json({ results: [], query: sanitized, error: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { results: [], query: sanitized, error: `Embedding sidecar unavailable: ${String(err)}` },
+      { status: 503 }
+    );
   }
 }

@@ -11,10 +11,8 @@ export async function GET() {
   const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
   const brainDir = join(trevorDir, "brain");
   const memoryDir = join(brainDir, "memory");
-  const chromaDir = join(trevorDir, "vectordb");
 
   try {
-    const { execSync } = await import("child_process");
     const fs = await import("fs");
 
     // Read HEARTBEAT.md
@@ -52,7 +50,7 @@ export async function GET() {
       }
     }
 
-    // ChromaDB collection counts — cached (10s cold start otherwise)
+    // ChromaDB collection counts via embedding sidecar (fast, model already loaded)
     let patternCount = 0;
     let kbCount = 0;
     if (_chromaCache && Date.now() - _chromaCache.ts < CHROMA_CACHE_TTL) {
@@ -60,28 +58,17 @@ export async function GET() {
       kbCount = _chromaCache.kbCount;
     } else {
       try {
-        const pyScript = `
-import json, sys
-try:
-    import chromadb
-    c = chromadb.PersistentClient(path="${chromaDir}")
-    cols = c.list_collections()
-    result = {}
-    for col in cols:
-        result[col.name] = col.count()
-    print(json.dumps(result))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-`;
-        const pyResult = execSync(
-          `${join(trevorDir, "venv", "bin", "python3")} -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-          { encoding: "utf-8", timeout: 15000, cwd: trevorDir }
-        ).trim();
-        const counts = JSON.parse(pyResult);
-        patternCount = counts["trade_patterns"] || counts["trade-patterns"] || 0;
-        kbCount = counts["knowledge_base"] || counts["knowledge-base"] || 0;
-        _chromaCache = { patternCount, kbCount, ts: Date.now() };
-      } catch { /* chromadb query failed — return 0s */ }
+        const sidecarRes = await fetch("http://127.0.0.1:5100/collections", {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (sidecarRes.ok) {
+          const raw = await sidecarRes.json();
+          const counts = raw.collections || {};
+          patternCount = counts["trade_patterns"] || counts["trade-patterns"] || 0;
+          kbCount = counts["knowledge_base"] || counts["knowledge-base"] || 0;
+          _chromaCache = { patternCount, kbCount, ts: Date.now() };
+        }
+      } catch { /* sidecar unavailable — return cached or 0s */ }
     }
 
     return NextResponse.json({

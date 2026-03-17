@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
-// Cache KB stats for 5 minutes (ChromaDB init is expensive)
+const SIDECAR_URL = "http://127.0.0.1:5100";
+
+// Cache KB stats for 5 minutes
 let _kbStatsCache: { data: unknown; ts: number } | null = null;
 const KB_STATS_CACHE_TTL = 300_000;
 
@@ -14,41 +15,35 @@ export async function GET() {
     });
   }
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const chromaDir = join(trevorDir, "vectordb");
-
   try {
-    const { execSync } = await import("child_process");
-    const pythonPath = join(trevorDir, "venv", "bin", "python3");
+    const sidecarRes = await fetch(`${SIDECAR_URL}/collections`, {
+      signal: AbortSignal.timeout(15000),
+    });
 
-    // Use direct chromadb client instead of KnowledgeBase (avoids sentence-transformer load)
-    const pyScript = `
-import json, sys, os
-sys.path.insert(0, "${trevorDir}")
-try:
-    import chromadb
-    c = chromadb.PersistentClient(path="${chromaDir}")
-    cols = c.list_collections()
-    result = {"collections": [], "total_entries": 0}
-    for col in cols:
-        cnt = col.count()
-        result["collections"].append({"name": col.name, "count": cnt})
-        result["total_entries"] += cnt
-    print(json.dumps(result))
-except Exception as e:
-    print(json.dumps({"total_entries": 0, "error": str(e)}))
-`;
-    const raw = execSync(
-      `${pythonPath} -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-      { encoding: "utf-8", timeout: 15000, cwd: trevorDir }
-    ).trim();
+    if (!sidecarRes.ok) {
+      return NextResponse.json(
+        { total_entries: 0, error: `Sidecar error: ${sidecarRes.status}` },
+        { status: 502 }
+      );
+    }
 
-    const data = JSON.parse(raw);
+    const raw = await sidecarRes.json();
+    const collections = raw.collections || {};
+
+    // Transform to match expected response format
+    const data = {
+      collections: Object.entries(collections).map(([name, count]) => ({ name, count })),
+      total_entries: Object.values(collections).reduce((sum: number, c) => sum + (c as number), 0),
+    };
+
     _kbStatsCache = { data, ts: Date.now() };
     return NextResponse.json(data, {
       headers: { "X-Cache": "MISS", "Cache-Control": "private, max-age=300" },
     });
   } catch (err) {
-    return NextResponse.json({ total_entries: 0, error: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { total_entries: 0, error: `Embedding sidecar unavailable: ${String(err)}` },
+      { status: 503 }
+    );
   }
 }
