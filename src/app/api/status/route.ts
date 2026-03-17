@@ -36,7 +36,7 @@ result = {}
 
 # XP
 try:
-    xp = conn.execute("SELECT COALESCE(SUM(xp),0) FROM xp_ledger").fetchone()[0]
+    xp = conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0]
     result["xp"] = int(xp)
 except: result["xp"] = 0
 
@@ -48,7 +48,7 @@ except: result["total"] = 0
 
 # Recent trade insights
 try:
-    rows = conn.execute("SELECT ticker, direction, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 5").fetchall()
+    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 5").fetchall()
     result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2]*100) if r[2] and r[2] <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["recent"] = []
 

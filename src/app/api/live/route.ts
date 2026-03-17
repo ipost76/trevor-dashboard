@@ -32,7 +32,7 @@ result = {}
 
 # XP
 try:
-    result["xp"] = int(conn.execute("SELECT COALESCE(SUM(xp),0) FROM xp_ledger").fetchone()[0])
+    result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0])
 except: result["xp"] = 0
 
 # Trade insights (signals proxy)
@@ -49,7 +49,7 @@ except: result["outcomes"] = {"decided": 0, "wins": 0, "losses": 0}
 
 # Recent trade insights
 try:
-    rows = conn.execute("SELECT ticker, direction, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 10").fetchall()
+    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 10").fetchall()
     result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["recent"] = []
 
@@ -78,7 +78,7 @@ except: result["training"] = {"trades": 0, "observations": 0, "sentiment": 0}
 
 # Alert cooldowns (active scalps proxy)
 try:
-    rows = conn.execute("SELECT ticker, direction, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-24 hours') ORDER BY created_at DESC LIMIT 5").fetchall()
+    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-24 hours') ORDER BY created_at DESC LIMIT 5").fetchall()
     result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["active"] = []
 
