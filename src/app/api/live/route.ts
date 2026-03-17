@@ -47,9 +47,9 @@ try:
     result["outcomes"] = {"decided": rows[0] or 0, "wins": int(rows[1] or 0), "losses": int(rows[2] or 0)}
 except: result["outcomes"] = {"decided": 0, "wins": 0, "losses": 0}
 
-# Recent trade insights
+# Recent trade insights (last 1 hour only)
 try:
-    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights ORDER BY created_at DESC LIMIT 10").fetchall()
+    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-1 hour') ORDER BY created_at DESC LIMIT 10").fetchall()
     result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["recent"] = []
 
@@ -76,10 +76,10 @@ try:
     result["training"] = {"trades": tt, "observations": to, "sentiment": ts}
 except: result["training"] = {"trades": 0, "observations": 0, "sentiment": 0}
 
-# Alert cooldowns (active scalps proxy)
+# Active trades (DB-persisted on TAKE/BUILDING)
 try:
-    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-24 hours') ORDER BY created_at DESC LIMIT 5").fetchall()
-    result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
+    rows = conn.execute("SELECT ticker, direction, confidence, opened_at FROM active_trades WHERE status='open' ORDER BY opened_at DESC").fetchall()
+    result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["active"] = []
 
 # Cost tracking (today)

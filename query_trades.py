@@ -11,15 +11,15 @@ def main():
     conn.row_factory = sqlite3.Row
 
     if scope == "active":
-        # Active trades from trade_insights where status is open/active
+        # Active trades from active_trades table (persisted on TAKE/BUILDING)
         result = {"trades": [], "stats": {}}
         try:
             rows = conn.execute("""
-                SELECT ticker, direction, entry_price, current_price, stop_loss, take_profit,
-                       leverage, pnl_pct, confidence, timestamp, status, trade_type
-                FROM trade_insights
-                WHERE status IN ('open', 'active', 'OPEN', 'ACTIVE')
-                ORDER BY timestamp DESC
+                SELECT trade_id, ticker, direction, entry_price, stop_price, target_price,
+                       leverage, confidence, track, opened_at, status
+                FROM active_trades
+                WHERE status = 'open'
+                ORDER BY opened_at DESC
             """).fetchall()
             result["trades"] = [dict(r) for r in rows]
         except Exception:
@@ -54,12 +54,13 @@ def main():
         except Exception:
             result["stats"] = {"total": 0, "wins": 0, "losses": 0, "scratches": 0, "winRate": 0, "avgPnl": 0, "totalPnl": 0, "activeCount": 0}
 
-        # Recent signals
+        # Recent signals (last 24h only)
         try:
             rows = conn.execute("""
                 SELECT ticker, direction, signal_type, confidence, timestamp, mode
                 FROM alert_outcomes
-                ORDER BY timestamp DESC
+                WHERE fired_at > datetime('now', '-24 hours')
+                ORDER BY fired_at DESC
                 LIMIT 10
             """).fetchall()
             result["recentSignals"] = [dict(r) for r in rows]
