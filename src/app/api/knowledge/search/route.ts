@@ -31,7 +31,7 @@ print(json.dumps(results if results else []))
 `;
     const raw = execSync(
       `${pythonPath} -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-      { encoding: "utf-8", timeout: 15000, cwd: trevorDir }
+      { encoding: "utf-8", timeout: 30000, cwd: trevorDir }
     ).trim();
 
     const results = JSON.parse(raw);

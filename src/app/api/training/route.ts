@@ -3,6 +3,10 @@ import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache for training summary (expensive: 15-30s cold, ChromaDB init)
+let _summaryCache: { data: unknown; ts: number } | null = null;
+const SUMMARY_CACHE_TTL = 300_000; // 5 minutes
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const scope = searchParams.get("scope") || "summary";
@@ -18,6 +22,12 @@ export async function GET(request: NextRequest) {
     const { execSync } = await import("child_process");
 
     if (scope === "summary") {
+      // Return cached summary if fresh (avoids 15-30s Python+ChromaDB cold start)
+      if (_summaryCache && Date.now() - _summaryCache.ts < SUMMARY_CACHE_TTL) {
+        return NextResponse.json(_summaryCache.data, {
+          headers: { "X-Cache": "HIT", "Cache-Control": "private, max-age=300" },
+        });
+      }
       const raw = execSync(
         `${pythonPath} ${scriptPath} summary`,
         {
@@ -27,7 +37,11 @@ export async function GET(request: NextRequest) {
           env: { ...process.env, HOME: "/home/trevor" },
         }
       ).trim();
-      return NextResponse.json(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      _summaryCache = { data: parsed, ts: Date.now() };
+      return NextResponse.json(parsed, {
+        headers: { "X-Cache": "MISS", "Cache-Control": "private, max-age=300" },
+      });
     }
 
     if (scope === "records") {
