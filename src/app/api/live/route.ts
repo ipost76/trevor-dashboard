@@ -47,9 +47,9 @@ try:
     result["outcomes"] = {"decided": rows[0] or 0, "wins": int(rows[1] or 0), "losses": int(rows[2] or 0)}
 except: result["outcomes"] = {"decided": 0, "wins": 0, "losses": 0}
 
-# Recent trade insights (last 1 hour only)
+# Recent trade insights (last 1 hour, non-NEUTRAL, oldest first)
 try:
-    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-1 hour') ORDER BY created_at DESC LIMIT 10").fetchall()
+    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-1 hour') AND signal_type IN ('LONG', 'SHORT') ORDER BY created_at ASC").fetchall()
     result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["recent"] = []
 
