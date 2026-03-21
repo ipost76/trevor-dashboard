@@ -13,7 +13,7 @@ export async function GET() {
     signals: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 },
     xp: 0,
     rank: "Apprentice",
-    recentSignals: [] as Array<{ ticker: string; direction: string; confidence: number; outcome: string | null; timestamp: string }>,
+    recentSignals: [] as Array<{ id?: number; ticker: string; signal_type?: string; direction: string; confidence: number; outcome: string | null; entry_price?: number | null; target_price?: number | null; stop_price?: number | null; timeframe?: string; timestamp: string }>,
     activeScalps: [] as Array<{ ticker: string; direction: string; confidence: number; timestamp: string }>,
     watchlist: [] as Array<{ ticker: string; track: string; type: string }>,
     trainingStats: { trades: 0, observations: 0, sentiment: 0, vectors: 0 },
@@ -49,8 +49,8 @@ except: result["outcomes"] = {"decided": 0, "wins": 0, "losses": 0}
 
 # Recent trade insights (last 1 hour, non-NEUTRAL, oldest first)
 try:
-    rows = conn.execute("SELECT ticker, signal_type, confidence, created_at FROM trade_insights WHERE created_at > datetime('now', '-1 hour') AND signal_type IN ('LONG', 'SHORT') ORDER BY created_at ASC").fetchall()
-    result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": round(float(r[2] or 0) * 100) if r[2] and float(r[2]) <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
+    rows = conn.execute("SELECT id, ticker, signal_type, confidence, entry_price, target_price, stop_price, timeframe, created_at FROM trade_insights WHERE created_at > datetime('now', '-1 hour') AND signal_type IN ('LONG', 'SHORT') ORDER BY created_at ASC").fetchall()
+    result["recent"] = [{"id": r[0], "ticker": r[1], "signal_type": r[2] or "?", "direction": r[2] or "?", "confidence": round(float(r[3] or 0) * 100) if r[3] and float(r[3]) <= 1 else int(r[3] or 0), "entry_price": r[4], "target_price": r[5], "stop_price": r[6], "timeframe": r[7] or "", "timestamp": r[8] or ""} for r in rows]
 except: result["recent"] = []
 
 # Watchlist
@@ -103,7 +103,7 @@ print(json.dumps(result))
       data.signals.losses = db.outcomes?.losses || 0;
       const decided = data.signals.wins + data.signals.losses;
       data.signals.winRate = decided > 0 ? Math.round((data.signals.wins / decided) * 100) : 0;
-      data.recentSignals = (db.recent || []).map((s: { ticker: string; direction: string; confidence: number; timestamp: string }) => ({ ...s, outcome: null }));
+      data.recentSignals = (db.recent || []).map((s: Record<string, unknown>) => ({ ...s, outcome: null }));
       data.activeScalps = db.active || [];
       data.watchlist = db.watchlist || [];
       data.trainingStats = { trades: db.training?.trades || 0, observations: db.training?.observations || 0, sentiment: db.training?.sentiment || 0, vectors: 0 };

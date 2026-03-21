@@ -49,7 +49,7 @@ except: result["trades"] = []
 
 # Recent signals (last 15)
 try:
-    rows = conn.execute("SELECT ticker, direction, tier3_score, action, created_at FROM signals ORDER BY id DESC LIMIT 15").fetchall()
+    rows = conn.execute("SELECT ticker, direction, tier3_score, action, created_at FROM signals WHERE action = 'EXECUTE' ORDER BY id DESC LIMIT 15").fetchall()
     result["signals"] = [dict(r) for r in rows]
 except: result["signals"] = []
 

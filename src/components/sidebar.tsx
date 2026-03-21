@@ -15,6 +15,7 @@ const navItems: NavItem[] = [
   { group: "COMMAND", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Holdings", icon: Briefcase, href: "/holdings" },
   { label: "Trades", icon: ArrowLeftRight, href: "/trades" },
+  { group: "TRADING", label: "AutoTrader", icon: Terminal, href: "/autotrader" },
   { group: "INTEL", label: "Signals", icon: Activity, href: "/signals" },
   { label: "Research", icon: Search, href: "/research" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
