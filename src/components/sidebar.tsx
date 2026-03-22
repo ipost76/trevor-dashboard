@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, ArrowLeftRight, Terminal,
   Menu, X, ChevronLeft, ChevronRight, Shield, BookOpen,
-  Search, MessageSquare, Activity, Briefcase, Settings,
+  Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { label: "Chat", icon: MessageSquare, href: "/chat" },
   { group: "SYSTEM", label: "Control Panel", icon: Settings, href: "/control" },
   { label: "Training", icon: BookOpen, href: "/training" },
+  { label: "Dev Tasks", icon: ClipboardList, href: "/dev-tasks" },
 ];
 
 export function Sidebar() {

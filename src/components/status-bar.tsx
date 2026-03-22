@@ -39,7 +39,7 @@ export function StatusBar() {
   return (
     <div className="flex h-6 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel-header)] px-3 text-[9px] font-mono text-muted-foreground">
       <div className="flex items-center gap-4">
-        <span>TREVOR v5.0</span>
+        <span>TREVOR V3</span>
         <span className={stats.uptime === "ONLINE" ? "text-[var(--neon-green)] opacity-80" : "text-[var(--neon-red)] opacity-80"}>
           {stats.uptime || "..."}
         </span>
