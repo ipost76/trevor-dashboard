@@ -32,7 +32,7 @@ def main():
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode())
-                print(json.dumps({"response": data.get("response", data.get("message", str(data))) if isinstance(data, dict) else str(data), "ok": True}))
+                print(json.dumps({"response": data.get("response", data.get("message", str(data))), "ok": True}))
         except urllib.error.HTTPError as e:
             # Try alternative endpoint
             try:
@@ -45,7 +45,7 @@ def main():
                 )
                 with urllib.request.urlopen(req, timeout=60) as resp:
                     data = json.loads(resp.read().decode())
-                    print(json.dumps({"response": data.get("response", data.get("message", str(data))) if isinstance(data, dict) else str(data), "ok": True}))
+                    print(json.dumps({"response": data.get("response", data.get("message", str(data))), "ok": True}))
             except Exception as e2:
                 print(json.dumps({"error": f"Bridge error: {e} / {e2}", "ok": False}))
         except Exception as e:

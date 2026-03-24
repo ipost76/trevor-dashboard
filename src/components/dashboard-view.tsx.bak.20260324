@@ -124,7 +124,7 @@ export function DashboardView() {
 
   useEffect(() => {
     fetchDashboard();
-    const i = setInterval(fetchDashboard, 30000);
+    const i = setInterval(fetchDashboard, 15000);
     return () => clearInterval(i);
   }, [fetchDashboard]);
 

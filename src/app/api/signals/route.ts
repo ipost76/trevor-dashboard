@@ -45,7 +45,9 @@ try:
     rows = conn.execute(
         "SELECT id, ticker, signal_type, confidence, entry_price, target_price, "
         "stop_price, reasoning, strategy, timeframe, multi_tf_confirmed, "
-        "outcome, actual_result_pct, exit_reason, created_at "
+        "outcome, actual_result_pct, exit_reason, created_at, "
+        "score_momentum, score_trend, score_volume, score_volatility, "
+        "score_microstructure, regime, quality_tier, rr_ratio, groups_confirmed "
         "FROM trade_insights " + where_clause + " ORDER BY created_at DESC LIMIT ? OFFSET ?",
         params + [${limit}, ${offset}]
     ).fetchall()
@@ -55,7 +57,12 @@ try:
          "entry_price": r[4], "target_price": r[5], "stop_price": r[6],
          "reasoning": r[7], "strategy": r[8], "timeframe": r[9],
          "multi_tf": bool(r[10]), "outcome": r[11],
-         "result_pct": r[12], "exit_reason": r[13], "created_at": r[14]}
+         "result_pct": r[12], "exit_reason": r[13], "created_at": r[14],
+         "breakdown": {"momentum": r[15] or 0, "trend": r[16] or 0,
+                        "volume": r[17] or 0, "volatility": r[18] or 0,
+                        "microstructure": r[19] or 0},
+         "regime": r[20] or "", "quality_tier": r[21] or "",
+         "rr_ratio": r[22] or 0, "groups_confirmed": r[23] or 0}
         for r in rows
     ]
 except:
