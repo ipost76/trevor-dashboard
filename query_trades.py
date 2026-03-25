@@ -16,7 +16,10 @@ def main():
         try:
             rows = conn.execute("""
                 SELECT trade_id, ticker, direction, entry_price, stop_price, target_price,
-                       leverage, confidence, track, opened_at, status
+                       leverage, confidence, track, opened_at, status,
+                       dynamic_target, target_pct, atr_at_entry, regime_at_entry,
+                       peak_pnl_lev, last_exit_condition, last_exit_severity,
+                       profit_target_price, entry_groups
                 FROM active_trades
                 WHERE status = 'open'
                 ORDER BY opened_at DESC

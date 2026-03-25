@@ -13,6 +13,9 @@ import {
   RefreshCw,
   Plus,
   X,
+  ArrowRightLeft,
+  Shield,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
@@ -42,6 +45,17 @@ type ActiveTrade = {
   created_at?: string;
   opened_at?: string;
   track?: string;
+  // Exit engine fields
+  dynamic_target?: number;
+  target_pct?: number;
+  peak_pnl_lev?: number;
+  last_exit_condition?: string;
+  last_exit_severity?: number;
+  regime_at_entry?: string;
+  confidence?: number;
+  profit_target_price?: number;
+  atr_at_entry?: number;
+  entry_groups?: string;
 };
 
 type Signal = {
@@ -197,6 +211,16 @@ function SignalTable({
 
 /* ── Active Trades Card Layout ── */
 
+/* ── Exit condition labels ── */
+const EXIT_COND: Record<string, { emoji: string; label: string }> = {
+  DIRECTION_FLIP: { emoji: "\uD83D\uDD34", label: "Direction Flip" },
+  PROFIT_TARGET: { emoji: "\uD83C\uDFAF", label: "Target Zone" },
+  PROFIT_FADING: { emoji: "\uD83D\uDCC9", label: "Profit Fading" },
+  MOMENTUM_EXHAUSTION: { emoji: "\uD83D\uDCA8", label: "Momentum Dying" },
+  PATTERN_MATCH: { emoji: "\uD83D\uDCCA", label: "Pattern Exit" },
+  DEGRADATION: { emoji: "\u26A0\uFE0F", label: "Signal Weakening" },
+};
+
 function ActiveTradesTab({
   trades,
   loading,
@@ -206,17 +230,54 @@ function ActiveTradesTab({
   loading: boolean;
   onRefresh: () => void;
 }) {
-  const [closingId, setClosingId] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [actionType, setActionType] = useState<"close" | "flip" | null>(null);
   const [exitPriceStr, setExitPriceStr] = useState("");
+  const [newEntryStr, setNewEntryStr] = useState("");
+  const [newLevStr, setNewLevStr] = useState("");
   const [closeStatus, setCloseStatus] = useState<
     "idle" | "submitting" | "polling" | "done" | "error"
   >("idle");
   const [closeError, setCloseError] = useState("");
 
+  const resetAction = () => {
+    setActionId(null);
+    setActionType(null);
+    setExitPriceStr("");
+    setNewEntryStr("");
+    setNewLevStr("");
+    setCloseStatus("idle");
+    setCloseError("");
+  };
+
+  const pollForCompletion = (tradeId: string, endpoint: string) => {
+    setCloseStatus("polling");
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${endpoint}?trade_id=${encodeURIComponent(tradeId)}`);
+        const data = await res.json();
+        if (data.status === "completed") {
+          clearInterval(poll);
+          setCloseStatus("done");
+          setTimeout(() => { resetAction(); onRefresh(); }, 1500);
+        } else if (data.status === "failed") {
+          clearInterval(poll);
+          setCloseStatus("error");
+          setCloseError(data.result?.error || "Request failed");
+        } else if (attempts > 30) {
+          clearInterval(poll);
+          setCloseStatus("error");
+          setCloseError("Timeout");
+        }
+      } catch { /* continue */ }
+    }, 2000);
+  };
+
   const handleClose = async (tradeId: string) => {
     const price = parseFloat(exitPriceStr);
     if (!price || price <= 0) return;
-
     setCloseStatus("submitting");
     setCloseError("");
     try {
@@ -226,50 +287,39 @@ function ActiveTradesTab({
         body: JSON.stringify({ trade_id: tradeId, exit_price: price }),
       });
       const data = await res.json();
-      if (data.error) {
-        setCloseStatus("error");
-        setCloseError(data.error);
-        return;
-      }
+      if (data.error) { setCloseStatus("error"); setCloseError(data.error); return; }
+      pollForCompletion(tradeId, "/api/trades/close-status");
+    } catch (err) { setCloseStatus("error"); setCloseError(String(err)); }
+  };
 
-      // Poll for completion
-      setCloseStatus("polling");
-      let attempts = 0;
-      const poll = setInterval(async () => {
-        attempts++;
-        try {
-          const statusRes = await fetch(
-            `/api/trades/close-status?trade_id=${encodeURIComponent(tradeId)}`
-          );
-          const statusData = await statusRes.json();
-          if (statusData.status === "completed") {
-            clearInterval(poll);
-            setCloseStatus("done");
-            setTimeout(() => {
-              setClosingId(null);
-              setExitPriceStr("");
-              setCloseStatus("idle");
-              onRefresh();
-            }, 1500);
-          } else if (statusData.status === "failed") {
-            clearInterval(poll);
-            setCloseStatus("error");
-            setCloseError(
-              statusData.result?.error || "Close request failed"
-            );
-          } else if (attempts > 30) {
-            clearInterval(poll);
-            setCloseStatus("error");
-            setCloseError("Timeout waiting for bot to process");
-          }
-        } catch {
-          // continue polling
-        }
-      }, 2000);
-    } catch (err) {
-      setCloseStatus("error");
-      setCloseError(String(err));
-    }
+  const handleHold = async (tradeId: string) => {
+    try {
+      await fetch("/api/trades/hold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_id: tradeId }),
+      });
+      onRefresh();
+    } catch { /* silent */ }
+  };
+
+  const handleFlip = async (tradeId: string) => {
+    const exit = parseFloat(exitPriceStr);
+    const entry = parseFloat(newEntryStr);
+    const lev = parseInt(newLevStr) || 1;
+    if (!exit || !entry) return;
+    setCloseStatus("submitting");
+    setCloseError("");
+    try {
+      const res = await fetch("/api/trades/flip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_id: tradeId, exit_price: exit, new_entry: entry, leverage: lev }),
+      });
+      const data = await res.json();
+      if (data.error) { setCloseStatus("error"); setCloseError(data.error); return; }
+      pollForCompletion(tradeId, "/api/trades/command-status");
+    } catch (err) { setCloseStatus("error"); setCloseError(String(err)); }
   };
 
   if (loading) {
@@ -307,217 +357,180 @@ function ActiveTradesTab({
   return (
     <div className="p-2 space-y-2">
       {trades.map((t, i) => {
-        const pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
         const tradeId = t.trade_id || `${t.ticker}_${i}`;
-        const isClosing = closingId === tradeId;
-        const exitPrice = parseFloat(exitPriceStr);
-        const hasValidPrice = !isNaN(exitPrice) && exitPrice > 0;
+        const isActive = actionId === tradeId;
+        const dirMult = t.direction?.toUpperCase() === "SHORT" ? -1 : 1;
 
-        // P&L preview for close dialog
-        const dirMult =
-          t.direction?.toUpperCase() === "SHORT" ? -1 : 1;
-        const previewPnl =
-          hasValidPrice && t.entry_price > 0
-            ? ((exitPrice - t.entry_price) / t.entry_price) *
-              dirMult *
-              (t.leverage || 1) *
-              100
-            : null;
+        // P&L calc
+        const pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
 
+        // Target progress
+        const dynTarget = t.dynamic_target || t.profit_target_price || t.target_price;
+        let targetPct = 0;
+        if (dynTarget && t.entry_price > 0 && dynTarget !== t.entry_price) {
+          if (t.direction?.toUpperCase() === "LONG") {
+            targetPct = Math.max(0, Math.min(100,
+              ((t.entry_price - t.entry_price) === 0 ? 0 :
+              ((t.current_price ?? t.entry_price) - t.entry_price) / (dynTarget - t.entry_price) * 100)));
+          } else {
+            targetPct = Math.max(0, Math.min(100,
+              (t.entry_price - (t.current_price ?? t.entry_price)) / (t.entry_price - dynTarget) * 100));
+          }
+        }
+
+        // Exit condition
+        const exitCond = t.last_exit_condition ? EXIT_COND[t.last_exit_condition] : null;
         const openedAt = t.opened_at || t.created_at;
 
+        // Preview for close/flip
+        const exitPrice = parseFloat(exitPriceStr);
+        const hasValidExit = !isNaN(exitPrice) && exitPrice > 0;
+        const previewPnl = hasValidExit && t.entry_price > 0
+          ? ((exitPrice - t.entry_price) / t.entry_price) * dirMult * (t.leverage || 1) * 100
+          : null;
+
         return (
-          <div key={tradeId} className="panel p-3 glow-border">
-            {/* Header Row */}
+          <div key={tradeId} className={cn("panel p-3", exitCond && (t.last_exit_severity ?? 0) >= 7 ? "border border-[rgba(255,51,102,0.3)]" : "glow-border")}>
+            {/* Header */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold">{t.ticker}</span>
                 <DirectionBadge dir={t.direction} />
-                {t.leverage != null && t.leverage > 1 && (
-                  <span className="text-[10px] font-bold neon-amber">
-                    {t.leverage}x
-                  </span>
+                {(t.leverage ?? 1) > 1 && (
+                  <span className="text-[10px] font-bold neon-amber">{t.leverage}x</span>
+                )}
+                {t.regime_at_entry && (
+                  <span className="text-[9px] px-1 rounded border border-[var(--border)] text-muted-foreground">{t.regime_at_entry}</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "text-lg font-bold font-mono",
-                    pnl >= 0 ? "neon-green" : "neon-red"
-                  )}
-                >
-                  {pnl >= 0 ? "+" : ""}
-                  {pnl.toFixed(2)}%
-                </span>
-                {t.trade_id && !isClosing && (
-                  <button
-                    onClick={() => {
-                      setClosingId(tradeId);
-                      setExitPriceStr("");
-                      setCloseStatus("idle");
-                      setCloseError("");
-                    }}
-                    className="p-1 rounded hover:bg-[rgba(255,51,102,0.1)] text-muted-foreground hover:text-[var(--neon-red)] transition-colors"
-                    title="Close trade"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
+              <span className={cn("text-lg font-bold font-mono", pnl >= 0 ? "neon-green" : "neon-red")}>
+                {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}%
+              </span>
             </div>
 
             {/* Price Grid */}
             <div className="grid grid-cols-4 gap-2 text-[10px]">
               <div>
-                <span className="text-muted-foreground">Entry</span>
-                <br />
-                <span className="font-mono">
-                  ${t.entry_price?.toFixed(2)}
-                </span>
+                <span className="text-muted-foreground">Entry</span><br />
+                <span className="font-mono">${t.entry_price?.toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-muted-foreground">Current</span>
-                <br />
-                <span className="font-mono">
-                  {t.current_price != null
-                    ? `$${t.current_price.toFixed(2)}`
-                    : "-"}
-                </span>
+                <span className="text-muted-foreground">Current</span><br />
+                <span className="font-mono">{t.current_price != null ? `$${t.current_price.toFixed(2)}` : "-"}</span>
               </div>
               <div>
-                <span className="text-muted-foreground">SL</span>
-                <br />
-                <span className="font-mono neon-red">
-                  {t.stop_price != null
-                    ? `$${t.stop_price.toFixed(2)}`
-                    : "-"}
-                </span>
+                <span className="text-muted-foreground">SL</span><br />
+                <span className="font-mono neon-red">{t.stop_price != null ? `$${t.stop_price.toFixed(2)}` : "-"}</span>
               </div>
               <div>
-                <span className="text-muted-foreground">TP</span>
-                <br />
-                <span className="font-mono neon-green">
-                  {t.target_price != null
-                    ? `$${t.target_price.toFixed(2)}`
-                    : "-"}
-                </span>
+                <span className="text-muted-foreground">Target</span><br />
+                <span className="font-mono neon-green">{dynTarget ? `$${dynTarget.toFixed(2)}` : "-"}</span>
               </div>
             </div>
+
+            {/* Target Progress + Peak P&L */}
+            {dynTarget && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-[9px] text-muted-foreground mb-0.5">
+                  <span>{targetPct.toFixed(0)}% to target</span>
+                  {(t.peak_pnl_lev ?? 0) > 0 && (
+                    <span>Peak: +{(t.peak_pnl_lev ?? 0).toFixed(1)}%</span>
+                  )}
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all", pnl >= 0 ? "bg-[var(--neon-green)]" : "bg-[var(--neon-red)]")}
+                    style={{ width: `${Math.max(0, Math.min(100, targetPct))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Exit Condition Badge */}
+            {exitCond && (
+              <div className={cn(
+                "mt-2 p-1.5 rounded text-[10px] border",
+                (t.last_exit_severity ?? 0) >= 7
+                  ? "border-[rgba(255,51,102,0.3)] bg-[rgba(255,51,102,0.06)]"
+                  : "border-[rgba(255,165,2,0.3)] bg-[rgba(255,165,2,0.04)]"
+              )}>
+                <span className="font-bold">{exitCond.emoji} {exitCond.label}</span>
+                {t.last_exit_severity != null && (
+                  <span className="text-muted-foreground ml-1">(sev {t.last_exit_severity})</span>
+                )}
+              </div>
+            )}
 
             {/* Timestamp */}
             {openedAt && (
               <div className="mt-1.5 text-[9px] text-muted-foreground">
-                Opened{" "}
-                {new Date(openedAt).toLocaleString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hour12: false,
-                })}
+                Opened {new Date(openedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
               </div>
             )}
 
-            {/* ── Close Trade Inline Panel ── */}
-            {isClosing && (
-              <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-3">
+            {/* Action Buttons */}
+            {t.trade_id && !isActive && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <button onClick={() => { setActionId(tradeId); setActionType("close"); resetAction(); setActionId(tradeId); setActionType("close"); }}
+                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.1)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.2)] transition-colors">
+                  <X className="h-3 w-3" /> Close
+                </button>
+                <button onClick={() => handleHold(tradeId)}
+                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(0,240,255,0.1)] text-[var(--neon-cyan)] border border-[rgba(0,240,255,0.3)] rounded hover:bg-[rgba(0,240,255,0.2)] transition-colors">
+                  <Shield className="h-3 w-3" /> Hold
+                </button>
+                <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("flip"); }}
+                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,165,2,0.1)] text-[var(--neon-amber)] border border-[rgba(255,165,2,0.3)] rounded hover:bg-[rgba(255,165,2,0.2)] transition-colors">
+                  <ArrowRightLeft className="h-3 w-3" /> Flip
+                </button>
+              </div>
+            )}
+
+            {/* ── Close Panel ── */}
+            {isActive && actionType === "close" && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Close Position</span>
+                  <button onClick={resetAction} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={exitPriceStr} onChange={(e) => setExitPriceStr(e.target.value)} placeholder="Exit price" type="number" step="any" min="0" className="input-terminal flex-1" autoFocus disabled={closeStatus !== "idle"} onKeyDown={(e) => { if (e.key === "Enter" && hasValidExit) handleClose(tradeId); }} />
+                  <button onClick={() => handleClose(tradeId)} disabled={!hasValidExit || closeStatus !== "idle"} className={cn("btn-primary whitespace-nowrap", (!hasValidExit || closeStatus !== "idle") && "opacity-50 pointer-events-none")}>
+                    {closeStatus === "idle" ? "Close" : closeStatus === "submitting" ? "Sending..." : closeStatus === "polling" ? "Processing..." : closeStatus === "done" ? "Done!" : "Retry"}
+                  </button>
+                </div>
+                {previewPnl !== null && (
+                  <div className={cn("panel p-2 border text-[10px]", previewPnl >= 0 ? "border-[rgba(0,255,136,0.3)] bg-[rgba(0,255,136,0.04)]" : "border-[rgba(255,51,102,0.3)] bg-[rgba(255,51,102,0.04)]")}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Est. P&L</span>
+                      <span className={cn("font-bold font-mono", previewPnl >= 0 ? "neon-green" : "neon-red")}>{previewPnl >= 0 ? "+" : ""}{previewPnl.toFixed(2)}%</span>
+                    </div>
+                  </div>
+                )}
+                {closeStatus === "error" && closeError && <div className="text-[10px] neon-red">{closeError}</div>}
+                {closeStatus === "done" && <div className="text-[10px] neon-green font-bold">Closed. Results posted to Discord.</div>}
+              </div>
+            )}
+
+            {/* ── Flip Panel ── */}
+            {isActive && actionType === "flip" && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Close Position
+                    Flip to {t.direction?.toUpperCase() === "LONG" ? "SHORT" : "LONG"}
                   </span>
-                  <button
-                    onClick={() => {
-                      setClosingId(null);
-                      setCloseStatus("idle");
-                    }}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  <button onClick={resetAction} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    value={exitPriceStr}
-                    onChange={(e) => setExitPriceStr(e.target.value)}
-                    placeholder="Exit price"
-                    type="number"
-                    step="any"
-                    min="0"
-                    className="input-terminal flex-1"
-                    autoFocus
-                    disabled={closeStatus !== "idle"}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && hasValidPrice) {
-                        handleClose(tradeId);
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => handleClose(tradeId)}
-                    disabled={
-                      !hasValidPrice ||
-                      closeStatus !== "idle"
-                    }
-                    className={cn(
-                      "btn-primary whitespace-nowrap",
-                      (!hasValidPrice || closeStatus !== "idle") &&
-                        "opacity-50 pointer-events-none"
-                    )}
-                  >
-                    {closeStatus === "idle" && "Close"}
-                    {closeStatus === "submitting" && "Sending..."}
-                    {closeStatus === "polling" && "Processing..."}
-                    {closeStatus === "done" && "Done!"}
-                    {closeStatus === "error" && "Retry"}
-                  </button>
+                <div className="grid grid-cols-3 gap-2">
+                  <input value={exitPriceStr} onChange={(e) => setExitPriceStr(e.target.value)} placeholder="Exit price" type="number" step="any" className="input-terminal" autoFocus />
+                  <input value={newEntryStr} onChange={(e) => setNewEntryStr(e.target.value)} placeholder="New entry" type="number" step="any" className="input-terminal" />
+                  <input value={newLevStr} onChange={(e) => setNewLevStr(e.target.value)} placeholder={`${t.leverage || 1}x`} type="number" min="1" max="125" className="input-terminal" />
                 </div>
-
-                {/* P&L Preview */}
-                {previewPnl !== null && (
-                  <div
-                    className={cn(
-                      "panel p-2 border text-[10px]",
-                      previewPnl >= 0
-                        ? "border-[rgba(0,255,136,0.3)] bg-[rgba(0,255,136,0.04)]"
-                        : "border-[rgba(255,51,102,0.3)] bg-[rgba(255,51,102,0.04)]"
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">
-                        Est. P&L
-                      </span>
-                      <span
-                        className={cn(
-                          "font-bold font-mono text-sm",
-                          previewPnl >= 0 ? "neon-green" : "neon-red"
-                        )}
-                      >
-                        {previewPnl >= 0 ? "+" : ""}
-                        {previewPnl.toFixed(2)}%
-                      </span>
-                    </div>
-                    {(t.leverage || 1) > 1 && (
-                      <div className="text-[9px] text-muted-foreground mt-0.5">
-                        Includes {t.leverage}x leverage
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Error */}
-                {closeStatus === "error" && closeError && (
-                  <div className="text-[10px] neon-red">
-                    {closeError}
-                  </div>
-                )}
-
-                {/* Done */}
-                {closeStatus === "done" && (
-                  <div className="text-[10px] neon-green font-bold">
-                    Trade closed. Results posted to Discord.
-                  </div>
-                )}
+                <button onClick={() => handleFlip(tradeId)} disabled={!hasValidExit || !parseFloat(newEntryStr) || closeStatus !== "idle"} className={cn("btn-primary w-full", closeStatus !== "idle" && "opacity-50 pointer-events-none")}>
+                  {closeStatus === "idle" ? `Close ${t.direction} + Open ${t.direction?.toUpperCase() === "LONG" ? "SHORT" : "LONG"}` : closeStatus === "submitting" ? "Sending..." : closeStatus === "polling" ? "Processing..." : closeStatus === "done" ? "Done!" : "Retry"}
+                </button>
+                {closeStatus === "error" && closeError && <div className="text-[10px] neon-red">{closeError}</div>}
+                {closeStatus === "done" && <div className="text-[10px] neon-green font-bold">Flipped. New trade posted to Discord.</div>}
               </div>
             )}
           </div>
