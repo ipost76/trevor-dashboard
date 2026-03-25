@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, ArrowLeftRight, Terminal,
   Menu, X, ChevronLeft, ChevronRight, Shield, BookOpen,
-  Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList,
+  Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList, Zap,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
   { group: "INTEL", label: "Signals", icon: Activity, href: "/signals" },
   { label: "Research", icon: Search, href: "/research" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
+  { group: "GHOST", label: "Ghost HQ", icon: Zap, href: "/ghost" },
   { group: "SYSTEM", label: "Control Panel", icon: Settings, href: "/control" },
   { label: "Training", icon: BookOpen, href: "/training" },
   { label: "Dev Tasks", icon: ClipboardList, href: "/dev-tasks" },
