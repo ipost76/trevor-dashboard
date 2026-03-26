@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ArrowLeftRight, Terminal,
   ChevronLeft, ChevronRight, Shield, BookOpen,
   Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList, Zap,
-  MoreHorizontal, X,
+  MoreHorizontal, X, Bell,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { group: "INTEL", label: "Signals", icon: Activity, href: "/signals" },
   { label: "Research", icon: Search, href: "/research" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
+  { label: "Reminders", icon: Bell, href: "/reminders" },
   { group: "GHOST", label: "Ghost HQ", icon: Zap, href: "/ghost" },
   { group: "SYSTEM", label: "Control Panel", icon: Settings, href: "/control" },
   { label: "Training", icon: BookOpen, href: "/training" },
