@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { execSync } from "child_process";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +11,8 @@ type Commit = {
   subject: string;
 };
 
+const REPO_DIR = "/home/trevor/trevor";
+
 let cached: { total: number; commits: Commit[] } | null = null;
 let cacheTime = 0;
 
@@ -19,14 +20,22 @@ function loadCommits() {
   const now = Date.now();
   if (cached && now - cacheTime < 60_000) return cached;
   try {
-    const raw = readFileSync(
-      join(process.cwd(), "public", "commit-history.json"),
-      "utf-8"
+    const raw = execSync(
+      `git -C ${REPO_DIR} log --format="%H|%h|%aI|%an|%s" --no-merges`,
+      { encoding: "utf-8", timeout: 10_000 }
     );
-    cached = JSON.parse(raw);
+    const commits: Commit[] = raw
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, short_hash, date, author, ...rest] = line.split("|");
+        return { hash, short_hash, date, author, subject: rest.join("|") };
+      });
+    cached = { total: commits.length, commits };
     cacheTime = now;
   } catch {
-    cached = { total: 0, commits: [] };
+    cached = cached || { total: 0, commits: [] };
   }
   return cached!;
 }
