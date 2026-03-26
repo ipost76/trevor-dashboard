@@ -26,9 +26,10 @@ const navItems: NavItem[] = [
   { label: "Dev Tasks", icon: ClipboardList, href: "/dev-tasks" },
 ];
 
-// Bottom tab bar: top 6 pages + More
-const TAB_ITEMS = navItems.slice(0, 6); // Dashboard, Holdings, Trades, AutoTrader, Signals, Research
-const MORE_ITEMS = navItems.slice(6);   // Chat, Ghost HQ, Control Panel, Training, Dev Tasks
+// Bottom tab bar: 5 most-used pages + More
+const TAB_HREFS = ["/dashboard", "/trades", "/signals", "/chat", "/control"];
+const TAB_ITEMS = TAB_HREFS.map(h => navItems.find(n => n.href === h)!);
+const MORE_ITEMS = navItems.filter(n => !TAB_HREFS.includes(n.href));
 
 export function Sidebar() {
   const pathname = usePathname();

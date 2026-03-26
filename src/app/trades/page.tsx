@@ -333,7 +333,7 @@ function ActiveTradesTab({
               <div className="flex-1" />
               <Skeleton className="h-5 w-20" />
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {Array.from({ length: 4 }).map((_, j) => (
                 <Skeleton key={j} className="h-8 w-full" />
               ))}
@@ -409,7 +409,7 @@ function ActiveTradesTab({
             </div>
 
             {/* Price Grid */}
-            <div className="grid grid-cols-4 gap-2 text-[10px]">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
               <div>
                 <span className="text-muted-foreground">Entry</span><br />
                 <span className="font-mono">${t.entry_price?.toFixed(2)}</span>
@@ -521,7 +521,7 @@ function ActiveTradesTab({
                   </span>
                   <button onClick={resetAction} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                   <input value={exitPriceStr} onChange={(e) => setExitPriceStr(e.target.value)} placeholder="Exit price" type="number" step="any" className="input-terminal" autoFocus />
                   <input value={newEntryStr} onChange={(e) => setNewEntryStr(e.target.value)} placeholder="New entry" type="number" step="any" className="input-terminal" />
                   <input value={newLevStr} onChange={(e) => setNewLevStr(e.target.value)} placeholder={`${t.leverage || 1}x`} type="number" min="1" max="125" className="input-terminal" />

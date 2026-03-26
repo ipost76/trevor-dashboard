@@ -165,7 +165,7 @@ export function DashboardView() {
     <div className="flex-1 overflow-hidden p-2 flex flex-col gap-2">
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
-        <div className="flex items-center gap-5 px-3 py-1.5 flex-wrap">
+        <div className="flex items-center gap-5 px-3 py-1.5 flex-wrap stat-strip-mobile md:!flex-wrap">
           <StatBlock label="Total P&L" value={`${data.totalPnl >= 0 ? "+" : ""}${data.totalPnl.toFixed(1)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
           <StatBlock label="W / L" value={`${data.wins}W ${data.losses}L`} sub={`${winPct}% win rate`} />
           <StatBlock label="Win Rate" value={`${data.winRate.toFixed(0)}%`} color={data.winRate >= 55 ? "neon-green" : data.winRate < 45 ? "neon-red" : "neon-amber"} />
@@ -178,10 +178,10 @@ export function DashboardView() {
       </div>
 
       {/* ── Main Grid (2×2) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 stagger-cards" style={{ gridTemplateRows: "1fr 1fr" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 stagger-cards dashboard-grid" style={{ gridTemplateRows: "1fr 1fr" }}>
 
         {/* ── TOP-LEFT: Signals & Quality ── */}
-        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors">
+        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-2 lg:order-1">
           <div className="panel-header flex items-center gap-1.5">
             <Zap className="h-3 w-3" />
             <span>SIGNALS & QUALITY</span>
@@ -220,7 +220,7 @@ export function DashboardView() {
         </Link>
 
         {/* ── TOP-RIGHT: Active Trades ── */}
-        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors">
+        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-1 lg:order-2">
           <div className="panel-header flex items-center gap-1.5">
             <Activity className="h-3 w-3" />
             <span>ACTIVE TRADES</span>
@@ -260,10 +260,12 @@ export function DashboardView() {
         </Link>
 
         {/* ── BOTTOM-LEFT: AutoTrader ── */}
-        <AutoTraderPanel data={data.auto} />
+        <div className="order-3 flex flex-col min-h-0">
+          <AutoTraderPanel data={data.auto} />
+        </div>
 
         {/* ── BOTTOM-RIGHT: Chat ── */}
-        <div className="panel flex flex-col overflow-hidden">
+        <div className="panel flex flex-col overflow-hidden order-4">
           <div className="panel-header flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Send className="h-3 w-3" />
@@ -295,7 +297,7 @@ function AutoTraderPanel({ data }: { data: AutoData | null }) {
     : 0;
 
   return (
-    <div className="panel flex flex-col overflow-hidden">
+    <div className="panel flex flex-col overflow-hidden max-h-[200px] md:max-h-none">
       <div className="panel-header flex items-center gap-1.5">
         <Bot className="h-3 w-3" />
         <span>AUTOTRADER</span>

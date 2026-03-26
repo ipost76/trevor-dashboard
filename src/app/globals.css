@@ -333,25 +333,54 @@ body::after {
   }
 }
 
+/* Scrollbar hide utility */
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 /* ── Mobile responsiveness (< 768px) ───────────────────────────────── */
 @media (max-width: 767px) {
-  /* Data grids → single column */
-  .grid-cols-2, .grid-cols-3, .grid-cols-4,
+  /* Major layout grids → single column (only lg: responsive ones) */
   .lg\:grid-cols-2, .lg\:grid-cols-3, .lg\:grid-cols-4 {
     grid-template-columns: 1fr !important;
   }
+
+  /* Dashboard: auto row heights (not forced equal 1fr) */
+  .dashboard-grid {
+    grid-template-rows: auto !important;
+  }
+
+  /* Stat strip: horizontal scroll instead of awkward wrap */
+  .stat-strip-mobile {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 12px !important;
+    padding: 6px 8px !important;
+  }
+  .stat-strip-mobile::-webkit-scrollbar { display: none; }
+
+  /* Brain editor: stack sidebar above content */
+  .brain-editor-layout { flex-direction: column !important; }
+  .brain-file-sidebar {
+    width: 100% !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  .brain-file-list {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .brain-file-list::-webkit-scrollbar { display: none; }
 
   /* Tables → horizontal scroll */
   table, .data-table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-  }
-
-  /* Stat strips → wrap */
-  .flex.items-center.gap-5 {
-    flex-wrap: wrap;
-    gap: 8px;
   }
 
   /* Panels → full width, less padding */

@@ -18,7 +18,7 @@ export function TabBar<T extends string>({
   onChange: (key: T) => void;
 }) {
   return (
-    <div className="flex items-center border-b border-[var(--border)] bg-[var(--panel-header)]">
+    <div role="tablist" className="flex items-center border-b border-[var(--border)] bg-[var(--panel-header)] overflow-x-auto scrollbar-hide">
       {tabs.map((t) => {
         const Icon = t.icon;
         return (
@@ -26,7 +26,7 @@ export function TabBar<T extends string>({
             key={t.key}
             onClick={() => onChange(t.key)}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors border-b-2",
+              "flex items-center gap-1.5 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] transition-colors border-b-2 shrink-0 whitespace-nowrap",
               active === t.key
                 ? "text-[var(--neon-cyan)] border-[var(--neon-cyan)]"
                 : "text-muted-foreground border-transparent hover:text-foreground"

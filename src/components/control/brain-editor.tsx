@@ -123,12 +123,13 @@ export function BrainEditor() {
   return (
     <div className="flex flex-col h-full">
       {/* Editor section */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 brain-editor-layout">
         {/* File selector */}
-        <div className="w-48 shrink-0 border-r border-[var(--border)] bg-[rgba(0,0,0,0.2)] overflow-auto">
-          <div className="p-2 text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground border-b border-[var(--border)]">
+        <div className="w-48 shrink-0 border-r border-[var(--border)] bg-[rgba(0,0,0,0.2)] overflow-auto brain-file-sidebar">
+          <div className="p-2 text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground border-b border-[var(--border)] hidden md:block">
             Brain Files
           </div>
+          <div className="brain-file-list">
           {BRAIN_FILES.map((name) => {
             const sacred = SACRED_FILES.has(name);
             const isActive = selectedFile === name;
@@ -137,10 +138,10 @@ export function BrainEditor() {
                 key={name}
                 onClick={() => setSelectedFile(name)}
                 className={cn(
-                  "flex items-center gap-2 w-full px-3 py-2 text-[11px] font-medium transition-colors text-left",
+                  "flex items-center gap-2 w-full px-3 py-2 text-[11px] font-medium transition-colors text-left shrink-0",
                   isActive
-                    ? "bg-[rgba(0,240,255,0.08)] text-[var(--neon-cyan)] border-l-2 border-[var(--neon-cyan)]"
-                    : "text-muted-foreground hover:text-foreground hover:bg-[rgba(255,255,255,0.02)] border-l-2 border-transparent"
+                    ? "bg-[rgba(0,240,255,0.08)] text-[var(--neon-cyan)] border-l-2 md:border-l-2 border-[var(--neon-cyan)]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-[rgba(255,255,255,0.02)] border-l-2 md:border-l-2 border-transparent"
                 )}
               >
                 {sacred ? (
@@ -152,6 +153,7 @@ export function BrainEditor() {
               </button>
             );
           })}
+          </div>
         </div>
 
         {/* Editor panel */}
