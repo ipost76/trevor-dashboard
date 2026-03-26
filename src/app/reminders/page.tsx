@@ -42,11 +42,13 @@ function relativeTime(iso: string): string {
   return diff > 0 ? `in ${days}d` : `${days}d ago`;
 }
 
-const MODE_LABELS: Record<string, string> = {
-  once: "1x",
-  twice: "2x",
-  until_confirmed: "Until DONE",
-};
+function modeLabel(m: string): string {
+  if (m === "until_confirmed") return "Until DONE";
+  if (m === "once") return "1x";
+  if (m === "twice") return "2x";
+  if (/^\d+$/.test(m)) return parseInt(m) === 1 ? "1x" : `${m}x`;
+  return m;
+}
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   pending: { label: "PENDING", cls: "text-[var(--neon-amber)]" },
@@ -64,7 +66,7 @@ export default function RemindersPage() {
   const [showForm, setShowForm] = useState(false);
   const [formText, setFormText] = useState("");
   const [formWhen, setFormWhen] = useState("");
-  const [formMode, setFormMode] = useState("once");
+  const [formMode, setFormMode] = useState("1");
   const [editId, setEditId] = useState<number | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -209,7 +211,7 @@ export default function RemindersPage() {
             </div>
             <div className="flex gap-3 items-center">
               <span className="text-[9px] text-muted-foreground uppercase">Mode:</span>
-              {(["once", "twice", "until_confirmed"] as const).map((m) => (
+              {["1", "2", "3"].map((m) => (
                 <button
                   key={m}
                   onClick={() => setFormMode(m)}
@@ -220,9 +222,20 @@ export default function RemindersPage() {
                       : "border-[var(--border)] text-muted-foreground"
                   )}
                 >
-                  {MODE_LABELS[m]}
+                  {m}x
                 </button>
               ))}
+              <button
+                onClick={() => setFormMode(formMode === "until_confirmed" ? "1" : "until_confirmed")}
+                className={cn(
+                  "text-[10px] px-2 py-0.5 rounded border transition-colors",
+                  formMode === "until_confirmed"
+                    ? "border-[var(--neon-cyan)] text-[var(--neon-cyan)]"
+                    : "border-[var(--border)] text-muted-foreground"
+                )}
+              >
+                Until DONE
+              </button>
               <button onClick={handleCreate} className="btn-primary text-[10px] px-3 py-0.5 ml-auto">
                 Create
               </button>
@@ -249,7 +262,7 @@ export default function RemindersPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-[9px] font-mono text-muted-foreground">#{r.id}</span>
                           <span className={cn("text-[9px] font-bold uppercase", badge.cls)}>{badge.label}</span>
-                          <span className="text-[9px] text-muted-foreground">{MODE_LABELS[r.repeat_mode] || r.repeat_mode}</span>
+                          <span className="text-[9px] text-muted-foreground">{modeLabel(r.repeat_mode)}</span>
                           {r.times_fired > 0 && (
                             <span className="text-[9px] text-muted-foreground">fired {r.times_fired}x</span>
                           )}
@@ -263,7 +276,7 @@ export default function RemindersPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {r.status === "active" && r.repeat_mode === "until_confirmed" && (
+                        {r.status === "active" && (
                           <button
                             onClick={() => handleAction(r.id, "complete")}
                             className="p-1 text-[var(--neon-green)] hover:bg-[rgba(0,255,136,0.1)] rounded"
