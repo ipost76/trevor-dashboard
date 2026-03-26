@@ -4,8 +4,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, ArrowLeftRight, Terminal,
-  Menu, X, ChevronLeft, ChevronRight, Shield, BookOpen,
+  ChevronLeft, ChevronRight, Shield, BookOpen,
   Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList, Zap,
+  MoreHorizontal, X,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -25,15 +26,23 @@ const navItems: NavItem[] = [
   { label: "Dev Tasks", icon: ClipboardList, href: "/dev-tasks" },
 ];
 
+// Bottom tab bar: top 6 pages + More
+const TAB_ITEMS = navItems.slice(0, 6); // Dashboard, Holdings, Trades, AutoTrader, Signals, Research
+const MORE_ITEMS = navItems.slice(6);   // Chat, Ghost HQ, Control Panel, Training, Dev Tasks
+
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const closeMobile = useCallback(() => setMobileOpen(false), []);
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  const SidebarContent = () => (
+  const isActiveMore = MORE_ITEMS.some(
+    (item) => pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
+  );
+
+  // ── Desktop sidebar (unchanged) ──
+  const DesktopSidebar = () => (
     <aside className={cn(
-      "flex h-full flex-col border-r transition-[width] duration-200",
+      "hidden md:flex h-full flex-col border-r transition-[width] duration-200",
       "bg-[var(--sidebar)] border-[var(--sidebar-border)]",
       collapsed ? "w-14" : "w-52"
     )}>
@@ -68,7 +77,6 @@ export function Sidebar() {
               {showGroup && collapsed && <div className="my-2 border-t border-[var(--sidebar-border)]" />}
               <Link
                 href={item.href}
-                onClick={closeMobile}
                 title={collapsed ? item.label : undefined}
                 className={cn(
                   "flex items-center gap-2 rounded py-1.5 text-[11px] font-medium transition-all duration-150",
@@ -100,28 +108,78 @@ export function Sidebar() {
     </aside>
   );
 
+  // ── Mobile bottom tab bar ──
+  const MobileTabBar = () => (
+    <>
+      {/* More menu overlay */}
+      {moreOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={() => setMoreOpen(false)} />
+          <div className="fixed bottom-14 left-0 right-0 z-50 md:hidden">
+            <div className="mx-3 mb-1 rounded-lg bg-[var(--sidebar)] border border-[var(--sidebar-border)] shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--sidebar-border)]">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">More</span>
+                <button onClick={() => setMoreOpen(false)} className="p-1 text-muted-foreground"><X className="h-3.5 w-3.5" /></button>
+              </div>
+              {MORE_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.href || pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMoreOpen(false)}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 text-[12px] transition-colors",
+                      isActive ? "text-[var(--neon-cyan)] bg-[rgba(0,240,255,0.06)]" : "text-foreground"
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Bottom tab bar */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-14 items-center justify-around border-t border-[var(--sidebar-border)] bg-[var(--sidebar)] md:hidden"
+           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {TAB_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-colors",
+                isActive ? "text-[var(--neon-cyan)]" : "text-muted-foreground"
+              )}
+            >
+              <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_rgba(0,240,255,0.6)]")} />
+            </Link>
+          );
+        })}
+        <button
+          onClick={() => setMoreOpen((p) => !p)}
+          className={cn(
+            "flex flex-col items-center justify-center w-12 h-11 rounded-lg transition-colors",
+            isActiveMore || moreOpen ? "text-[var(--neon-cyan)]" : "text-muted-foreground"
+          )}
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
+      </nav>
+    </>
+  );
+
   return (
     <>
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="fixed left-3 top-3 z-50 flex h-9 w-9 items-center justify-center rounded glass-strong md:hidden"
-        aria-label="Open menu"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
-      {mobileOpen && <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={closeMobile} />}
-      <div className={cn(
-        "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-2xl max-md:transition-transform max-md:duration-200",
-        mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
-        "md:relative md:flex md:flex-col"
-      )}>
-        {mobileOpen && (
-          <button onClick={closeMobile} className="absolute right-2 top-2 z-10 rounded p-1.5 text-muted-foreground hover:text-foreground md:hidden">
-            <X className="h-4 w-4" />
-          </button>
-        )}
-        <SidebarContent />
-      </div>
+      <DesktopSidebar />
+      <MobileTabBar />
     </>
   );
 }

@@ -61,36 +61,36 @@ export function Header() {
               {status ? (status.trevor.running ? "LIVE" : "OFFLINE") : "..."}
             </span>
           </div>
-          {status?.trevor.running && (
-            <span className="text-[9px] text-muted-foreground font-mono">PID {status.trevor.pid}</span>
-          )}
+          <span className="hidden md:inline text-[9px] text-muted-foreground font-mono">
+            {status?.trevor.running ? `PID ${status.trevor.pid}` : ""}
+          </span>
           <div className="h-3 w-px bg-[var(--border)]" />
           <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
         </div>
 
         {/* Right: XP + Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           {status && (
-            <div className="flex items-center gap-1.5 rounded bg-[rgba(0,240,255,0.06)] border border-[rgba(0,240,255,0.12)] px-2 py-0.5">
+            <div className="flex items-center gap-1 md:gap-1.5 rounded bg-[rgba(0,240,255,0.06)] border border-[rgba(0,240,255,0.12)] px-1.5 md:px-2 py-0.5">
               <Zap className="h-2.5 w-2.5 text-[var(--neon-cyan)]" />
-              <span className="text-[10px] font-bold text-[var(--neon-cyan)]">{status.xp} XP</span>
-              <span className="text-[9px] text-muted-foreground">{status.rank}</span>
+              <span className="text-[10px] font-bold text-[var(--neon-cyan)]">{status.xp}</span>
+              <span className="hidden md:inline text-[9px] text-muted-foreground">{status.rank}</span>
             </div>
           )}
-          <div className="h-3 w-px bg-[var(--border)]" />
+          <div className="hidden md:block h-3 w-px bg-[var(--border)]" />
           <button
             onClick={() => setShowChangePassword(true)}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
+            className="hidden md:flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
             title="Change password"
           >
             <KeyRound className="h-3 w-3" />
           </button>
           <button
             onClick={handleLogout}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(255,51,102,0.1)] hover:text-[var(--neon-red)] transition-colors"
+            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(255,51,102,0.1)] hover:text-[var(--neon-red)] transition-colors"
             title="Log out"
           >
-            <LogOut className="h-3 w-3" />
+            <LogOut className="h-3.5 w-3.5 md:h-3 md:w-3" />
           </button>
         </div>
       </header>
