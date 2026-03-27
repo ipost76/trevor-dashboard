@@ -309,23 +309,21 @@ export default function SignalsPage() {
                   <div className="panel">
                     <div className="panel-header">CONFIDENCE CALIBRATION</div>
                     <div className="p-3 space-y-2">
-                      {["50-60", "60-70", "70-80", "80-90", "90+"].map(bucket => {
-                        const b = calibration[bucket];
+                      {Object.entries(calibration).map(([bucket, b]) => {
                         if (!b) return null;
                         const maxT = Math.max(1, ...Object.values(calibration).map(v => v?.trades || 0));
                         const barW = b.trades > 0 ? (b.trades / maxT) * 100 : 0;
-                        const midpoint = bucket === "90+" ? 92.5 : (parseInt(bucket) + parseInt(bucket.split("-")[1] || "100")) / 2;
-                        const calibrated = b.winRate != null && b.winRate >= midpoint;
+                        const goodWR = b.winRate != null && b.winRate >= 55;
                         return (
                           <div key={bucket} className="flex items-center gap-3">
-                            <span className="text-[10px] font-bold text-muted-foreground w-10 shrink-0">{bucket}%</span>
+                            <span className="text-[10px] font-bold text-muted-foreground w-12 shrink-0">{bucket}%</span>
                             <div className="flex-1 h-4 rounded-sm bg-[var(--muted)] relative overflow-hidden">
-                              <div className="h-full rounded-sm transition-all" style={{ width: `${barW}%`, backgroundColor: b.trades === 0 ? "var(--muted-foreground)" : calibrated ? "var(--neon-green)" : "var(--neon-red)", opacity: b.trades === 0 ? 0.2 : 0.7 }} />
+                              <div className="h-full rounded-sm transition-all" style={{ width: `${barW}%`, backgroundColor: b.trades === 0 ? "var(--muted-foreground)" : goodWR ? "var(--neon-green)" : b.winRate != null && b.winRate >= 45 ? "var(--neon-amber)" : "var(--neon-red)", opacity: b.trades === 0 ? 0.2 : 0.7 }} />
                             </div>
-                            <div className="text-right w-20 shrink-0">
+                            <div className="text-right w-24 shrink-0">
                               {b.trades > 0 ? (
-                                <span className={cn("text-[10px] font-bold", calibrated ? "neon-green" : "neon-red")}>
-                                  {b.winRate}% <span className="text-muted-foreground font-normal">({b.trades})</span>
+                                <span className={cn("text-[10px] font-bold", goodWR ? "neon-green" : "neon-red")}>
+                                  {b.winRate}% <span className="text-muted-foreground font-normal">({b.wins}W/{b.trades})</span>
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-muted-foreground">No data</span>

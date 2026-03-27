@@ -288,8 +288,29 @@ function ActiveTradesTab({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [actionId, setActionId] = useState<string | null>(null);
   const [actionType, setActionType] = useState<"close" | "flip" | null>(null);
+
+  // Fetch live prices for open trades
+  useEffect(() => {
+    if (!trades.length) return;
+    const tickers = [...new Set(trades.map((t) => t.ticker?.replace("-PERP", "").replace("/USD", "")))].join(",");
+    const fetchPrices = async () => {
+      try {
+        const res = await fetch(`/api/prices?tickers=${tickers}`);
+        const data = await res.json();
+        const p: Record<string, number> = {};
+        for (const [k, v] of Object.entries(data.prices || {})) {
+          p[k] = (v as { price: number }).price;
+        }
+        setLivePrices(p);
+      } catch { /* ignore */ }
+    };
+    fetchPrices();
+    const iv = setInterval(fetchPrices, 30_000);
+    return () => clearInterval(iv);
+  }, [trades]);
   const [exitPriceStr, setExitPriceStr] = useState("");
   const [newEntryStr, setNewEntryStr] = useState("");
   const [newLevStr, setNewLevStr] = useState("");
@@ -419,8 +440,16 @@ function ActiveTradesTab({
         const isActive = actionId === tradeId;
         const dirMult = t.direction?.toUpperCase() === "SHORT" ? -1 : 1;
 
-        // P&L calc
-        const pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
+        // P&L calc — use live price if available
+        const tickerKey = t.ticker?.replace("-PERP", "").replace("/USD", "") || "";
+        const livePrice = livePrices[tickerKey] || t.current_price;
+        let pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
+        if (livePrice && t.entry_price && t.entry_price > 0) {
+          const rawPnl = t.direction?.toUpperCase() === "SHORT"
+            ? ((t.entry_price - livePrice) / t.entry_price) * 100
+            : ((livePrice - t.entry_price) / t.entry_price) * 100;
+          pnl = rawPnl * (t.leverage || 1);
+        }
 
         // Target progress
         const dynTarget = t.dynamic_target || t.profit_target_price || t.target_price;
@@ -429,10 +458,10 @@ function ActiveTradesTab({
           if (t.direction?.toUpperCase() === "LONG") {
             targetPct = Math.max(0, Math.min(100,
               ((t.entry_price - t.entry_price) === 0 ? 0 :
-              ((t.current_price ?? t.entry_price) - t.entry_price) / (dynTarget - t.entry_price) * 100)));
+              ((livePrice ?? t.entry_price) - t.entry_price) / (dynTarget - t.entry_price) * 100)));
           } else {
             targetPct = Math.max(0, Math.min(100,
-              (t.entry_price - (t.current_price ?? t.entry_price)) / (t.entry_price - dynTarget) * 100));
+              (t.entry_price - (livePrice ?? t.entry_price)) / (t.entry_price - dynTarget) * 100));
           }
         }
 
@@ -471,7 +500,7 @@ function ActiveTradesTab({
               <EditableEntry trade={t} onSaved={onRefresh} />
               <div>
                 <span className="text-muted-foreground">Current</span><br />
-                <span className="font-mono">{t.current_price != null ? `$${t.current_price.toFixed(2)}` : "-"}</span>
+                <span className="font-mono">{livePrice ? `$${livePrice.toFixed(livePrice < 1 ? 4 : 2)}` : "-"}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">SL</span><br />
