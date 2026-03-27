@@ -49,11 +49,15 @@ function parseNextRun(schedule: string): string {
     candidate.setUTCHours(h, m, 0, 0);
 
     if (candidate > nowUTC) {
-      // Convert UTC to ET (approximate: UTC-4 EDT or UTC-5 EST)
-      const etOffset = -4; // EDT
-      const et = new Date(candidate.getTime() + etOffset * 60 * 60 * 1000);
-      const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][et.getDay()];
-      return `${dayName} ${et.getHours().toString().padStart(2, "0")}:${et.getMinutes().toString().padStart(2, "0")} ET`;
+      // Convert UTC to ET with proper DST handling
+      const etStr = candidate.toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      return `${etStr} ET`;
     }
   }
 
