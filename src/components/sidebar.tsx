@@ -68,7 +68,8 @@ export function Sidebar() {
     <aside className={cn(
       "hidden md:flex h-full flex-col border-r transition-[width] duration-200",
       "bg-[var(--sidebar)] border-[var(--sidebar-border)]",
-      collapsed ? "w-14" : "w-52"
+      "w-0", // Mobile: zero width (hidden + w-0 = no flex space)
+      collapsed ? "md:w-14" : "md:w-52"
     )}>
       <div className={cn(
         "flex items-center shrink-0 border-b border-[var(--sidebar-border)]",

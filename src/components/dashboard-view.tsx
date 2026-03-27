@@ -182,7 +182,7 @@ export function DashboardView() {
   const winPct = decided > 0 ? ((data.wins / decided) * 100).toFixed(0) : "0";
 
   return (
-    <div className="flex-1 overflow-hidden p-2 flex flex-col gap-2">
+    <div className="flex-1 overflow-hidden p-2 flex flex-col gap-1.5 md:gap-2">
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
         <div className="flex items-center gap-5 px-3 py-1.5 flex-wrap stat-strip-mobile md:!flex-wrap">
@@ -199,10 +199,10 @@ export function DashboardView() {
       </div>
 
       {/* ── Main Grid (2×2 desktop, stack mobile) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-auto stagger-cards dashboard-grid">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-1.5 md:gap-2 flex-1 min-h-0 overflow-hidden md:overflow-auto stagger-cards dashboard-grid">
 
         {/* ── TOP-LEFT: Signals & Quality ── */}
-        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-2 lg:order-1 max-h-[200px] md:max-h-none">
+        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-2 lg:order-1 max-h-[140px] md:max-h-none">
           <div className="panel-header flex items-center gap-1.5">
             <Zap className="h-3 w-3" />
             <span>SIGNALS & QUALITY</span>
@@ -241,7 +241,7 @@ export function DashboardView() {
         </Link>
 
         {/* ── TOP-RIGHT: Active Trades ── */}
-        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-1 lg:order-2 max-h-[220px] md:max-h-none">
+        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-1 lg:order-2 max-h-[160px] md:max-h-none">
           <div className="panel-header flex items-center gap-1.5">
             <Activity className="h-3 w-3" />
             <span>ACTIVE TRADES</span>
@@ -289,12 +289,12 @@ export function DashboardView() {
         </Link>
 
         {/* ── BOTTOM-LEFT: AutoTrader ── */}
-        <div className="order-3 flex flex-col min-h-0">
+        <div className="order-3 flex flex-col min-h-0 max-h-[120px] md:max-h-none overflow-hidden">
           <AutoTraderPanel data={data.auto} />
         </div>
 
         {/* ── BOTTOM-RIGHT: Chat ── */}
-        <div className="panel flex flex-col overflow-hidden order-4">
+        <div className="panel flex flex-col overflow-hidden order-4 max-h-[120px] md:max-h-none">
           <div className="panel-header flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Send className="h-3 w-3" />
