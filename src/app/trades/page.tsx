@@ -16,6 +16,7 @@ import {
   ArrowRightLeft,
   Shield,
   Target,
+  Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
@@ -221,6 +222,63 @@ const EXIT_COND: Record<string, { emoji: string; label: string }> = {
   DEGRADATION: { emoji: "\u26A0\uFE0F", label: "Signal Weakening" },
 };
 
+function EditableEntry({ trade: t, onSaved }: { trade: Record<string, unknown>; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(t.entry_price ?? ""));
+  const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState<"ok" | "err" | null>(null);
+
+  const save = async () => {
+    const p = parseFloat(val);
+    if (isNaN(p) || p <= 0) { setVal(String(t.entry_price ?? "")); setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/trades/edit-entry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_id: t.trade_id, entry_price: p }),
+      });
+      if (res.ok) {
+        setFlash("ok");
+        setTimeout(() => { setFlash(null); setEditing(false); onSaved(); }, 600);
+      } else { setFlash("err"); setTimeout(() => setFlash(null), 1000); setVal(String(t.entry_price ?? "")); }
+    } catch { setFlash("err"); setTimeout(() => setFlash(null), 1000); setVal(String(t.entry_price ?? "")); }
+    setSaving(false);
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <span className="text-muted-foreground">Entry</span><br />
+        <input
+          autoFocus
+          type="text"
+          inputMode="decimal"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setVal(String(t.entry_price ?? "")); setEditing(false); } }}
+          onBlur={save}
+          className={cn(
+            "font-mono text-[10px] w-20 px-1 py-0.5 bg-transparent border rounded outline-none",
+            flash === "ok" ? "border-[var(--neon-green)]" : flash === "err" ? "border-[var(--neon-red)]" : "border-[var(--neon-cyan)]",
+            saving && "opacity-50"
+          )}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="group cursor-pointer" onClick={() => { setVal(String(t.entry_price ?? "")); setEditing(true); }}>
+      <span className="text-muted-foreground">Entry</span><br />
+      <span className={cn("font-mono", flash === "ok" && "text-[var(--neon-green)]")}>
+        ${(t.entry_price as number)?.toFixed(2)}
+      </span>
+      <Pencil className="h-2 w-2 inline ml-0.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
+    </div>
+  );
+}
+
 function ActiveTradesTab({
   trades,
   loading,
@@ -410,10 +468,7 @@ function ActiveTradesTab({
 
             {/* Price Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
-              <div>
-                <span className="text-muted-foreground">Entry</span><br />
-                <span className="font-mono">${t.entry_price?.toFixed(2)}</span>
-              </div>
+              <EditableEntry trade={t} onSaved={onRefresh} />
               <div>
                 <span className="text-muted-foreground">Current</span><br />
                 <span className="font-mono">{t.current_price != null ? `$${t.current_price.toFixed(2)}` : "-"}</span>
