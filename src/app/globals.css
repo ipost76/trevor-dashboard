@@ -114,6 +114,11 @@
   body { @apply bg-background text-foreground; font-family: var(--font-mono); }
 }
 
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 body {
   min-height: 100vh;
   background-color: var(--background);

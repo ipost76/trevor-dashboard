@@ -39,16 +39,15 @@ def get_data():
         if loss_pnls and sum(loss_pnls) != 0 else None,
     }
 
-    # Calibration
+    # Calibration — use active_trades (has confidence + pnl_pct for closed trades)
     cal_rows = conn.execute("""
-        SELECT ti.confidence, to2.pnl_pct
-        FROM trade_outcomes to2
-        JOIN trade_insights ti ON to2.insight_id = ti.id
-        WHERE ti.confidence IS NOT NULL AND to2.pnl_pct IS NOT NULL
+        SELECT confidence, pnl_pct
+        FROM active_trades
+        WHERE status = 'closed' AND confidence IS NOT NULL AND pnl_pct IS NOT NULL
     """).fetchall()
 
     buckets = {}
-    for label in ["50-60", "60-70", "70-80", "80-90", "90+"]:
+    for label in ["<35", "35-45", "45-55", "55-65", "65-75", "75+"]:
         buckets[label] = {"trades": 0, "wins": 0}
 
     for r in cal_rows:
@@ -57,17 +56,16 @@ def get_data():
             conf *= 100
         is_win = (r['pnl_pct'] or 0) > 0
 
-        bucket = None
-        if 50 <= conf < 60: bucket = "50-60"
-        elif 60 <= conf < 70: bucket = "60-70"
-        elif 70 <= conf < 80: bucket = "70-80"
-        elif 80 <= conf < 90: bucket = "80-90"
-        elif conf >= 90: bucket = "90+"
+        if conf < 35: bucket = "<35"
+        elif conf < 45: bucket = "35-45"
+        elif conf < 55: bucket = "45-55"
+        elif conf < 65: bucket = "55-65"
+        elif conf < 75: bucket = "65-75"
+        else: bucket = "75+"
 
-        if bucket:
-            buckets[bucket]["trades"] += 1
-            if is_win:
-                buckets[bucket]["wins"] += 1
+        buckets[bucket]["trades"] += 1
+        if is_win:
+            buckets[bucket]["wins"] += 1
 
     for data in buckets.values():
         data["winRate"] = round(data["wins"] / data["trades"] * 100, 1) if data["trades"] > 0 else None
@@ -80,7 +78,7 @@ def get_data():
 
     ticker_map = {}
     for t in ticker_rows:
-        sym = t['ticker'] or 'UNKNOWN'
+        sym = (t['ticker'] or 'UNKNOWN').replace('-PERP', '').replace('/USD', '')
         if sym not in ticker_map:
             ticker_map[sym] = {"trades": 0, "wins": 0, "pnl": 0.0}
         ticker_map[sym]["trades"] += 1
