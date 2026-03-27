@@ -153,3 +153,36 @@ sudo systemctl restart trevor-dashboard
 
 ### Git
 - `0c1b8a7` — Hub v3.2: Training page rebuild + Watchlist revamp (3 files, 711 ins, 292 del)
+
+## Hub Mobile Layout + Feature Fixes (2026-03-27)
+
+### Mobile Layout Root Cause (commits aaf86e1, fe99f4c)
+- globals.css: max-width 100vw -> 100%, overflow-x hidden -> overflow hidden + height 100%
+- app-shell.tsx: Added 100dvh with vh fallback for dynamic viewport height
+- sidebar.tsx: md: prefix on border-r and transition (defensive)
+- signals/page.tsx: Column header responsive -- Tier/Regime/R:R hidden on mobile (was 528px)
+- history-table.tsx: Filter row flex-wrap, delete modal w-full max-w-sm (was w-80)
+- trade-form.tsx: Modal w-full max-w-md (was w-96)
+- trades/page.tsx: min-w-0 on tab bar flex wrapper (5 tabs forced page to ~405px), overflow-x-hidden
+- dashboard-view.tsx: All 7 stats in 4-col grid, compact panels (AutoTrader 100px, Chat 80px)
+
+### Signals Page Redesign (commit a6df52b)
+- Merged Feed+Quality tabs into single unified summary view, no individual signal list
+- API: /api/signals?scope=summary returns pre-aggregated GROUP BY data + quality metrics
+- Sections: summary cards, quality metrics, ticker breakdown, charts (direction trend, confidence dist, cumulative P&L)
+
+### Training Page Redesign (commit a6df52b)
+- Expanded from 4 stats to full informational view
+- Added: educational section, regime/direction/timeframe breakdowns, top tickers, storage breakdown
+- API: byDirection + byRegime queries added to query_training.py, timeout 60s->90s
+
+### P&L Double-Leverage Fix (commit a7bc192)
+- Bug: query_trades.py line 106 multiplied already-leveraged pnl_pct by leverage again
+- DB stores correct values; only Hub API was doubling
+- Fix: leveraged_pnl_pct = round(pnl_pct, 2) -- no extra multiplication
+
+### Git (2026-03-27)
+- aaf86e1 -- fix: mobile layout root cause
+- fe99f4c -- fix: trades page horizontal shift + dashboard vertical scroll
+- a6df52b -- feat: redesign Signals + Training pages
+- a7bc192 -- fix: P&L double-leverage
