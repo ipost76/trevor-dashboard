@@ -101,6 +101,20 @@ def main():
         except:
             result["distinctTickers"] = 0
 
+        # By direction
+        try:
+            rows = conn.execute("SELECT direction, COUNT(*) as ct, SUM(CASE WHEN outcome_result='WIN' THEN 1 ELSE 0 END) as wins FROM training_trades GROUP BY direction").fetchall()
+            result["byDirection"] = [{"direction": r[0] or "UNKNOWN", "count": r[1], "wins": int(r[2] or 0), "winRate": round(int(r[2] or 0)*100.0/r[1], 1) if r[1] > 0 else 0} for r in rows]
+        except:
+            result["byDirection"] = []
+
+        # By regime
+        try:
+            rows = conn.execute("SELECT regime_trend, COUNT(*) as ct, SUM(CASE WHEN outcome_result='WIN' THEN 1 ELSE 0 END) as wins FROM training_trades WHERE regime_trend IS NOT NULL AND regime_trend != '' GROUP BY regime_trend ORDER BY ct DESC LIMIT 10").fetchall()
+            result["byRegime"] = [{"regime": r[0], "count": r[1], "wins": int(r[2] or 0), "winRate": round(int(r[2] or 0)*100.0/r[1], 1) if r[1] > 0 else 0} for r in rows]
+        except:
+            result["byRegime"] = []
+
         conn.close()
 
         # ChromaDB

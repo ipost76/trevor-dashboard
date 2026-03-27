@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
         `${pythonPath} ${scriptPath} summary`,
         {
           encoding: "utf-8",
-          timeout: 60000,
+          timeout: 90000,
           cwd: trevorDir,
           env: { ...process.env, HOME: "/home/trevor" },
         }
