@@ -103,7 +103,7 @@ def main():
             for r in rows:
                 d = dict(r)
                 d["outcome"] = "WIN" if (d.get("pnl_pct") or 0) > 0 else "LOSS"
-                d["leveraged_pnl_pct"] = round((d.get("pnl_pct") or 0) * (d.get("leverage") or 1), 2)
+                d["leveraged_pnl_pct"] = round(d.get("pnl_pct") or 0, 2)
                 records.append(d)
         except Exception as e:
             total = 0
