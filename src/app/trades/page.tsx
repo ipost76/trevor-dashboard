@@ -17,6 +17,7 @@ import {
   Shield,
   Target,
   Pencil,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
@@ -632,6 +633,9 @@ export default function TradesPage() {
   const [allSignals, setAllSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [tradeFormOpen, setTradeFormOpen] = useState(false);
+  const [capital, setCapital] = useState<number | null>(null);
+  const [editingCapital, setEditingCapital] = useState(false);
+  const [capitalInput, setCapitalInput] = useState("");
 
   const fetchActiveAndSignals = useCallback(async () => {
     const [activeData, liveData] = await Promise.all([
@@ -645,9 +649,27 @@ export default function TradesPage() {
 
   useEffect(() => {
     fetchActiveAndSignals();
+    safeFetch<{ capital?: number }>("/api/capital", {}).then((d) => {
+      if (d.capital !== undefined) setCapital(d.capital);
+    });
     const interval = setInterval(fetchActiveAndSignals, 15000);
     return () => clearInterval(interval);
   }, [fetchActiveAndSignals]);
+
+  const saveCapital = async () => {
+    const val = parseFloat(capitalInput);
+    if (isNaN(val) || val < 0) return;
+    try {
+      const res = await fetch("/api/capital", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ capital: val }),
+      });
+      const data = await res.json();
+      if (data.capital !== undefined) setCapital(data.capital);
+    } catch {}
+    setEditingCapital(false);
+  };
 
   const scalpSignals = allSignals.filter(isScalpSignal);
   const ltSignals = allSignals.filter((s) => !isScalpSignal(s));
@@ -659,7 +681,39 @@ export default function TradesPage() {
   return (
     <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
       <div className="panel h-full flex flex-col">
-        {/* Tab Bar + Actions */}
+        {/* Capital + Tab Bar + Actions */}
+        {capital !== null && (
+          <div className="flex items-center gap-2 px-3 py-1 border-b border-[var(--border)]">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Capital</span>
+            {editingCapital ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input-terminal w-20 text-[11px] px-1.5 py-0.5"
+                  value={capitalInput}
+                  onChange={(e) => setCapitalInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveCapital(); if (e.key === "Escape") setEditingCapital(false); }}
+                  autoFocus
+                />
+                <button onClick={saveCapital} className="text-[var(--neon-green)] hover:brightness-125 transition-colors">
+                  <Check className="h-3 w-3" />
+                </button>
+                <button onClick={() => setEditingCapital(false)} className="text-muted-foreground hover:text-[var(--neon-red)] transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setCapitalInput(String(capital)); setEditingCapital(true); }}
+                className="flex items-center gap-1 text-[11px] text-[var(--neon-green)] hover:brightness-125 transition-colors"
+              >
+                ${capital.toFixed(2)}
+                <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+        )}
         <div className="flex items-center">
           <div className="flex-1 min-w-0">
             <TabBar tabs={TABS} active={tab} onChange={setTab} />
