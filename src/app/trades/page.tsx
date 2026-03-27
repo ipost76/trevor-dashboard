@@ -477,7 +477,7 @@ function ActiveTradesTab({
           : null;
 
         return (
-          <div key={tradeId} className={cn("panel p-3", exitCond && (t.last_exit_severity ?? 0) >= 7 ? "border border-[rgba(255,51,102,0.3)]" : "glow-border")}>
+          <div key={tradeId} className={cn("panel p-3 overflow-hidden max-w-full", exitCond && (t.last_exit_severity ?? 0) >= 7 ? "border border-[rgba(255,51,102,0.3)]" : "glow-border")}>
             {/* Header */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -554,7 +554,7 @@ function ActiveTradesTab({
 
             {/* Action Buttons */}
             {t.trade_id && !isActive && (
-              <div className="mt-2 flex items-center gap-1.5">
+              <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                 <button onClick={() => { setActionId(tradeId); setActionType("close"); resetAction(); setActionId(tradeId); setActionType("close"); }}
                   className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.1)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.2)] transition-colors">
                   <X className="h-3 w-3" /> Close

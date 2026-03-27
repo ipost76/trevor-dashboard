@@ -177,11 +177,11 @@ export function DashboardView() {
         </div>
       </div>
 
-      {/* ── Main Grid (2×2) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 stagger-cards dashboard-grid" style={{ gridTemplateRows: "1fr 1fr" }}>
+      {/* ── Main Grid (2×2 desktop, stack mobile) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 flex-1 min-h-0 overflow-auto stagger-cards dashboard-grid">
 
         {/* ── TOP-LEFT: Signals & Quality ── */}
-        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-2 lg:order-1">
+        <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-2 lg:order-1 max-h-[200px] md:max-h-none">
           <div className="panel-header flex items-center gap-1.5">
             <Zap className="h-3 w-3" />
             <span>SIGNALS & QUALITY</span>
@@ -220,7 +220,7 @@ export function DashboardView() {
         </Link>
 
         {/* ── TOP-RIGHT: Active Trades ── */}
-        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-1 lg:order-2">
+        <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors order-1 lg:order-2 max-h-[220px] md:max-h-none">
           <div className="panel-header flex items-center gap-1.5">
             <Activity className="h-3 w-3" />
             <span>ACTIVE TRADES</span>
