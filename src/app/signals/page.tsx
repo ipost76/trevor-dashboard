@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { TabBar, type TabDef } from "@/components/ui/tab-bar";
 import { EmptyState } from "@/components/ui/empty-state";
+import { StyledBarChart } from "@/components/charts/StyledBarChart";
+import { StyledLineChart } from "@/components/charts/StyledLineChart";
 
 type Breakdown = { momentum: number; trend: number; volume: number; volatility: number; microstructure: number };
 type Signal = {
@@ -145,6 +147,7 @@ export default function SignalsPage() {
   const [overall, setOverall] = useState<Overall | null>(null);
   const [calibration, setCalibration] = useState<Record<string, CalBucket>>({});
   const [tickers, setTickers] = useState<TickerPerf[]>([]);
+  const [dailyPnl, setDailyPnl] = useState<Array<{ date: string; pnl: number; cumulative: number; trades: number }>>([]);
   const [sortKey, setSortKey] = useState<"trades" | "winRate" | "totalPnl">("trades");
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -162,6 +165,8 @@ export default function SignalsPage() {
       setOverall(raw.overall || null);
       setCalibration(raw.calibration || {});
       setTickers(raw.tickerPerformance || []);
+      const pnlData = await safeFetch<Array<{ date: string; pnl: number; cumulative: number; trades: number }>>("/api/stats/daily-pnl", []);
+      setDailyPnl(pnlData);
     }
     setLoading(false);
   }, []);
@@ -361,6 +366,38 @@ export default function SignalsPage() {
                       </table>
                     </div>
                   </div>
+                </div>
+
+                {/* Charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+                  {/* Ticker Performance Chart */}
+                  {sortedTickers.length > 0 && (
+                    <div className="panel p-3">
+                      <div className="panel-header mb-2">P&L BY TICKER</div>
+                      <StyledBarChart
+                        data={sortedTickers.map(t => ({ name: t.symbol, pnl: t.totalPnl }))}
+                        dataKey="pnl"
+                        nameKey="name"
+                        height={180}
+                        colorByValue
+                      />
+                    </div>
+                  )}
+
+                  {/* Cumulative P&L Over Time */}
+                  {dailyPnl.length > 0 && (
+                    <div className="panel p-3">
+                      <div className="panel-header mb-2">CUMULATIVE P&L</div>
+                      <StyledLineChart
+                        data={dailyPnl.map(d => ({ date: d.date?.slice(5) || "", cumulative: d.cumulative }))}
+                        lines={[{ dataKey: "cumulative", color: "#00ff88", name: "Cum P&L %" }]}
+                        xKey="date"
+                        height={180}
+                        showArea
+                        referenceLine={0}
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             )}

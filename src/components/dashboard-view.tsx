@@ -83,6 +83,7 @@ function formatET(ts: string): string {
 
 export function DashboardView() {
   const [data, setData] = useState<DashboardData>(EMPTY);
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
@@ -127,6 +128,25 @@ export function DashboardView() {
     const i = setInterval(fetchDashboard, 30000);
     return () => clearInterval(i);
   }, [fetchDashboard]);
+
+  // Live prices for active trade cards
+  useEffect(() => {
+    if (!data.activeTrades.length) return;
+    const tickers = [...new Set(data.activeTrades.map(t => t.ticker?.replace("-PERP", "").replace("/USD", "")))].filter(Boolean).join(",");
+    if (!tickers) return;
+    const fp = async () => {
+      try {
+        const res = await fetch(`/api/prices?tickers=${tickers}`);
+        const d = await res.json();
+        const p: Record<string, number> = {};
+        for (const [k, v] of Object.entries(d.prices || {})) p[k] = (v as { price: number }).price;
+        setLivePrices(p);
+      } catch { /* ignore */ }
+    };
+    fp();
+    const iv = setInterval(fp, 30000);
+    return () => clearInterval(iv);
+  }, [data.activeTrades]);
 
   const sendChat = useCallback(async () => {
     const msg = chatInput.trim();
@@ -233,7 +253,15 @@ export function DashboardView() {
             {data.activeTrades.length > 0 ? (
               <div className="space-y-1.5">
                 {data.activeTrades.slice(0, 6).map((t, i) => {
-                  const pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
+                  const tk = t.ticker?.replace("-PERP", "").replace("/USD", "") || "";
+                  const lp = livePrices[tk] || t.current_price;
+                  let pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
+                  if (lp && t.entry_price && t.entry_price > 0) {
+                    const raw = t.direction?.toUpperCase() === "SHORT"
+                      ? ((t.entry_price - lp) / t.entry_price) * 100
+                      : ((lp - t.entry_price) / t.entry_price) * 100;
+                    pnl = raw * (t.leverage || 1);
+                  }
                   return (
                     <div key={i} className="panel p-2">
                       <div className="flex items-center justify-between mb-0.5">
@@ -248,7 +276,7 @@ export function DashboardView() {
                       </div>
                       <div className="flex gap-3 text-[9px] text-muted-foreground">
                         <span>Entry: ${t.entry_price?.toFixed(2)}</span>
-                        {t.current_price && <span>Now: ${t.current_price.toFixed(2)}</span>}
+                        {lp ? <span>Now: ${lp.toFixed(lp < 1 ? 4 : 2)}</span> : t.current_price ? <span>Now: ${t.current_price.toFixed(2)}</span> : null}
                       </div>
                     </div>
                   );

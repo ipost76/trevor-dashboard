@@ -8,7 +8,7 @@ import {
   Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList, Zap,
   MoreHorizontal, X, Bell,
 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 type NavItem = { label: string; icon: React.ComponentType<{ className?: string }>; href: string; group?: string };
 
@@ -36,6 +36,28 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [signalBadge, setSignalBadge] = useState(0);
+
+  // Poll for unread signal count
+  useEffect(() => {
+    const fetchBadge = async () => {
+      try {
+        const res = await fetch("/api/signals/unread-count");
+        const d = await res.json();
+        setSignalBadge(d.count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchBadge();
+    const iv = setInterval(fetchBadge, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Clear badge when visiting signals or trades page
+  useEffect(() => {
+    if (pathname === "/signals" || pathname === "/trades") {
+      setSignalBadge(0);
+    }
+  }, [pathname]);
 
   const isActiveMore = MORE_ITEMS.some(
     (item) => pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))
@@ -161,7 +183,12 @@ export function Sidebar() {
                 isActive ? "text-[var(--neon-cyan)]" : "text-muted-foreground"
               )}
             >
-              <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_rgba(0,240,255,0.6)]")} />
+              <span className="relative">
+                <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_rgba(0,240,255,0.6)]")} />
+                {signalBadge > 0 && (item.href === "/signals" || item.href === "/trades") && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-[#ff3366] text-white text-[8px] font-bold px-0.5">{signalBadge}</span>
+                )}
+              </span>
             </Link>
           );
         })}

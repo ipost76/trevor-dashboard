@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search } from "lucide-react";
+import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { ChangePasswordModal } from "@/components/change-password-modal";
@@ -11,6 +11,26 @@ export function Header() {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [time, setTime] = useState("");
+  const [oled, setOled] = useState(false);
+
+  // OLED mode: read from localStorage on mount
+  useEffect(() => {
+    const saved = typeof window !== "undefined" && localStorage.getItem("oled") === "true";
+    setOled(saved);
+    if (saved) document.documentElement.classList.add("oled");
+  }, []);
+
+  const toggleOled = () => {
+    const next = !oled;
+    setOled(next);
+    if (next) {
+      document.documentElement.classList.add("oled");
+      localStorage.setItem("oled", "true");
+    } else {
+      document.documentElement.classList.remove("oled");
+      localStorage.setItem("oled", "false");
+    }
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -84,6 +104,13 @@ export function Header() {
             title="Change password"
           >
             <KeyRound className="h-3 w-3" />
+          </button>
+          <button
+            onClick={toggleOled}
+            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
+            title={oled ? "Standard mode" : "OLED mode"}
+          >
+            {oled ? <Sun className="h-3.5 w-3.5 md:h-3 md:w-3" /> : <Moon className="h-3.5 w-3.5 md:h-3 md:w-3" />}
           </button>
           <button
             onClick={handleLogout}

@@ -84,7 +84,7 @@ export default function DevTasksPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 max-w-4xl mx-auto p-2 overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center gap-3">
         <ClipboardList className="h-6 w-6 text-zinc-400" />
