@@ -78,7 +78,7 @@ def get_data():
 
     ticker_map = {}
     for t in ticker_rows:
-        sym = (t['ticker'] or 'UNKNOWN').replace('-PERP', '').replace('/USD', '')
+        sym = (t['ticker'] or 'UNKNOWN').replace('-PERP', '').replace('/USD', '').upper()
         if sym not in ticker_map:
             ticker_map[sym] = {"trades": 0, "wins": 0, "pnl": 0.0}
         ticker_map[sym]["trades"] += 1

@@ -66,7 +66,7 @@ export function Sidebar() {
   // ── Desktop sidebar (unchanged) ──
   const DesktopSidebar = () => (
     <aside className={cn(
-      "hidden md:flex h-full flex-col border-r transition-[width] duration-200",
+      "hidden md:flex h-full flex-col md:border-r md:transition-[width] md:duration-200",
       "bg-[var(--sidebar)] border-[var(--sidebar-border)]",
       "w-0", // Mobile: zero width (hidden + w-0 = no flex space)
       collapsed ? "md:w-14" : "md:w-52"

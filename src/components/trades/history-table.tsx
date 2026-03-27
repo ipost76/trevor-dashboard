@@ -79,7 +79,7 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="panel p-4 w-80 space-y-3 border border-[var(--neon-red)] shadow-[0_0_20px_rgba(255,51,102,0.2)]">
+      <div className="panel p-4 w-full max-w-sm mx-4 space-y-3 border border-[var(--neon-red)] shadow-[0_0_20px_rgba(255,51,102,0.2)]">
         <div className="flex items-center gap-2 text-[var(--neon-red)]">
           <AlertTriangle className="h-4 w-4" />
           <span className="text-sm font-bold">Confirm Delete</span>
@@ -334,7 +334,7 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
       )}
 
       {/* Filters Row */}
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--panel-header)]">
+      <div className="flex flex-wrap items-center gap-1.5 md:gap-2 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--panel-header)]">
         <div className="flex items-center gap-1">
           <Search className="h-3 w-3 text-muted-foreground" />
           <input

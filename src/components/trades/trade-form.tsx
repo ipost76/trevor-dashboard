@@ -125,7 +125,7 @@ export function TradeForm({ open, onClose, onSave }: TradeFormProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="panel p-4 w-96 space-y-3 border border-[var(--neon-cyan)] shadow-[0_0_20px_rgba(0,240,255,0.15)]">
+      <div className="panel p-4 w-full max-w-md mx-4 space-y-3 border border-[var(--neon-cyan)] shadow-[0_0_20px_rgba(0,240,255,0.15)]">
         {/* Header */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold neon-text">MANUAL TRADE ENTRY</span>

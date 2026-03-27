@@ -185,16 +185,14 @@ export function DashboardView() {
     <div className="flex-1 overflow-hidden p-2 flex flex-col gap-1.5 md:gap-2">
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
-        <div className="flex items-center gap-5 px-3 py-1.5 flex-wrap stat-strip-mobile md:!flex-wrap">
+        <div className="grid grid-cols-4 gap-x-2 gap-y-1 px-2 py-1.5 md:flex md:items-center md:gap-5 md:px-3">
           <StatBlock label="P&L" value={`${data.totalPnl >= 0 ? "+" : ""}${data.totalPnl.toFixed(1)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
           <StatBlock label="W/L" value={`${data.wins}/${data.losses}`} sub={`${winPct}%`} />
+          <StatBlock label="Win Rate" value={`${winPct}%`} color={Number(winPct) >= 50 ? "neon-green" : "neon-red"} />
           <StatBlock label="Active" value={String(data.activeTrades.length)} color="neon-text" />
-          <span className="hidden md:contents">
-            <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
-            <StatBlock label="Signals" value={String(data.totalInsights)} />
-            <StatBlock label="Avg P&L" value={`${data.avgPnl >= 0 ? "+" : ""}${data.avgPnl.toFixed(2)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
-            <StatBlock label="Cost" value={`$${data.todayCost.toFixed(3)}`} />
-          </span>
+          <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
+          <StatBlock label="Signals" value={String(data.totalInsights)} />
+          <StatBlock label="Avg P&L" value={`${data.avgPnl >= 0 ? "+" : ""}${data.avgPnl.toFixed(2)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
         </div>
       </div>
 
@@ -275,7 +273,7 @@ export function DashboardView() {
                         </span>
                       </div>
                       <div className="flex gap-3 text-[9px] text-muted-foreground">
-                        <span>Entry: ${t.entry_price?.toFixed(2)}</span>
+                        <span>Entry: {t.entry_price ? `$${t.entry_price.toFixed(t.entry_price < 1 ? 4 : 2)}` : "—"}</span>
                         {lp ? <span>Now: ${lp.toFixed(lp < 1 ? 4 : 2)}</span> : t.current_price ? <span>Now: ${t.current_price.toFixed(2)}</span> : null}
                       </div>
                     </div>

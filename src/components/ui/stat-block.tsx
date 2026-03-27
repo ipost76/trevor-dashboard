@@ -12,10 +12,10 @@ export function StatBlock({
   color?: string;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5 min-w-0">
       <div className="stat-label">{label}</div>
-      <div className={cn("stat-value", color || "text-foreground")}>{value}</div>
-      {sub && <div className="text-[9px] text-muted-foreground">{sub}</div>}
+      <div className={cn("stat-value text-sm md:text-xl", color || "text-foreground")}>{value}</div>
+      {sub && <div className="text-[9px] text-muted-foreground truncate">{sub}</div>}
     </div>
   );
 }

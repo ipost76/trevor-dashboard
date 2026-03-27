@@ -264,16 +264,16 @@ export default function SignalsPage() {
             )}
 
             {/* Column Headers */}
-            <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border)] text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
-              <span className="w-20">Ticker</span>
+            <div className="flex items-center gap-1.5 md:gap-2 px-2 py-1 border-b border-[var(--border)] text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
+              <span className="w-16 md:w-20">Ticker</span>
               <span className="w-14">Dir</span>
-              <span className="w-8">Tier</span>
-              <span className="w-16">Regime</span>
+              <span className="hidden md:inline w-8">Tier</span>
+              <span className="hidden md:inline w-16">Regime</span>
               <span className="flex-1" />
               <span className="w-10 text-right">Conf</span>
-              <span className="w-12 text-right">R:R</span>
-              <span className="w-10 text-center">Result</span>
-              <span className="w-16 text-right">Time</span>
+              <span className="hidden md:inline w-12 text-right">R:R</span>
+              <span className="w-6 md:w-10 text-center">Result</span>
+              <span className="w-10 md:w-16 text-right">Time</span>
               <span className="w-4" />
             </div>
 
