@@ -366,16 +366,13 @@ body::after {
     grid-template-rows: auto !important;
   }
 
-  /* Stat strip: horizontal scroll instead of awkward wrap */
+  /* Stat strip: wrap on mobile instead of horizontal scroll */
   .stat-strip-mobile {
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    gap: 12px !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
     padding: 6px 8px !important;
+    justify-content: center;
   }
-  .stat-strip-mobile::-webkit-scrollbar { display: none; }
 
   /* Brain editor: stack sidebar above content */
   .brain-editor-layout { flex-direction: column !important; }

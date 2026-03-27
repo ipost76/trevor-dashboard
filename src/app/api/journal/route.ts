@@ -25,25 +25,64 @@ function runInlinePython(
 
 export async function GET() {
   const script = `
-import os, json
+import sqlite3, json, os
 
-trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
-journal_dir = os.path.join(trevor_dir, "brain", "journal")
-os.makedirs(journal_dir, exist_ok=True)
+db = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
+conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+conn.row_factory = sqlite3.Row
+
+# Auto-generate daily journal from closed trades
+rows = conn.execute("""
+    SELECT date(closed_at) as trade_date,
+           COUNT(*) as trades,
+           SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
+           SUM(CASE WHEN pnl_pct <= 0 THEN 1 ELSE 0 END) as losses,
+           ROUND(SUM(pnl_pct), 2) as total_pnl,
+           ROUND(AVG(pnl_pct), 2) as avg_pnl,
+           MAX(pnl_pct) as best_pnl,
+           MIN(pnl_pct) as worst_pnl
+    FROM active_trades
+    WHERE status = 'closed' AND closed_at IS NOT NULL
+    GROUP BY date(closed_at)
+    ORDER BY date(closed_at) DESC
+""").fetchall()
 
 entries = []
-for f in sorted(os.listdir(journal_dir), reverse=True):
-    if f.endswith('.md'):
-        path = os.path.join(journal_dir, f)
-        with open(path, encoding='utf-8') as fh:
-            content = fh.read()
-        entries.append({
-            "filename": f,
-            "content": content,
-            "date": f.replace(".md", ""),
-            "size": len(content),
-        })
+for r in rows:
+    d = dict(r)
+    # Get individual trades for this day
+    day_trades = conn.execute("""
+        SELECT ticker, direction, pnl_pct, leverage, confidence
+        FROM active_trades
+        WHERE status='closed' AND date(closed_at) = ?
+        ORDER BY pnl_pct DESC
+    """, (d["trade_date"],)).fetchall()
 
+    best = day_trades[0] if day_trades else None
+    worst = day_trades[-1] if day_trades else None
+    trade_list = [f"{t['ticker']} {t['direction']} {(t['pnl_pct'] or 0):+.1f}%" for t in day_trades]
+
+    wr = round(d["wins"] / d["trades"] * 100) if d["trades"] else 0
+    content = f"**Trades closed:** {d['trades']} ({d['wins']}W / {d['losses']}L)\\n"
+    content += f"**Day P&L:** {d['total_pnl']:+.1f}% | Win Rate: {wr}%\\n"
+    if best:
+        content += f"**Best:** {best['ticker']} {best['direction']} {(best['pnl_pct'] or 0):+.1f}% ({best['leverage']}x)\\n"
+    if worst and worst != best:
+        content += f"**Worst:** {worst['ticker']} {worst['direction']} {(worst['pnl_pct'] or 0):+.1f}% ({worst['leverage']}x)\\n"
+    content += f"**All:** {', '.join(trade_list)}"
+
+    entries.append({
+        "date": d["trade_date"],
+        "filename": f"{d['trade_date']}.md",
+        "content": content,
+        "trades": d["trades"],
+        "wins": d["wins"],
+        "losses": d["losses"],
+        "total_pnl": d["total_pnl"],
+        "size": len(content),
+    })
+
+conn.close()
 print(json.dumps({"entries": entries}))
 `.trim();
 

@@ -166,14 +166,15 @@ export function DashboardView() {
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
         <div className="flex items-center gap-5 px-3 py-1.5 flex-wrap stat-strip-mobile md:!flex-wrap">
-          <StatBlock label="Total P&L" value={`${data.totalPnl >= 0 ? "+" : ""}${data.totalPnl.toFixed(1)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
-          <StatBlock label="W / L" value={`${data.wins}W ${data.losses}L`} sub={`${winPct}% win rate`} />
-          <StatBlock label="Win Rate" value={`${data.winRate.toFixed(0)}%`} color={data.winRate >= 55 ? "neon-green" : data.winRate < 45 ? "neon-red" : "neon-amber"} />
+          <StatBlock label="P&L" value={`${data.totalPnl >= 0 ? "+" : ""}${data.totalPnl.toFixed(1)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
+          <StatBlock label="W/L" value={`${data.wins}/${data.losses}`} sub={`${winPct}%`} />
           <StatBlock label="Active" value={String(data.activeTrades.length)} color="neon-text" />
-          <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
-          <StatBlock label="Signals" value={String(data.totalInsights)} />
-          <StatBlock label="Avg P&L" value={`${data.avgPnl >= 0 ? "+" : ""}${data.avgPnl.toFixed(2)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
-          <StatBlock label="Cost Today" value={`$${data.todayCost.toFixed(3)}`} sub="/ $0.250" />
+          <span className="hidden md:contents">
+            <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
+            <StatBlock label="Signals" value={String(data.totalInsights)} />
+            <StatBlock label="Avg P&L" value={`${data.avgPnl >= 0 ? "+" : ""}${data.avgPnl.toFixed(2)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
+            <StatBlock label="Cost" value={`$${data.todayCost.toFixed(3)}`} />
+          </span>
         </div>
       </div>
 

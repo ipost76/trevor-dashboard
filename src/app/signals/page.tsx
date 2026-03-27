@@ -89,21 +89,21 @@ function SignalCard({ s, expanded, onToggle }: { s: Signal; expanded: boolean; o
 
   return (
     <div className="border-b border-[var(--border)] hover:bg-[rgba(0,240,255,0.03)] transition-colors">
-      <div className="flex items-center gap-2 data-cell cursor-pointer" onClick={onToggle}>
-        <span className="w-20 font-bold text-foreground truncate">{s.ticker}</span>
-        <span className="w-14"><span className={isLong ? "badge-long" : "badge-short"}>{isLong ? "LONG" : "SHORT"}</span></span>
-        {s.quality_tier && <span className={cn("text-[9px] font-bold px-1 rounded", tierColor)}>{s.quality_tier}</span>}
-        {s.regime && <span className="text-[8px] px-1 rounded bg-[var(--muted)] text-muted-foreground">{s.regime}</span>}
-        <span className="flex-1" />
-        <span className={cn("w-10 text-right font-bold", s.confidence >= 70 ? "neon-green" : s.confidence >= 50 ? "neon-amber" : "neon-red")}>{s.confidence}</span>
-        <span className="w-12 text-right text-[10px] text-muted-foreground">{rr}:1</span>
-        <span className="w-10 flex justify-center">
+      <div className="flex items-center gap-1.5 md:gap-2 data-cell cursor-pointer min-w-0" onClick={onToggle}>
+        <span className="w-16 md:w-20 font-bold text-foreground truncate shrink-0">{s.ticker}</span>
+        <span className="shrink-0"><span className={isLong ? "badge-long" : "badge-short"}>{isLong ? "L" : "S"}</span></span>
+        <span className="hidden md:inline shrink-0">{s.quality_tier && <span className={cn("text-[9px] font-bold px-1 rounded", tierColor)}>{s.quality_tier}</span>}</span>
+        <span className="hidden md:inline shrink-0">{s.regime && <span className="text-[8px] px-1 rounded bg-[var(--muted)] text-muted-foreground">{s.regime}</span>}</span>
+        <span className="flex-1 min-w-0" />
+        <span className={cn("shrink-0 font-bold", s.confidence >= 70 ? "neon-green" : s.confidence >= 50 ? "neon-amber" : "neon-red")}>{s.confidence}</span>
+        <span className="hidden md:inline w-12 text-right text-[10px] text-muted-foreground shrink-0">{rr}:1</span>
+        <span className="w-6 md:w-10 flex justify-center shrink-0">
           {s.outcome === "win" && <CheckCircle className="h-3.5 w-3.5 text-[var(--neon-green)]" />}
           {s.outcome === "loss" && <XCircle className="h-3.5 w-3.5 text-[var(--neon-red)]" />}
           {!s.outcome && <Clock className="h-3.5 w-3.5 text-muted-foreground" />}
         </span>
-        <span className="w-16 text-right text-[10px] text-muted-foreground" title={absTime}>{time}</span>
-        {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+        <span className="w-10 md:w-16 text-right text-[10px] text-muted-foreground shrink-0" title={absTime}>{time}</span>
+        {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
       </div>
       {expanded && (
         <div className="px-4 pb-3 pt-1 space-y-2">

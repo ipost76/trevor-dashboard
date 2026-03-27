@@ -78,29 +78,34 @@ def main():
         offset = int(sys.argv[3]) if len(sys.argv) > 3 else 0
         filters = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
 
-        conditions = ["1=1"]
+        conditions = ["status = 'closed'"]
         if filters.get("ticker"):
-            conditions.append(f"ticker='{filters['ticker']}'")
+            conditions.append(f"ticker LIKE '%{filters['ticker']}%'")
         if filters.get("outcome"):
-            conditions.append(f"outcome='{filters['outcome']}'")
+            if filters["outcome"] == "WIN":
+                conditions.append("pnl_pct > 0")
+            elif filters["outcome"] == "LOSS":
+                conditions.append("pnl_pct <= 0")
         if filters.get("direction"):
             conditions.append(f"direction='{filters['direction']}'")
-        if filters.get("search"):
-            s = filters["search"].replace("'", "''")
-            conditions.append(f"(ticker LIKE '%{s}%' OR notes LIKE '%{s}%')")
 
         where = " AND ".join(conditions)
 
         try:
-            total = conn.execute(f"SELECT COUNT(*) FROM trade_outcomes WHERE {where}").fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) FROM active_trades WHERE {where}").fetchone()[0]
             rows = conn.execute(f"""
-                SELECT ticker, direction, entry_price, exit_price, pnl_pct,
-                       leverage, outcome, trade_type, timestamp, notes, mode
-                FROM trade_outcomes WHERE {where}
-                ORDER BY timestamp DESC LIMIT {limit} OFFSET {offset}
+                SELECT trade_id, ticker, direction, entry_price, exit_price, pnl_pct,
+                       leverage, confidence, opened_at as created_at, closed_at, track
+                FROM active_trades WHERE {where}
+                ORDER BY closed_at DESC LIMIT {limit} OFFSET {offset}
             """).fetchall()
-            records = [dict(r) for r in rows]
-        except Exception:
+            records = []
+            for r in rows:
+                d = dict(r)
+                d["outcome"] = "WIN" if (d.get("pnl_pct") or 0) > 0 else "LOSS"
+                d["leveraged_pnl_pct"] = round((d.get("pnl_pct") or 0) * (d.get("leverage") or 1), 2)
+                records.append(d)
+        except Exception as e:
             total = 0
             records = []
 
