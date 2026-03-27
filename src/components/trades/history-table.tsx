@@ -18,6 +18,7 @@ import { DirectionBadge } from "@/components/ui/direction-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TableRowSkeleton } from "@/components/ui/skeleton";
+import { StyledLineChart } from "@/components/charts/StyledLineChart";
 
 /* ── Types ── */
 
@@ -134,7 +135,7 @@ function StatusDropdown({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as TrainingStatus)}
-      className="input-terminal text-[9px] px-1 py-0.5 w-[76px] appearance-none cursor-pointer"
+      className="input-terminal text-[9px] px-1 py-0.5 w-16 appearance-none cursor-pointer"
     >
       <option value="KEEP">KEEP</option>
       <option value="EXCLUDE">EXCLUDE</option>
@@ -164,6 +165,23 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
     ids: number[];
     show: boolean;
   }>({ ids: [], show: false });
+  const [pnlChart, setPnlChart] = useState<Array<{ date: string; cumulative: number }>>([]);
+
+  // Fetch cumulative P&L for chart
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/stats/daily-pnl");
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setPnlChart(data.map((d: Record<string, unknown>) => ({
+            date: String(d.date || "").slice(5),
+            cumulative: Number(d.cumulative) || 0,
+          })));
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -300,6 +318,21 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Cumulative P&L Chart */}
+      {pnlChart.length > 1 && (
+        <div className="px-2 pt-2 pb-1 border-b border-[var(--border)]">
+          <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1 px-1">Cumulative P&L</div>
+          <StyledLineChart
+            data={pnlChart}
+            lines={[{ dataKey: "cumulative", color: "#00ff88", name: "P&L %" }]}
+            xKey="date"
+            height={120}
+            showArea
+            referenceLine={0}
+          />
+        </div>
+      )}
+
       {/* Filters Row */}
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--panel-header)]">
         <div className="flex items-center gap-1">
@@ -363,8 +396,40 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
         </div>
       )}
 
-      {/* Table Header */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)] text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
+      {/* Mobile Card View */}
+      <div className="md:hidden flex-1 overflow-auto p-2 space-y-2">
+        {loading ? (
+          <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <TableRowSkeleton key={i} cols={3} />)}</div>
+        ) : records.length === 0 ? (
+          <EmptyState icon={Database} message="No trade records found" sub="Adjust filters or wait for trades to close" />
+        ) : (
+          records.map((r) => {
+            const pnl = r.leveraged_pnl_pct ?? r.pnl_pct ?? 0;
+            const date = r.created_at ? new Date(r.created_at + (r.created_at.includes("Z") ? "" : "Z")).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : "";
+            return (
+              <div key={r.id} className={cn("panel p-2.5 border-l-2", pnl > 0 ? "border-l-[var(--neon-green)]" : "border-l-[var(--neon-red)]")}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold">{r.ticker}</span>
+                    <DirectionBadge dir={r.direction} />
+                    {(r.leverage ?? 1) > 1 && <span className="text-[9px] neon-amber">{r.leverage}x</span>}
+                  </div>
+                  <span className={cn("text-[12px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>{pnl > 0 ? "+" : ""}{pnl.toFixed(1)}%</span>
+                </div>
+                <div className="flex gap-3 text-[9px] text-muted-foreground">
+                  <span>Entry: ${r.entry_price?.toFixed(r.entry_price < 1 ? 4 : 2)}</span>
+                  <span>Exit: ${r.exit_price?.toFixed(r.exit_price < 1 ? 4 : 2)}</span>
+                  {r.confidence != null && <span>Conf: {r.confidence}</span>}
+                  {date && <span>{date}</span>}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Desktop Table Header */}
+      <div className="hidden md:flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)] text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
         <span className="w-6 flex justify-center">
           <input
             type="checkbox"
@@ -379,12 +444,12 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
         <span className="w-8 text-right">Lev</span>
         <span className="w-14 text-right">Conf</span>
         <span className="flex-1 min-w-0">Annotation</span>
-        <span className="w-[76px]">Status</span>
+        <span className="w-16">Status</span>
         <span className="w-14 text-right">Actions</span>
       </div>
 
-      {/* Table Body */}
-      <div className="flex-1 overflow-auto">
+      {/* Desktop Table Body */}
+      <div className="hidden md:block flex-1 overflow-auto">
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -496,7 +561,7 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
                 </span>
 
                 {/* Training Status */}
-                <span className="w-[76px]">
+                <span className="w-16">
                   <span
                     className={cn(
                       "text-[8px] px-1.5 py-0.5 rounded border font-bold uppercase tracking-wider inline-block w-full text-center",

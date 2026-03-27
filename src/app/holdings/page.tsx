@@ -108,7 +108,7 @@ export default function HoldingsPage() {
   const [removeConfirm, setRemoveConfirm] = useState<number | null>(null);
 
   const fetchAll = useCallback(async () => {
-    const [pRes, aRes, wRes] = await Promise.all([
+    const [pRes, aRes, wRes, tRes] = await Promise.all([
       safeFetch<{ positions?: Position[] }>("/api/portfolio", { positions: [] }),
       safeFetch<Analytics>("/api/portfolio/analytics", {
         categories: [],
@@ -118,8 +118,22 @@ export default function HoldingsPage() {
         totals: { total: 0, open: 0, closed: 0, winners: 0, losers: 0, breakeven: 0, win_rate: 0 },
       }),
       safeFetch<{ watchlist?: WatchItem[]; items?: WatchItem[] }>("/api/watchlist", {}),
+      safeFetch<{ trades?: Array<Record<string, unknown>> }>("/api/trades?scope=active", { trades: [] }),
     ]);
-    setPositions(pRes.positions || []);
+    // Bridge: merge active trades into positions if portfolio is empty
+    const portfolioPositions = pRes.positions || [];
+    const activeTrades = (tRes.trades || []).map((t, i) => ({
+      id: 90000 + i,
+      ticker: String(t.ticker || ""),
+      direction: String(t.direction || "LONG"),
+      entry_price: Number(t.entry_price) || 0,
+      quantity: 1,
+      leverage: Number(t.leverage) || 1,
+      asset_type: "crypto_perp",
+      status: "open",
+      created_at: String(t.opened_at || ""),
+    })) as Position[];
+    setPositions(portfolioPositions.length > 0 ? portfolioPositions : activeTrades);
     setAnalytics(aRes);
     setWatchlist(wRes.watchlist || wRes.items || []);
     setLoading(false);
