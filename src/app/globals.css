@@ -84,6 +84,18 @@
   --glow-red: 0 0 20px rgba(255, 51, 102, 0.15);
 }
 
+/* OLED True Dark Mode — #000 backgrounds for battery savings */
+html.oled {
+  --background: #000000;
+  --card: #050505;
+  --muted: #0a0a0a;
+  --accent: #0a0a0a;
+  --sidebar: #000000;
+  --panel-header: #050505;
+  --glass-bg: rgba(0, 0, 0, 0.9);
+  --input: rgba(0, 240, 255, 0.05);
+}
+
 .dark {
   --background: #0a0a0f;
   --foreground: #e0e0e8;

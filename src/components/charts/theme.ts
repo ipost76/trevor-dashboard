@@ -1,0 +1,16 @@
+export const CHART_COLORS = {
+  green: "#00ff88",
+  greenDim: "#007a40",
+  greenGhost: "rgba(0,255,136,0.15)",
+  red: "#ff3366",
+  redDim: "rgba(255,51,102,0.15)",
+  amber: "#ffaa00",
+  cyan: "#00f0ff",
+  blue: "#00aaff",
+  text: "#e0e0e8",
+  textMuted: "#888899",
+  grid: "rgba(0,240,255,0.06)",
+  background: "#0a0a0f",
+  tooltip: "#12121a",
+  border: "rgba(0,240,255,0.12)",
+};
