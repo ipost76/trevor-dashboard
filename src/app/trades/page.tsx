@@ -657,11 +657,11 @@ export default function TradesPage() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-2">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden p-2">
       <div className="panel h-full flex flex-col">
         {/* Tab Bar + Actions */}
         <div className="flex items-center">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <TabBar tabs={TABS} active={tab} onChange={setTab} />
           </div>
           {tab === "history" && (

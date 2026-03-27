@@ -287,12 +287,12 @@ export function DashboardView() {
         </Link>
 
         {/* ── BOTTOM-LEFT: AutoTrader ── */}
-        <div className="order-3 flex flex-col min-h-0 max-h-[120px] md:max-h-none overflow-hidden">
+        <div className="order-3 flex flex-col min-h-0 max-h-[100px] md:max-h-none overflow-hidden">
           <AutoTraderPanel data={data.auto} />
         </div>
 
         {/* ── BOTTOM-RIGHT: Chat ── */}
-        <div className="panel flex flex-col overflow-hidden order-4 max-h-[120px] md:max-h-none">
+        <div className="panel flex flex-col overflow-hidden order-4 max-h-[80px] md:max-h-none">
           <div className="panel-header flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Send className="h-3 w-3" />

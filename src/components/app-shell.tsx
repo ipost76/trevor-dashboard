@@ -12,7 +12,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="relative z-10 flex h-screen overflow-hidden bg-background text-foreground">
+    <div className="relative z-10 flex h-screen supports-[height:100dvh]:h-[100dvh] overflow-hidden bg-background text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden w-full">
         <Header />

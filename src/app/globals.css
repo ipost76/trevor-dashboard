@@ -127,8 +127,9 @@ html.oled {
 }
 
 html, body {
-  overflow-x: clip;
+  overflow: hidden;
   max-width: 100%;
+  height: 100%;
 }
 
 body {
