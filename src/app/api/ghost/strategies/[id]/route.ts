@@ -11,6 +11,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
 }
 export async function DELETE(_r: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { const { id } = await params; return NextResponse.json(ghostJson("trades", "delete", id)); }
+  try { const { id } = await params; return NextResponse.json(ghostJson("strategies", "delete", id)); }
   catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
 }
