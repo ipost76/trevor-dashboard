@@ -63,8 +63,7 @@ const TOOLBAR_KEYS = [
   { label: "\u2193", seq: "\x1b[B", w: 36 },
   { label: "\u2190", seq: "\x1b[D", w: 36 },
   { label: "\u2192", seq: "\x1b[C", w: 36 },
-  { label: "PgUp", seq: "__pgup__", w: 44 },
-  { label: "PgDn", seq: "__pgdn__", w: 44 },
+  { label: "Scroll", seq: "__scroll__", w: 52 },
   { label: "|", seq: "|", w: 36 },
   { label: "/", seq: "/", w: 36 },
   { label: "~", seq: "~", w: 36 },
@@ -84,6 +83,7 @@ export function TerminalView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [ctrlActive, setCtrlActive] = useState(false);
   const [altActive, setAltActive] = useState(false);
+  const [scrollActive, setScrollActive] = useState(false);
   const [dims, setDims] = useState({ cols: 80, rows: 24 });
   const [isMobile, setIsMobile] = useState(false);
   const [toolbarBottom, setToolbarBottom] = useState(56); // default: above Hub bottom tab bar (56px)
@@ -119,16 +119,24 @@ export function TerminalView() {
       setCtrlActive(false);
       return;
     }
-    if (seq === "__pgup__") {
-      wsSend("\x1b[5~");
+    if (seq === "__scroll__") {
+      if (scrollActive) {
+        wsSend("q");
+        setScrollActive(false);
+      } else {
+        wsSend("\x02[");
+        setScrollActive(true);
+      }
       return;
     }
-    if (seq === "__pgdn__") {
-      wsSend("\x1b[6~");
+    // Esc exits scroll mode if active
+    if (scrollActive && seq === "\x1b") {
+      wsSend("q");
+      setScrollActive(false);
       return;
     }
     wsSend(seq);
-  }, [wsSend]);
+  }, [wsSend, scrollActive]);
 
   // Connect WebSocket + init xterm
   const connectTerminal = useCallback(async () => {
@@ -549,7 +557,8 @@ export function TerminalView() {
           {TOOLBAR_KEYS.map((k) => {
             const isCtrl = k.seq === "__ctrl__";
             const isAlt = k.seq === "__alt__";
-            const active = (isCtrl && ctrlActive) || (isAlt && altActive);
+            const isScroll = k.seq === "__scroll__";
+            const active = (isCtrl && ctrlActive) || (isAlt && altActive) || (isScroll && scrollActive);
             return (
               <button
                 key={k.label}
