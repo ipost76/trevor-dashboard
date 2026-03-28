@@ -124,3 +124,38 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
   }
 }
+
+export async function PATCH(request: NextRequest) {
+  const body = await request.json();
+  const { trade_id, margin_usd } = body;
+
+  if (!trade_id || margin_usd == null || margin_usd <= 0) {
+    return NextResponse.json({ error: "Missing trade_id or invalid margin_usd" }, { status: 400 });
+  }
+
+  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
+  const dbPath = process.env.TREVOR_DB_PATH || join(trevorDir, "trevor.db");
+
+  try {
+    const { execSync } = await import("child_process");
+    const pythonPath = join(trevorDir, "venv", "bin", "python3");
+    const code = `
+import sqlite3, json
+conn = sqlite3.connect("${dbPath}")
+conn.execute("UPDATE active_trades SET margin_usd=? WHERE trade_id=?", (${margin_usd}, "${trade_id}"))
+conn.commit()
+r = conn.execute("SELECT margin_usd, leverage FROM active_trades WHERE trade_id=?", ("${trade_id}",)).fetchone()
+conn.close()
+if r:
+    print(json.dumps({"ok": True, "margin_usd": r[0], "notional": round(r[0] * (r[1] or 1), 2)}))
+else:
+    print(json.dumps({"ok": False, "error": "Trade not found"}))
+`;
+    const raw = execSync(`${pythonPath} -c '${code.replace(/'/g, "'\"'\"'")}'`, {
+      encoding: "utf-8", timeout: 5000, cwd: trevorDir,
+    }).trim();
+    return NextResponse.json(JSON.parse(raw));
+  } catch (err) {
+    return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
+  }
+}

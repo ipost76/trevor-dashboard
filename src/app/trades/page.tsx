@@ -60,6 +60,7 @@ type ActiveTrade = {
   profit_target_price?: number;
   atr_at_entry?: number;
   entry_groups?: string;
+  margin_usd?: number;
 };
 
 type Signal = {
@@ -458,6 +459,67 @@ function EditableEntry({ trade: t, onSaved }: { trade: Record<string, unknown>; 
   );
 }
 
+/* ── Margin Editor ── */
+function MarginEditor({ trade: t, onSaved }: { trade: ActiveTrade; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(t.margin_usd ?? ""));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const margin = parseFloat(val);
+    if (isNaN(margin) || margin <= 0 || !t.trade_id) return;
+    setSaving(true);
+    try {
+      await fetch("/api/trades", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_id: t.trade_id, margin_usd: margin }),
+      });
+      setEditing(false);
+      onSaved();
+    } catch { /* silent */ }
+    setSaving(false);
+  };
+
+  const lev = t.leverage || 1;
+  const notional = (t.margin_usd || 0) * lev;
+
+  if (editing) {
+    return (
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+        <span className="text-muted-foreground">$</span>
+        <input
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+          className="input-terminal w-20 text-[10px] px-1 py-0.5"
+          placeholder="margin"
+        />
+        <button onClick={save} disabled={saving} className="text-[var(--neon-green)] hover:opacity-80">
+          <Check className="h-3 w-3" />
+        </button>
+        <button onClick={() => setEditing(false)} className="text-muted-foreground hover:opacity-80">
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 text-[10px] group cursor-pointer" onClick={() => { setVal(String(t.margin_usd ?? "")); setEditing(true); }}>
+      {t.margin_usd ? (
+        <>
+          <span className="text-muted-foreground">\U0001f4b0 ${t.margin_usd.toFixed(2)} margin \u2022 ${notional.toFixed(2)} notional</span>
+          <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
+        </>
+      ) : (
+        <span className="text-muted-foreground opacity-60">\U0001f4b0 <span className="neon-text text-[9px]">+ Add margin</span></span>
+      )}
+    </div>
+  );
+}
+
 function ActiveTradesTab({
   trades,
   loading,
@@ -730,6 +792,9 @@ function ActiveTradesTab({
                 Opened {new Date(openedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
               </div>
             )}
+
+            {/* Margin Display + Edit */}
+            <MarginEditor trade={t} onSaved={onRefresh} />
 
             {/* Action Buttons */}
             {t.trade_id && !isActive && (
