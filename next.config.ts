@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
+  serverExternalPackages: ['node-pty'],
   async headers() {
     return [
       {

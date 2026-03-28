@@ -193,3 +193,20 @@ sudo systemctl restart trevor-dashboard
 - Upgraded all chart colors to cyberpunk palette (green/pink direction bars, gradient confidence bars, green/red split P&L line)
 - Chart components extended: StyledBarChart (colors, positiveColor, negativeColor props), StyledLineChart (splitColorAtZero prop)
 - New theme exports: CONF_DIST_COLORS, CAL_BUCKET_COLORS
+
+## Terminal Page (2026-03-28)
+- Full browser bash shell: xterm.js frontend + node-pty WebSocket backend
+- Custom server.js replaces `next start` — serves Next.js + WebSocket on port 3333
+- WebSocket path: /ws/terminal (same port, no firewall changes needed)
+- Auth: session cookie validated on WS upgrade (same trevor_session cookie)
+- Theme: Termius-blue (scoped CSS vars, not Hub green) — #0d1117 bg, #58a6ff accent
+- Font: JetBrains Mono, 14px desktop, 13px mobile
+- Desktop: tab bar (36px) + full-bleed terminal + status bar (24px) + search addon
+- Mobile: tab bar (32px) + terminal + key toolbar (44px) + status bar (20px)
+- Key toolbar: Tab, Ctrl (sticky toggle), Alt (sticky toggle), Esc, arrows, |, /, ~, -, _
+- Keyboard: native xterm + visualViewport resize
+- Nav: first in sidebar (desktop), first in mobile tab bar (Dashboard to More menu)
+- Limits: 3 sessions, 4hr idle, 5000 scrollback
+- node-pty: native module, needs build-essential, in serverExternalPackages
+- SSR: disabled via dynamic import (xterm needs window)
+- SystemD ExecStart: /usr/bin/node /home/trevor/trevor-dashboard/server.js
