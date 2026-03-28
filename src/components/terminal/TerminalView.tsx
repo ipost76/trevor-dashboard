@@ -102,11 +102,9 @@ export function TerminalView() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
   }, []);
 
-  // Handle toolbar key press — onPointerUp only, 300ms debounce guard
+  // Handle toolbar key press — onClick with 300ms debounce guard
   const lastToolbarTap = useRef(0);
-  const handleToolbarKey = useCallback((seq: string, e: React.PointerEvent | React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleToolbarKey = useCallback((seq: string) => {
     const now = Date.now();
     if (now - lastToolbarTap.current < 300) return;
     lastToolbarTap.current = now;
@@ -122,12 +120,10 @@ export function TerminalView() {
       return;
     }
     if (seq === "__pgup__") {
-      console.log("[TERM] PgUp pressed, termRef:", !!termRef.current, "scrollPages:", typeof termRef.current?.scrollPages);
       termRef.current?.scrollPages(-1);
       return;
     }
     if (seq === "__pgdn__") {
-      console.log("[TERM] PgDn pressed, termRef:", !!termRef.current, "scrollPages:", typeof termRef.current?.scrollPages);
       termRef.current?.scrollPages(1);
       return;
     }
@@ -557,7 +553,7 @@ export function TerminalView() {
             return (
               <button
                 key={k.label}
-                onPointerUp={(e) => handleToolbarKey(k.seq, e)}
+                onClick={() => handleToolbarKey(k.seq)}
                 style={{
                   minWidth: k.w,
                   height: 34,
