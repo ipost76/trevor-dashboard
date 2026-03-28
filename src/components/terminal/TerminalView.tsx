@@ -135,10 +135,9 @@ export function TerminalView() {
       setScrollActive(false);
       return;
     }
-    // In scroll mode, arrows send 5x for faster scrolling
-    if (scrollActive && (seq === "\x1b[A" || seq === "\x1b[B")) {
-      for (let i = 0; i < 5; i++) wsSend(seq);
-      return;
+    // In scroll mode, arrows send Ctrl+U/Ctrl+D for half-page scroll
+    if (scrollActive && seq === "\x1b[A") { wsSend("\x15"); return; }
+    if (scrollActive && seq === "\x1b[B") { wsSend("\x04"); return;
     }
     wsSend(seq);
   }, [wsSend, scrollActive]);
