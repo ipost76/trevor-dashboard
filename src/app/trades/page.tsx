@@ -311,12 +311,10 @@ function ScalpSplitView({ signals, loading, summary }: { signals: Signal[]; load
           </CollapsibleSection>
         )}
 
-        {/* Signal cards */}
-        <div className="flex items-center gap-2 px-1">
-          <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Recent Signals</span>
-          <span className="px-1.5 py-0 rounded-full text-[8px] font-bold bg-[var(--neon-green)] text-[#06060b]">{signals.length}</span>
-        </div>
-        <SignalTable signals={signals} loading={loading} emptyMessage="No scalp signals" />
+        {/* Signal cards — collapsible on mobile */}
+        <CollapsibleSection title={`Recent Signals (${signals.length})`}>
+          <SignalTable signals={signals} loading={loading} emptyMessage="No scalp signals" />
+        </CollapsibleSection>
       </div>
     </div>
   );
