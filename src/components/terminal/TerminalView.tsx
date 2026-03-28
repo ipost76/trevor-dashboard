@@ -86,6 +86,7 @@ export function TerminalView() {
   const [altActive, setAltActive] = useState(false);
   const [dims, setDims] = useState({ cols: 80, rows: 24 });
   const [isMobile, setIsMobile] = useState(false);
+  const [toolbarBottom, setToolbarBottom] = useState(56); // default: above Hub bottom tab bar (56px)
 
   // Detect mobile
   useEffect(() => {
@@ -319,7 +320,7 @@ export function TerminalView() {
     }, 50);
   }, [searchOpen, wsSend]);
 
-  // visualViewport resize for mobile keyboard (debounced)
+  // visualViewport resize for mobile keyboard (debounced) + toolbar positioning
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -327,6 +328,16 @@ export function TerminalView() {
     const handleVVResize = () => {
       clearTimeout(vvTimeout);
       vvTimeout = setTimeout(() => {
+        // Position toolbar above keyboard
+        const keyboardHeight = window.innerHeight - vv.height;
+        const hubTabBar = 56; // Hub bottom tab bar height
+        if (keyboardHeight > 100) {
+          // Keyboard is open — toolbar sits above keyboard
+          setToolbarBottom(keyboardHeight);
+        } else {
+          // Keyboard closed — toolbar sits above Hub tab bar
+          setToolbarBottom(hubTabBar);
+        }
         if (fitRef.current) {
           fitRef.current.fit();
           const term = termRef.current;
@@ -361,7 +372,7 @@ export function TerminalView() {
   }, []);
 
   // Connection dot color
-  const dotColor = connState === "connected" ? "var(--term-green)" : connState === "connecting" ? "var(--term-amber)" : "var(--term-red)";
+  const dotColor = connState === "connected" ? "#3fb950" : connState === "connecting" ? "#d29922" : "#f85149";
   const connLabel = connState === "connected" ? "Connected" : connState === "connecting" ? "Connecting..." : connState === "error" ? "Error" : "Disconnected";
 
   return (
@@ -374,7 +385,7 @@ export function TerminalView() {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        background: "var(--term-bg-void)",
+        background: "#0d1117",
         padding: 0,
         margin: 0,
         fontFamily: "'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', monospace",
@@ -389,10 +400,10 @@ export function TerminalView() {
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 12px",
-          background: "var(--term-bg-elevated)",
-          borderBottom: "1px solid var(--term-text-dim)",
+          background: "#1c2333",
+          borderBottom: "1px solid #30363d",
           fontSize: isMobile ? 12 : 13,
-          color: "var(--term-text-primary)",
+          color: "#e6edf3",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -405,7 +416,7 @@ export function TerminalView() {
             style={{
               background: "none",
               border: "none",
-              color: searchOpen ? "var(--term-blue-core)" : "var(--term-text-secondary)",
+              color: searchOpen ? "#58a6ff" : "#8b949e",
               cursor: "pointer",
               padding: 4,
               display: "flex",
@@ -427,8 +438,8 @@ export function TerminalView() {
             alignItems: "center",
             gap: 4,
             padding: "0 8px",
-            background: "var(--term-bg-surface)",
-            borderBottom: "1px solid var(--term-text-dim)",
+            background: "#161b22",
+            borderBottom: "1px solid #30363d",
           }}
         >
           <input
@@ -446,9 +457,9 @@ export function TerminalView() {
             style={{
               flex: 1,
               height: 24,
-              background: "var(--term-bg-void)",
-              color: "var(--term-text-primary)",
-              border: "1px solid var(--term-text-dim)",
+              background: "#0d1117",
+              color: "#e6edf3",
+              border: "1px solid #30363d",
               borderRadius: 4,
               padding: "0 8px",
               fontSize: 11,
@@ -489,14 +500,14 @@ export function TerminalView() {
             zIndex: 10,
           }}
         >
-          <span style={{ color: "var(--term-text-primary)", fontSize: isMobile ? 16 : 18, fontWeight: 600 }}>
+          <span style={{ color: "#e6edf3", fontSize: isMobile ? 16 : 18, fontWeight: 600 }}>
             Connection Lost
           </span>
           <button
             onClick={connectTerminal}
             style={{
-              background: "var(--term-blue-core)",
-              color: "var(--term-bg-void)",
+              background: "#58a6ff",
+              color: "#0d1117",
               border: "none",
               borderRadius: 8,
               height: 44,
@@ -512,19 +523,23 @@ export function TerminalView() {
         </div>
       )}
 
-      {/* ── Floating Key Toolbar (Mobile Only) ── */}
+      {/* ── Floating Key Toolbar (Mobile Only) — fixed above keyboard ── */}
       {isMobile && (
         <div
           style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: toolbarBottom,
             height: 44,
-            flexShrink: 0,
+            zIndex: 40,
             display: "flex",
             alignItems: "center",
             gap: 4,
             padding: "4px 8px",
-            background: "var(--term-bg-elevated)",
-            borderTop: "1px solid var(--term-text-dim)",
-            borderBottom: "1px solid var(--term-text-dim)",
+            background: "#1c2333",
+            borderTop: "1px solid #30363d",
+            borderBottom: "1px solid #30363d",
             overflowX: "auto",
             overflowY: "hidden",
             WebkitOverflowScrolling: "touch",
@@ -548,9 +563,9 @@ export function TerminalView() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  background: active ? "var(--term-blue-core)" : "var(--term-bg-surface)",
-                  color: active ? "var(--term-bg-void)" : "var(--term-text-primary)",
-                  border: `1px solid ${active ? "var(--term-blue-bright)" : "var(--term-text-dim)"}`,
+                  background: active ? "#58a6ff" : "#161b22",
+                  color: active ? "#0d1117" : "#e6edf3",
+                  border: `1px solid ${active ? "#79c0ff" : "#30363d"}`,
                   borderRadius: 6,
                   fontSize: 12,
                   fontWeight: 500,
@@ -579,20 +594,20 @@ export function TerminalView() {
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 12px",
-          background: "var(--term-bg-elevated)",
-          borderTop: "1px solid var(--term-text-dim)",
+          background: "#1c2333",
+          borderTop: "1px solid #30363d",
           fontSize: isMobile ? 10 : 12,
-          color: "var(--term-text-secondary)",
+          color: "#8b949e",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor }} />
           <span>{connLabel}</span>
-          {!isMobile && <span style={{ color: "var(--term-text-muted)" }}>trevor@trevor-prime</span>}
+          {!isMobile && <span style={{ color: "#484f58" }}>trevor@trevor-prime</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span>{dims.rows}&times;{dims.cols}</span>
-          {!isMobile && <span style={{ color: "var(--term-text-muted)" }}>{isMobile ? 13 : 14}px</span>}
+          {!isMobile && <span style={{ color: "#484f58" }}>{isMobile ? 13 : 14}px</span>}
         </div>
       </div>
 
@@ -605,7 +620,7 @@ export function TerminalView() {
 const searchBtnStyle: React.CSSProperties = {
   background: "none",
   border: "none",
-  color: "var(--term-text-secondary)",
+  color: "#8b949e",
   cursor: "pointer",
   padding: 4,
   display: "flex",
