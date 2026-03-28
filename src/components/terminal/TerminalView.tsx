@@ -120,11 +120,11 @@ export function TerminalView() {
       return;
     }
     if (seq === "__pgup__") {
-      termRef.current?.scrollPages(-1);
+      wsSend("\x1b[5~");
       return;
     }
     if (seq === "__pgdn__") {
-      termRef.current?.scrollPages(1);
+      wsSend("\x1b[6~");
       return;
     }
     wsSend(seq);
