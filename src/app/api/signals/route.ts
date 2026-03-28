@@ -71,13 +71,14 @@ except:
 try:
     rows = conn.execute("""
         SELECT CASE
-            WHEN confidence*100<35 THEN 'under_35'
             WHEN confidence*100<45 THEN '35_44'
             WHEN confidence*100<55 THEN '45_54'
             WHEN confidence*100<65 THEN '55_64'
             ELSE '65_plus' END as bucket,
             COUNT(*) as ct
-        FROM trade_insights GROUP BY bucket ORDER BY bucket
+        FROM trade_insights
+        WHERE confidence IS NOT NULL AND confidence*100 >= 35
+        GROUP BY bucket ORDER BY bucket
     """).fetchall()
     out["confidence_distribution"] = {r[0]: r[1] for r in rows}
 except:
@@ -107,7 +108,7 @@ print(json.dumps(out))
       const summaryData = JSON.parse(pyResult);
 
       // Also get quality metrics from query_signal_quality.py
-      let quality = { overall: null, calibration: {}, tickerPerformance: [] };
+      let quality: { overall: unknown; calibration: Record<string, unknown>; tickerPerformance: unknown[]; tradePerformance: unknown } = { overall: null, calibration: {}, tickerPerformance: [], tradePerformance: null };
       try {
         const qResult = execSync(
           `/home/trevor/trevor/venv/bin/python3 /home/trevor/trevor-dashboard/query_signal_quality.py`,
@@ -123,6 +124,7 @@ print(json.dumps(out))
           calibration: quality.calibration || {},
           ticker_performance: quality.tickerPerformance || [],
         },
+        trade_performance: quality.tradePerformance || null,
         timestamp: new Date().toISOString(),
         latencyMs: Date.now() - start,
       });

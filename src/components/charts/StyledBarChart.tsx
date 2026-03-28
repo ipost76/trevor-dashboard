@@ -10,11 +10,15 @@ type Props = {
   height?: number;
   colorByValue?: boolean;
   horizontal?: boolean;
+  colors?: string[];
+  positiveColor?: string;
+  negativeColor?: string;
 };
 
 export function StyledBarChart({
   data, dataKey, nameKey = "name", color = CHART_COLORS.green,
   height = 200, colorByValue = false, horizontal = false,
+  colors, positiveColor, negativeColor,
 }: Props) {
   if (!data?.length) return null;
 
@@ -27,9 +31,9 @@ export function StyledBarChart({
         labelStyle={{ color: CHART_COLORS.text }}
         itemStyle={{ color: CHART_COLORS.green }}
       />
-      <Bar dataKey={dataKey} radius={[0, 3, 3, 0]}>
-        {colorByValue && data.map((d, i) => (
-          <Cell key={i} fill={Number(d[dataKey]) >= 0 ? CHART_COLORS.green : CHART_COLORS.red} fillOpacity={0.7} />
+      <Bar dataKey={dataKey} fill={color} fillOpacity={0.7} radius={[0, 3, 3, 0]}>
+        {(colorByValue || colors) && data.map((d, i) => (
+          <Cell key={i} fill={colors ? (colors[i] || color) : Number(d[dataKey]) >= 0 ? (positiveColor || CHART_COLORS.green) : (negativeColor || CHART_COLORS.red)} fillOpacity={0.7} />
         ))}
       </Bar>
     </BarChart>
@@ -43,8 +47,8 @@ export function StyledBarChart({
         itemStyle={{ color: CHART_COLORS.green }}
       />
       <Bar dataKey={dataKey} fill={color} fillOpacity={0.7} radius={[3, 3, 0, 0]}>
-        {colorByValue && data.map((d, i) => (
-          <Cell key={i} fill={Number(d[dataKey]) >= 0 ? CHART_COLORS.green : CHART_COLORS.red} fillOpacity={0.7} />
+        {(colorByValue || colors) && data.map((d, i) => (
+          <Cell key={i} fill={colors ? (colors[i] || color) : Number(d[dataKey]) >= 0 ? (positiveColor || CHART_COLORS.green) : (negativeColor || CHART_COLORS.red)} fillOpacity={0.7} />
         ))}
       </Bar>
     </BarChart>

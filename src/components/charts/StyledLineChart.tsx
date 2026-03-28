@@ -1,4 +1,5 @@
 "use client";
+import { useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Area } from "recharts";
 import { CHART_COLORS } from "./theme";
 
@@ -11,16 +12,41 @@ type Props = {
   height?: number;
   showArea?: boolean;
   referenceLine?: number;
+  splitColorAtZero?: boolean;
 };
 
 export function StyledLineChart({
   data, lines, xKey = "date", height = 200, showArea = false, referenceLine,
+  splitColorAtZero = false,
 }: Props) {
   if (!data?.length) return null;
+
+  const gradientOffset = useMemo(() => {
+    if (!splitColorAtZero || !lines[0]) return 1;
+    const key = lines[0].dataKey;
+    const vals = data.map((d) => Number(d[key]) || 0);
+    const max = Math.max(...vals);
+    const min = Math.min(...vals);
+    if (max <= 0) return 0;
+    if (min >= 0) return 1;
+    return max / (max - min);
+  }, [data, lines, splitColorAtZero]);
 
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ left: 0, right: 10, top: 5, bottom: 5 }}>
+        {splitColorAtZero && (
+          <defs>
+            <linearGradient id="splitStroke" x1="0" y1="0" x2="0" y2="1">
+              <stop offset={gradientOffset} stopColor="#00ff88" stopOpacity={1} />
+              <stop offset={gradientOffset} stopColor="#ff4444" stopOpacity={1} />
+            </linearGradient>
+            <linearGradient id="splitFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset={gradientOffset} stopColor="#00ff88" stopOpacity={0.2} />
+              <stop offset={gradientOffset} stopColor="#ff4444" stopOpacity={0.2} />
+            </linearGradient>
+          </defs>
+        )}
         <XAxis dataKey={xKey} tick={{ fill: CHART_COLORS.textMuted, fontSize: 10 }} />
         <YAxis tick={{ fill: CHART_COLORS.textMuted, fontSize: 10 }} width={45} />
         <Tooltip
@@ -35,7 +61,7 @@ export function StyledLineChart({
             key={l.dataKey}
             type="monotone"
             dataKey={l.dataKey}
-            stroke={l.color || CHART_COLORS.green}
+            stroke={splitColorAtZero ? "url(#splitStroke)" : (l.color || CHART_COLORS.green)}
             strokeWidth={2}
             dot={false}
             name={l.name || l.dataKey}
@@ -46,8 +72,8 @@ export function StyledLineChart({
             key={`area-${l.dataKey}`}
             type="monotone"
             dataKey={l.dataKey}
-            fill={l.color || CHART_COLORS.green}
-            fillOpacity={0.1}
+            fill={splitColorAtZero ? "url(#splitFill)" : (l.color || CHART_COLORS.green)}
+            fillOpacity={splitColorAtZero ? 1 : 0.1}
             stroke="none"
           />
         ))}
