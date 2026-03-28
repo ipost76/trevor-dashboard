@@ -29,7 +29,7 @@ const navItems: NavItem[] = [
 ];
 
 // Bottom tab bar: 5 most-used pages + More
-const TAB_HREFS = ["/terminal", "/trades", "/signals", "/chat", "/control"];
+const TAB_HREFS = ["/terminal", "/dashboard", "/trades", "/signals", "/chat"];
 const TAB_ITEMS = TAB_HREFS.map(h => navItems.find(n => n.href === h)!);
 const MORE_ITEMS = navItems.filter(n => !TAB_HREFS.includes(n.href));
 

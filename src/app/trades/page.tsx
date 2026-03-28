@@ -159,55 +159,40 @@ function SignalTable({
   }
 
   return (
-    <>
-      {/* Table Header */}
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)] text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
-        <span className="w-16">Ticker</span>
-        <span className="w-12">Dir</span>
-        <span className="flex-1">Signal</span>
-        <span className="w-14 text-right">Conf</span>
-        <span className="w-10 text-center">Result</span>
-        <span className="w-20 text-right">Time</span>
-      </div>
+    <div className="flex-1 overflow-auto space-y-1 p-1.5">
+      {signals.map((s, i) => {
+        const dt = s.created_at || s.timestamp || "";
+        let ago = "";
+        if (dt) {
+          const diff = Date.now() - new Date(dt).getTime();
+          const mins = Math.floor(diff / 60000);
+          if (mins < 60) ago = `${mins}m ago`;
+          else if (mins < 1440) ago = `${Math.floor(mins / 60)}h ago`;
+          else ago = `${Math.floor(mins / 1440)}d ago`;
+        }
+        const ep = s.entry_price;
+        const dec = ep && ep < 1 ? 4 : 2;
 
-      {/* Rows */}
-      <div className="flex-1 overflow-auto">
-        {signals.map((s, i) => {
-          const time = (s.created_at || s.timestamp)
-            ? new Date(s.created_at || s.timestamp || "").toLocaleTimeString(
-                "en-US",
-                { hour12: false, hour: "2-digit", minute: "2-digit" }
-              )
-            : "";
-
-          return (
-            <div
-              key={s.id || i}
-              className="flex items-center gap-2 data-cell hover:bg-[rgba(0,240,255,0.03)] transition-colors"
-            >
-              <span className="w-16 font-bold text-foreground truncate text-[11px]">
-                {s.ticker}
-              </span>
-              <span className="w-12">
-                <DirectionBadge dir={s.direction || "long"} />
-              </span>
-              <span className="flex-1 text-[10px] text-muted-foreground truncate">
-                {s.signal_type || "--"}
-              </span>
-              <span className="w-14 flex justify-end">
-                <ConfidenceBar value={s.confidence} />
-              </span>
-              <span className="w-10 flex justify-center">
-                <OutcomeIcon outcome={s.outcome} />
-              </span>
-              <span className="w-20 text-right text-[10px] text-muted-foreground">
-                {time}
-              </span>
+        return (
+          <div key={s.id || i} className="panel p-2 hover:border-[rgba(0,240,255,0.2)] transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-foreground">{s.ticker}</span>
+              <DirectionBadge dir={s.direction || s.signal_type || "long"} />
+              <div className="flex-1" />
+              <ConfidenceBar value={s.confidence} />
+              <span className="text-[9px] text-muted-foreground w-14 text-right">{ago}</span>
             </div>
-          );
-        })}
-      </div>
-    </>
+            {(s.entry_price || s.stop_price || s.target_price) && (
+              <div className="flex gap-3 mt-1 text-[9px] text-muted-foreground">
+                {ep ? <span>Entry: <span className="text-foreground">${ep.toFixed(dec)}</span></span> : null}
+                {s.target_price ? <span>Target: <span className="neon-green">${s.target_price.toFixed(dec)}</span></span> : null}
+                {s.stop_price ? <span>Stop: <span className="neon-red">${s.stop_price.toFixed(dec)}</span></span> : null}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -638,12 +623,12 @@ export default function TradesPage() {
   const [capitalInput, setCapitalInput] = useState("");
 
   const fetchActiveAndSignals = useCallback(async () => {
-    const [activeData, liveData] = await Promise.all([
+    const [activeData, sigData] = await Promise.all([
       safeFetch<{ trades?: ActiveTrade[] }>("/api/trades?scope=active", {}),
-      safeFetch<{ recentSignals?: Signal[] }>("/api/live", {}),
+      safeFetch<{ signals?: Signal[] }>("/api/signals?scope=list&limit=30", {}),
     ]);
     setActiveTrades(activeData.trades || []);
-    setAllSignals(liveData.recentSignals || []);
+    setAllSignals((sigData.signals || []).map(s => ({ ...s, signal_type: s.signal_type || s.direction || "" })));
     setLoading(false);
   }, []);
 
