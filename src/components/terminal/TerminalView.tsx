@@ -63,6 +63,8 @@ const TOOLBAR_KEYS = [
   { label: "\u2193", seq: "\x1b[B", w: 36 },
   { label: "\u2190", seq: "\x1b[D", w: 36 },
   { label: "\u2192", seq: "\x1b[C", w: 36 },
+  { label: "PgUp", seq: "__pgup__", w: 44 },
+  { label: "PgDn", seq: "__pgdn__", w: 44 },
   { label: "|", seq: "|", w: 36 },
   { label: "/", seq: "/", w: 36 },
   { label: "~", seq: "~", w: 36 },
@@ -116,6 +118,14 @@ export function TerminalView() {
     if (seq === "__alt__") {
       setAltActive((p) => !p);
       setCtrlActive(false);
+      return;
+    }
+    if (seq === "__pgup__") {
+      termRef.current?.scrollPages(-1);
+      return;
+    }
+    if (seq === "__pgdn__") {
+      termRef.current?.scrollPages(1);
       return;
     }
     wsSend(seq);
@@ -455,7 +465,7 @@ export function TerminalView() {
       {/* ── Terminal Container ── */}
       <div
         ref={termContainerRef}
-        style={{ flex: 1, overflow: "hidden", position: "relative", touchAction: "pan-y" }}
+        style={{ flex: 1, overflow: "hidden", position: "relative", touchAction: "none" }}
         onClick={(e) => {
           // Only focus on tap (not drag/scroll). Check if it was a clean click.
           if (!(e as unknown as { detail?: number }).detail || (e as unknown as { detail: number }).detail <= 1) {
