@@ -135,6 +135,11 @@ export function TerminalView() {
       setScrollActive(false);
       return;
     }
+    // In scroll mode, arrows send 5x for faster scrolling
+    if (scrollActive && (seq === "\x1b[A" || seq === "\x1b[B")) {
+      for (let i = 0; i < 5; i++) wsSend(seq);
+      return;
+    }
     wsSend(seq);
   }, [wsSend, scrollActive]);
 
