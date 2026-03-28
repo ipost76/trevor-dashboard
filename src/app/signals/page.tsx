@@ -90,7 +90,11 @@ export default function SignalsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    fetchAll();
+    const iv = setInterval(fetchAll, 30000);
+    return () => clearInterval(iv);
+  }, [fetchAll]);
 
   const summary = data?.summary ?? EMPTY_SUMMARY;
   const overall = data?.quality?.overall;

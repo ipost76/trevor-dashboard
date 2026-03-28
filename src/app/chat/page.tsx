@@ -17,8 +17,11 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    safeFetch<{ ok?: boolean }>("/api/chat?scope=health", {}).then(d => setHealth(d.ok ? "ok" : "down"));
-    safeFetch<{ messages?: Message[] }>("/api/chat?scope=history", {}).then(d => setMessages(d.messages || []));
+    const checkHealth = () => safeFetch<{ ok?: boolean }>("/api/chat?scope=health", {}).then(d => setHealth(d?.ok ? "ok" : "down"));
+    checkHealth();
+    safeFetch<{ messages?: Message[] }>("/api/chat?scope=history", {}).then(d => setMessages(d?.messages || []));
+    const iv = setInterval(checkHealth, 30000);
+    return () => clearInterval(iv);
   }, []);
 
   useEffect(() => {
@@ -112,7 +115,7 @@ export default function ChatPage() {
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && send()}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
               placeholder="Enter command..."
               disabled={sending || health === "down"}
               className="input-terminal flex-1"

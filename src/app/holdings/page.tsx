@@ -443,7 +443,7 @@ export default function HoldingsPage() {
                     <span className="w-20 text-[10px] text-muted-foreground truncate">
                       {assetTypeLabel(p.asset_type)}
                     </span>
-                    <span className="flex-1 flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="flex-1 flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       {p.status !== "closed" && (
                         <>
                           <button

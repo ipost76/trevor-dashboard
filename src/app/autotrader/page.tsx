@@ -33,12 +33,14 @@ function formatET(ts: string): string {
 export default function AutoTraderPage() {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch("/api/autotrader");
-      if (res.ok) setData(await res.json());
-    } catch { /* retry next cycle */ }
+      if (res.ok) { setData(await res.json()); setError(false); }
+      else setError(true);
+    } catch { setError(true); }
     setLoading(false);
   }, []);
 
@@ -52,6 +54,15 @@ export default function AutoTraderPage() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-muted-foreground text-sm animate-pulse">Loading AutoTrader...</div>
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3">
+        <div className="text-muted-foreground text-sm">Failed to load AutoTrader data</div>
+        <button onClick={fetchData} className="btn-primary text-xs px-4 py-2">Retry</button>
       </div>
     );
   }

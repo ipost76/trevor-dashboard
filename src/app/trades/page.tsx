@@ -556,7 +556,7 @@ function ActiveTradesTab({
             {/* Action Buttons */}
             {t.trade_id && !isActive && (
               <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                <button onClick={() => { setActionId(tradeId); setActionType("close"); resetAction(); setActionId(tradeId); setActionType("close"); }}
+                <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("close"); }}
                   className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.1)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.2)] transition-colors">
                   <X className="h-3 w-3" /> Close
                 </button>

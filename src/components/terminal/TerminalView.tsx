@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Search, X, ChevronUp, ChevronDown, Settings } from "lucide-react";
+import { Search, X, ChevronUp, ChevronDown } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
@@ -300,12 +300,14 @@ export function TerminalView() {
     }, 50);
   }, [searchOpen, wsSend]);
 
-  // visualViewport resize for mobile keyboard
+  // visualViewport resize for mobile keyboard (debounced)
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    let vvTimeout: ReturnType<typeof setTimeout>;
     const handleVVResize = () => {
-      requestAnimationFrame(() => {
+      clearTimeout(vvTimeout);
+      vvTimeout = setTimeout(() => {
         if (fitRef.current) {
           fitRef.current.fit();
           const term = termRef.current;
@@ -314,13 +316,14 @@ export function TerminalView() {
             wsSend(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
           }
         }
-      });
+      }, 100);
     };
     vv.addEventListener("resize", handleVVResize);
     vv.addEventListener("scroll", handleVVResize);
     return () => {
       vv.removeEventListener("resize", handleVVResize);
       vv.removeEventListener("scroll", handleVVResize);
+      clearTimeout(vvTimeout);
     };
   }, [wsSend]);
 
@@ -391,19 +394,6 @@ export function TerminalView() {
             }}
           >
             <Search size={isMobile ? 16 : 14} />
-          </button>
-          <button
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--term-text-secondary)",
-              cursor: "pointer",
-              padding: 4,
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <Settings size={isMobile ? 16 : 14} />
           </button>
         </div>
       </div>

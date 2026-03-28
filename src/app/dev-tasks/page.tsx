@@ -26,7 +26,7 @@ const CAT_COLORS: Record<string, string> = {
   fix: "bg-red-500/20 text-red-400",
   prompt: "bg-purple-500/20 text-purple-400",
   update: "bg-blue-500/20 text-blue-400",
-  note: "bg-zinc-500/20 text-zinc-400",
+  note: "bg-[rgba(0,240,255,0.08)] text-muted-foreground",
   bug: "bg-orange-500/20 text-orange-400",
 };
 
@@ -87,9 +87,9 @@ export default function DevTasksPage() {
     <div className="space-y-4 max-w-4xl mx-auto p-2 overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <ClipboardList className="h-6 w-6 text-zinc-400" />
+        <ClipboardList className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-bold">Dev Tasks</h1>
-        <span className="ml-2 rounded-full bg-zinc-700 px-2.5 py-0.5 text-xs font-medium text-zinc-300">
+        <span className="ml-2 rounded-full bg-[var(--card)] px-2.5 py-0.5 text-xs font-medium text-foreground">
           {counts.open} open
         </span>
         {counts.wip > 0 && (
@@ -109,8 +109,8 @@ export default function DevTasksPage() {
               className={cn(
                 "rounded px-3 py-1 text-xs font-medium transition",
                 statusFilter === s
-                  ? "bg-zinc-600 text-white"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                  ? "bg-[rgba(0,240,255,0.15)] text-[var(--neon-cyan)]"
+                  : "bg-[var(--card)] text-muted-foreground hover:bg-[rgba(0,240,255,0.06)]"
               )}
             >
               {s === "in-progress" ? "WIP" : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -125,8 +125,8 @@ export default function DevTasksPage() {
               className={cn(
                 "rounded px-2.5 py-1 text-xs font-medium transition",
                 catFilter === c
-                  ? "bg-zinc-600 text-white"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                  ? "bg-[rgba(0,240,255,0.15)] text-[var(--neon-cyan)]"
+                  : "bg-[var(--card)] text-muted-foreground hover:bg-[rgba(0,240,255,0.06)]"
               )}
             >
               {c.charAt(0).toUpperCase() + c.slice(1)}
@@ -141,8 +141,8 @@ export default function DevTasksPage() {
               className={cn(
                 "rounded px-2.5 py-1 text-xs font-medium transition",
                 prioFilter === p
-                  ? "bg-zinc-600 text-white"
-                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                  ? "bg-[rgba(0,240,255,0.15)] text-[var(--neon-cyan)]"
+                  : "bg-[var(--card)] text-muted-foreground hover:bg-[rgba(0,240,255,0.06)]"
               )}
             >
               {p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1)}
@@ -153,11 +153,11 @@ export default function DevTasksPage() {
 
       {/* Task List */}
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-zinc-500">
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading...
         </div>
       ) : tasks.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">No tasks found.</div>
+        <div className="text-center py-12 text-muted-foreground">No tasks found.</div>
       ) : (
         <div className="space-y-1">
           {tasks.map((task) => {
@@ -168,7 +168,7 @@ export default function DevTasksPage() {
                 <div
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2.5 transition cursor-pointer",
-                    "hover:bg-zinc-800/60",
+                    "hover:bg-[rgba(0,240,255,0.04)]",
                     isDone && "opacity-50"
                   )}
                   onClick={() => setExpanded(isExpanded ? null : task.id)}
@@ -183,16 +183,16 @@ export default function DevTasksPage() {
                     disabled={toggling === task.id}
                   >
                     {toggling === task.id ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                     ) : isDone ? (
                       <CheckCircle className="h-5 w-5 text-green-500" />
                     ) : (
-                      <Circle className="h-5 w-5 text-zinc-600 group-hover:text-zinc-400" />
+                      <Circle className="h-5 w-5 text-muted-foreground group-hover:text-muted-foreground" />
                     )}
                   </button>
 
                   {/* ID */}
-                  <span className="text-xs text-zinc-500 font-mono w-8">#{task.id}</span>
+                  <span className="text-xs text-muted-foreground font-mono w-8">#{task.id}</span>
 
                   {/* Category badge */}
                   <span
@@ -208,7 +208,7 @@ export default function DevTasksPage() {
                   <span
                     className={cn(
                       "flex-1 text-sm",
-                      isDone ? "line-through text-zinc-500" : "text-zinc-200"
+                      isDone ? "line-through text-muted-foreground" : "text-foreground"
                     )}
                   >
                     {task.title}
@@ -223,14 +223,14 @@ export default function DevTasksPage() {
                   />
 
                   {/* Date */}
-                  <span className="text-[11px] text-zinc-600 w-20 text-right">
+                  <span className="text-[11px] text-muted-foreground w-20 text-right">
                     {task.created_at ? task.created_at.slice(0, 10) : ""}
                   </span>
                 </div>
 
                 {/* Expanded notes */}
                 {isExpanded && task.notes && (
-                  <div className="ml-16 px-3 pb-3 text-sm text-zinc-400 whitespace-pre-wrap">
+                  <div className="ml-16 px-3 pb-3 text-sm text-muted-foreground whitespace-pre-wrap">
                     {task.notes}
                   </div>
                 )}
