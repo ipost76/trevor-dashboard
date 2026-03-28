@@ -41,10 +41,17 @@ export default function TerminalPage() {
   return (
     <>
       <style>{`
-        /* Override Hub parent backgrounds for terminal page */
-        body, html { background: #0d1117 !important; }
+        /* Nuclear override: force navy on EVERYTHING when terminal page is active */
+        html, body { background: #0d1117 !important; }
+        body > div { background: #0d1117 !important; }
+        header { background: #1c2333 !important; border-color: #30363d !important; }
         main { background: #0d1117 !important; }
         main > * { background: #0d1117 !important; }
+        footer, [class*="status-bar"] { background: #1c2333 !important; border-color: #30363d !important; }
+        /* Hub sidebar on desktop */
+        aside { background: #0d1117 !important; border-color: #30363d !important; }
+        /* Hub bottom tab bar on mobile */
+        nav[class*="fixed"] { background: #161b22 !important; border-color: #30363d !important; }
       `}</style>
       <TerminalView />
     </>
