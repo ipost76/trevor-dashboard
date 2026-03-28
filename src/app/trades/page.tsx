@@ -18,6 +18,8 @@ import {
   Target,
   Pencil,
   Check,
+  ChevronDown,
+  ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
@@ -192,6 +194,199 @@ function SignalTable({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ── Collapsible Section ── */
+function CollapsibleSection({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button onClick={() => setOpen(p => !p)} className="flex items-center gap-1.5 w-full py-1.5 text-left">
+        {open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRightIcon className="h-3 w-3 text-muted-foreground" />}
+        <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{title}</span>
+      </button>
+      {open && <div className="pb-2">{children}</div>}
+    </div>
+  );
+}
+
+/* ── Scalp Split View ── */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ScalpSplitView({ signals, loading, summary }: { signals: Signal[]; loading: boolean; summary: any }) {
+  const wrColor = (wr: number) => wr >= 55 ? "neon-green" : wr < 45 ? "neon-red" : "neon-amber";
+  const pfColor = (pf: number) => pf >= 1.5 ? "neon-green" : pf >= 1.0 ? "neon-amber" : "neon-red";
+
+  const sm = summary?.summary;
+  const perf = summary?.trade_performance;
+  const cal = summary?.quality?.calibration || {};
+  const tickerPerf = (summary?.quality?.ticker_performance || []).slice(0, 5);
+  const totalSig = sm?.total_signals || 0;
+  const longPct = totalSig > 0 ? Math.round((sm?.long_count || 0) / totalSig * 100) : 0;
+
+  const leftPanel = (
+    <div className="space-y-3">
+      {/* Summary stat cards */}
+      <div className="grid grid-cols-2 gap-1.5">
+        {[
+          { label: "TOTAL SIGNALS", value: String(totalSig), color: "neon-text" },
+          { label: "TODAY", value: String(sm?.signals_today || 0), color: (sm?.signals_today || 0) > 0 ? "neon-green" : "text-foreground" },
+          { label: "AVG CONFIDENCE", value: `${sm?.avg_confidence || 0}%`, color: (sm?.avg_confidence || 0) >= 55 ? "neon-green" : (sm?.avg_confidence || 0) >= 40 ? "neon-amber" : "neon-red" },
+          { label: "LONG / SHORT", value: `${longPct}/${100 - longPct}`, color: "neon-text" },
+        ].map(s => (
+          <div key={s.label} className="panel p-2 text-center">
+            <div className="stat-label mb-0.5">{s.label}</div>
+            <div className={cn("text-base font-bold font-mono", s.color)}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Quality Metrics */}
+      {perf && perf.total_closed > 0 ? (
+        <QualitySection perf={perf} wrColor={wrColor} pfColor={pfColor} />
+      ) : (
+        <div className="text-[10px] text-muted-foreground text-center py-2">No closed trades yet</div>
+      )}
+
+      {/* Confidence Calibration */}
+      {Object.keys(cal).length > 0 && (
+        <CalibrationSection cal={cal} wrColor={wrColor} />
+      )}
+
+      {/* Ticker Performance */}
+      {tickerPerf.length > 0 && (
+        <TickerPerfSection tickers={tickerPerf} wrColor={wrColor} />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex-1 overflow-hidden">
+      {/* Desktop: side-by-side */}
+      <div className="hidden md:grid h-full" style={{ gridTemplateColumns: "45% 55%", gap: 12 }}>
+        <div className="overflow-y-auto pr-2 py-1" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(0,255,136,0.2) transparent" }}>
+          {leftPanel}
+        </div>
+        <div className="overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(0,255,136,0.2) transparent" }}>
+          <div className="flex items-center gap-2 px-1.5 pb-1">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Recent Signals</span>
+            <span className="px-1.5 py-0 rounded-full text-[8px] font-bold bg-[var(--neon-green)] text-[#06060b]">{signals.length}</span>
+          </div>
+          <SignalTable signals={signals} loading={loading} emptyMessage="No scalp signals" />
+        </div>
+      </div>
+
+      {/* Mobile: stacked */}
+      <div className="md:hidden overflow-y-auto h-full p-1.5 space-y-2">
+        {/* Stats always visible */}
+        <div className="grid grid-cols-2 gap-1.5">
+          {[
+            { label: "TOTAL", value: String(totalSig), color: "neon-text" },
+            { label: "TODAY", value: String(sm?.signals_today || 0), color: (sm?.signals_today || 0) > 0 ? "neon-green" : "text-foreground" },
+            { label: "AVG CONF", value: `${sm?.avg_confidence || 0}%`, color: (sm?.avg_confidence || 0) >= 55 ? "neon-green" : (sm?.avg_confidence || 0) >= 40 ? "neon-amber" : "neon-red" },
+            { label: "L / S", value: `${longPct}/${100 - longPct}`, color: "neon-text" },
+          ].map(s => (
+            <div key={s.label} className="panel p-2 text-center">
+              <div className="stat-label mb-0.5">{s.label}</div>
+              <div className={cn("text-sm font-bold font-mono", s.color)}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Collapsible sections */}
+        {perf && perf.total_closed > 0 && (
+          <CollapsibleSection title="Quality Metrics">
+            <QualitySection perf={perf} wrColor={wrColor} pfColor={pfColor} />
+          </CollapsibleSection>
+        )}
+        {Object.keys(cal).length > 0 && (
+          <CollapsibleSection title="Confidence Calibration">
+            <CalibrationSection cal={cal} wrColor={wrColor} />
+          </CollapsibleSection>
+        )}
+        {tickerPerf.length > 0 && (
+          <CollapsibleSection title="Ticker Performance">
+            <TickerPerfSection tickers={tickerPerf} wrColor={wrColor} />
+          </CollapsibleSection>
+        )}
+
+        {/* Signal cards */}
+        <div className="flex items-center gap-2 px-1">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Recent Signals</span>
+          <span className="px-1.5 py-0 rounded-full text-[8px] font-bold bg-[var(--neon-green)] text-[#06060b]">{signals.length}</span>
+        </div>
+        <SignalTable signals={signals} loading={loading} emptyMessage="No scalp signals" />
+      </div>
+    </div>
+  );
+}
+
+/* ── Quality Section ── */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function QualitySection({ perf, wrColor, pfColor }: { perf: any; wrColor: (n: number) => string; pfColor: (n: number) => string }) {
+  const items = [
+    { label: "Win Rate", value: `${perf.win_rate}%`, color: wrColor(perf.win_rate) },
+    { label: "Profit Factor", value: perf.profit_factor ?? "\u2014", color: perf.profit_factor != null ? pfColor(perf.profit_factor) : "text-muted-foreground" },
+    { label: "Avg Winner", value: `+${perf.avg_winner_pct}%`, color: "neon-green" },
+    { label: "Avg Loser", value: `${perf.avg_loser_pct}%`, color: "neon-red" },
+    { label: "Best Trade", value: `+${perf.best_trade_pct}%`, color: "neon-green" },
+    { label: "Worst Trade", value: `${perf.worst_trade_pct}%`, color: "neon-red" },
+    { label: "Streak", value: perf.current_streak > 0 ? `+${perf.current_streak}` : String(perf.current_streak), color: perf.current_streak >= 0 ? "neon-green" : "neon-red" },
+  ];
+  return (
+    <div>
+      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 pl-2 border-l-2 border-[var(--neon-green)]">Quality Metrics</div>
+      <div className="space-y-0.5">
+        {items.map(it => (
+          <div key={it.label} className="flex items-center justify-between px-2 py-0.5 text-[10px]">
+            <span className="text-muted-foreground">{it.label}</span>
+            <span className={cn("font-bold font-mono", it.color)}>{it.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Calibration Section ── */
+function CalibrationSection({ cal, wrColor }: { cal: Record<string, { trades: number; wins: number; winRate: number | null }>; wrColor: (n: number) => string }) {
+  return (
+    <div>
+      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 pl-2 border-l-2 border-[var(--neon-cyan)]">Confidence Calibration</div>
+      <div className="space-y-0.5">
+        {Object.entries(cal).map(([bucket, b]) => (
+          <div key={bucket} className="flex items-center justify-between px-2 py-0.5 text-[10px]">
+            <span className="text-muted-foreground w-12">{bucket}</span>
+            <span className={cn("font-bold font-mono", b.winRate != null ? wrColor(b.winRate) : "text-muted-foreground")}>
+              {b.winRate != null ? `${b.winRate}% WR` : "\u2014"}
+            </span>
+            <span className="text-muted-foreground text-[9px]">({b.trades})</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Ticker Performance Section ── */
+function TickerPerfSection({ tickers, wrColor }: { tickers: Array<{ symbol: string; trades: number; winRate: number; totalPnl: number }>; wrColor: (n: number) => string }) {
+  return (
+    <div>
+      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 pl-2 border-l-2 border-[var(--neon-amber)]">Ticker Performance</div>
+      <div className="space-y-0.5">
+        {tickers.map(t => (
+          <div key={t.symbol} className="flex items-center gap-2 px-2 py-0.5 text-[10px]">
+            <span className="font-bold text-foreground w-16">{t.symbol}</span>
+            <span className="text-muted-foreground">{t.trades} sig</span>
+            <span className="flex-1" />
+            <span className={cn("font-bold font-mono", wrColor(t.winRate))}>{t.winRate}%</span>
+            <span className={cn("font-mono text-[9px]", t.totalPnl >= 0 ? "neon-green" : "neon-red")}>
+              {t.totalPnl >= 0 ? "+" : ""}{t.totalPnl.toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -621,14 +816,19 @@ export default function TradesPage() {
   const [capital, setCapital] = useState<number | null>(null);
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [scalpSummary, setScalpSummary] = useState<any>(null);
 
   const fetchActiveAndSignals = useCallback(async () => {
-    const [activeData, sigData] = await Promise.all([
+    const [activeData, sigData, summaryData] = await Promise.all([
       safeFetch<{ trades?: ActiveTrade[] }>("/api/trades?scope=active", {}),
       safeFetch<{ signals?: Signal[] }>("/api/signals?scope=list&limit=30", {}),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      safeFetch<any>("/api/signals?scope=summary", null),
     ]);
     setActiveTrades(activeData.trades || []);
     setAllSignals((sigData.signals || []).map(s => ({ ...s, signal_type: s.signal_type || s.direction || "" })));
+    if (summaryData) setScalpSummary(summaryData);
     setLoading(false);
   }, []);
 
@@ -734,10 +934,10 @@ export default function TradesPage() {
           )}
 
           {tab === "scalp" && (
-            <SignalTable
+            <ScalpSplitView
               signals={scalpSignals}
               loading={loading}
-              emptyMessage="No scalp signals"
+              summary={scalpSummary}
             />
           )}
 
