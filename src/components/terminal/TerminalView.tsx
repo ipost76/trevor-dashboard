@@ -122,10 +122,12 @@ export function TerminalView() {
       return;
     }
     if (seq === "__pgup__") {
+      console.log("[TERM] PgUp pressed, termRef:", !!termRef.current, "scrollPages:", typeof termRef.current?.scrollPages);
       termRef.current?.scrollPages(-1);
       return;
     }
     if (seq === "__pgdn__") {
+      console.log("[TERM] PgDn pressed, termRef:", !!termRef.current, "scrollPages:", typeof termRef.current?.scrollPages);
       termRef.current?.scrollPages(1);
       return;
     }
