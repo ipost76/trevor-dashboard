@@ -99,11 +99,13 @@ export function TerminalView() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
   }, []);
 
-  // Handle toolbar key press — debounce to prevent double-fire on mobile
+  // Handle toolbar key press — onPointerUp only, 300ms debounce guard
   const lastToolbarTap = useRef(0);
-  const handleToolbarKey = useCallback((seq: string) => {
+  const handleToolbarKey = useCallback((seq: string, e: React.PointerEvent | React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     const now = Date.now();
-    if (now - lastToolbarTap.current < 150) return; // debounce 150ms
+    if (now - lastToolbarTap.current < 300) return;
     lastToolbarTap.current = now;
 
     if (seq === "__ctrl__") {
@@ -117,7 +119,6 @@ export function TerminalView() {
       return;
     }
     wsSend(seq);
-    // Do NOT focus terminal — that opens the virtual keyboard on mobile
   }, [wsSend]);
 
   // Connect WebSocket + init xterm
@@ -529,17 +530,7 @@ export function TerminalView() {
             return (
               <button
                 key={k.label}
-                onTouchEnd={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleToolbarKey(k.seq);
-                }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  // Only fire on mouse if no recent touch (prevents double-fire)
-                  if (Date.now() - lastToolbarTap.current > 100) handleToolbarKey(k.seq);
-                }}
+                onPointerUp={(e) => handleToolbarKey(k.seq, e)}
                 style={{
                   minWidth: k.w,
                   height: 34,
