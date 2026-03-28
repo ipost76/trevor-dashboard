@@ -611,8 +611,14 @@ export function TerminalView() {
         </div>
       </div>
 
-      {/* Scoped scrollbar hide */}
-      <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
+      {/* Scoped styles: scrollbar hide + blue theme overrides */}
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .terminal-page { background: #0d1117 !important; }
+        .terminal-page .xterm { background-color: #0d1117 !important; }
+        .terminal-page .xterm-viewport { background-color: #0d1117 !important; }
+        .terminal-page .xterm-screen { background-color: #0d1117 !important; }
+      `}</style>
     </div>
   );
 }

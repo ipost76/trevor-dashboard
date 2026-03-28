@@ -38,5 +38,15 @@ const TerminalView = dynamic(
 );
 
 export default function TerminalPage() {
-  return <TerminalView />;
+  return (
+    <>
+      <style>{`
+        /* Override Hub parent backgrounds for terminal page */
+        body, html { background: #0d1117 !important; }
+        main { background: #0d1117 !important; }
+        main > * { background: #0d1117 !important; }
+      `}</style>
+      <TerminalView />
+    </>
+  );
 }
