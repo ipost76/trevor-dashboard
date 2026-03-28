@@ -157,6 +157,9 @@ export function TerminalView() {
       convertEol: true,
       allowProposedApi: true,
       scrollOnUserInput: true,
+      scrollSensitivity: mobile ? 3 : 1,
+      fastScrollSensitivity: mobile ? 10 : 5,
+      smoothScrollDuration: 100,
     });
 
     const fitAddon = new FitAddon();
@@ -451,8 +454,13 @@ export function TerminalView() {
       {/* ── Terminal Container ── */}
       <div
         ref={termContainerRef}
-        style={{ flex: 1, overflow: "hidden", position: "relative" }}
-        onClick={() => termRef.current?.focus()}
+        style={{ flex: 1, overflow: "hidden", position: "relative", touchAction: "pan-y" }}
+        onClick={(e) => {
+          // Only focus on tap (not drag/scroll). Check if it was a clean click.
+          if (!(e as unknown as { detail?: number }).detail || (e as unknown as { detail: number }).detail <= 1) {
+            termRef.current?.focus();
+          }
+        }}
       />
 
       {/* ── Reconnect Overlay ── */}
@@ -510,6 +518,7 @@ export function TerminalView() {
             overflowY: "hidden",
             WebkitOverflowScrolling: "touch",
             scrollbarWidth: "none",
+            touchAction: "pan-x",
           }}
           className="hide-scrollbar"
         >
