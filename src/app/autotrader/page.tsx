@@ -5,6 +5,7 @@ import {
   Activity, DollarSign, TrendingUp, TrendingDown,
   Pause, Play, AlertTriangle, Zap, Target, Clock,
 } from "lucide-react";
+import { fmtDollarPrice, fmtPctSigned, fmtPrice } from "@/lib/format";
 
 type Position = {
   ticker: string; side: string; entry_price: number; qty: number;
@@ -99,12 +100,12 @@ export default function AutoTraderPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Daily P&L" value={`$${dailyPnl >= 0 ? "+" : ""}${dailyPnl.toFixed(2)}`}
+        <StatCard label="Daily P&L" value={`$${fmtPctSigned(dailyPnl)}`}
           icon={dailyPnl >= 0 ? TrendingUp : TrendingDown}
           color={dailyPnl >= 0 ? "text-green-400" : "text-red-400"} />
         <StatCard label="Win Rate" value={`${stats.winRate || 0}%`}
           icon={Target} color="text-[var(--neon-cyan)]" />
-        <StatCard label="Total P&L" value={`$${(stats.totalPnl || 0) >= 0 ? "+" : ""}${(stats.totalPnl || 0).toFixed(2)}`}
+        <StatCard label="Total P&L" value={`$${fmtPctSigned(stats.totalPnl || 0)}`}
           icon={DollarSign}
           color={(stats.totalPnl || 0) >= 0 ? "text-green-400" : "text-red-400"} />
         <StatCard label="Trades" value={String(stats.total || 0)}
@@ -138,8 +139,8 @@ export default function AutoTraderPage() {
         <div className="glass rounded-lg p-3">
           <div className="text-[10px] font-bold tracking-wider text-muted-foreground mb-2">PERFORMANCE</div>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div>Profit Factor: <span className="text-foreground font-mono">{(stats.profitFactor || 0).toFixed(2)}</span></div>
-            <div>Avg P&L: <span className="text-foreground font-mono">{((stats as Record<string, number>).avgPnlPct || 0).toFixed(2)}%</span></div>
+            <div>Profit Factor: <span className="text-foreground font-mono">{fmtPrice(stats.profitFactor || 0)}</span></div>
+            <div>Avg P&L: <span className="text-foreground font-mono">{fmtPctSigned((stats as Record<string, number>).avgPnlPct || 0)}%</span></div>
           </div>
         </div>
       </div>
@@ -164,10 +165,10 @@ export default function AutoTraderPage() {
                   <span className="text-xs font-bold">{p.ticker}</span>
                 </div>
                 <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
-                  <span>Entry: ${p.entry_price?.toFixed(2)}</span>
+                  <span>Entry: {fmtDollarPrice(p.entry_price)}</span>
                   <span>Qty: {p.qty}</span>
-                  <span className="text-red-400">Stop: ${p.stop_price?.toFixed(2)}</span>
-                  <span className="text-green-400">Target: ${p.target_price?.toFixed(2)}</span>
+                  <span className="text-red-400">Stop: {fmtDollarPrice(p.stop_price)}</span>
+                  <span className="text-green-400">Target: {fmtDollarPrice(p.target_price)}</span>
                   <span>Score: {p.signal_score?.toFixed(0)}</span>
                 </div>
               </div>
@@ -225,9 +226,9 @@ export default function AutoTraderPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`font-mono ${t.pnl > 0 ? "text-green-400" : t.pnl < 0 ? "text-red-400" : ""}`}>
-                      {t.pnl_pct > 0 ? "+" : ""}{t.pnl_pct?.toFixed(2)}%
+                      {fmtPctSigned(t.pnl_pct)}%
                     </span>
-                    <span className="text-muted-foreground">${Math.abs(t.pnl || 0).toFixed(2)}</span>
+                    <span className="text-muted-foreground">{fmtDollarPrice(Math.abs(t.pnl || 0))}</span>
                     <span className="text-muted-foreground">{t.exit_reason}</span>
                   </div>
                 </div>

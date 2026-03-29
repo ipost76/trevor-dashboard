@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Activity, RefreshCw, TrendingUp, TrendingDown, Target, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtPctSigned, fmtDollar } from "@/lib/format";
 import { safeFetch } from "@/lib/fetch";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,7 +65,7 @@ const wrColor = (wr: number) => wr >= 55 ? "neon-green" : wr < 45 ? "neon-red" :
 const pfColor = (pf: number) => pf >= 1.5 ? "neon-green" : pf >= 1.0 ? "neon-amber" : "neon-red";
 const pnlColor = (v: number) => v >= 0 ? "neon-green" : "neon-red";
 const fmtK = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
-const fmtPct = (v: number) => v >= 0 ? `+${v.toFixed(2)}%` : `${v.toFixed(2)}%`;
+const fmtPctLocal = (v: number) => `${fmtPctSigned(v)}%`;
 
 const BUCKET_LABELS: Record<string, string> = {
   "35_44": "35-44%", "45_54": "45-54%", "55_64": "55-64%", "65_plus": "65%+",
@@ -169,19 +170,19 @@ export default function SignalsPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <div className="text-center">
                   <div className="stat-label">Avg Winner</div>
-                  <div className="text-lg font-bold font-mono neon-green">{fmtPct(perf.avg_winner_pct)}</div>
+                  <div className="text-lg font-bold font-mono neon-green">{fmtPctLocal(perf.avg_winner_pct)}</div>
                 </div>
                 <div className="text-center">
                   <div className="stat-label">Avg Loser</div>
-                  <div className="text-lg font-bold font-mono neon-red">{perf.avg_loser_pct.toFixed(2)}%</div>
+                  <div className="text-lg font-bold font-mono neon-red">{fmtPctSigned(perf.avg_loser_pct)}%</div>
                 </div>
                 <div className="text-center">
                   <div className="stat-label">Best Trade</div>
-                  <div className="text-lg font-bold font-mono neon-green">{fmtPct(perf.best_trade_pct)}</div>
+                  <div className="text-lg font-bold font-mono neon-green">{fmtPctLocal(perf.best_trade_pct)}</div>
                 </div>
                 <div className="text-center">
                   <div className="stat-label">Worst Trade</div>
-                  <div className="text-lg font-bold font-mono neon-red">{perf.worst_trade_pct.toFixed(2)}%</div>
+                  <div className="text-lg font-bold font-mono neon-red">{fmtPctSigned(perf.worst_trade_pct)}%</div>
                 </div>
               </div>
 
@@ -190,7 +191,7 @@ export default function SignalsPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <div className="text-center">
                     <div className="stat-label">Capital</div>
-                    <div className="text-lg font-bold font-mono neon-text">${perf.capital.toFixed(2)}</div>
+                    <div className="text-lg font-bold font-mono neon-text">{fmtDollar(perf.capital)}</div>
                   </div>
                   <div className="text-center">
                     <div className="stat-label">Long Exposure</div>

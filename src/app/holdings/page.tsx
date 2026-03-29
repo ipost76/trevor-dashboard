@@ -7,6 +7,7 @@ import {
   Eye, EyeOff, TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import { safeFetch } from "@/lib/fetch";
 import { Panel } from "@/components/ui/panel";
 import { StatBlock } from "@/components/ui/stat-block";
@@ -251,7 +252,7 @@ export default function HoldingsPage() {
             label="Unrealized P&L"
             value={
               openPositions.length > 0
-                ? `${unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}%`
+                ? `${fmtPctSigned(unrealizedPnl)}%`
                 : "--"
             }
             color={
@@ -272,7 +273,7 @@ export default function HoldingsPage() {
             label="Realized P&L"
             value={
               totals.closed > 0
-                ? `${realizedPnl >= 0 ? "+" : ""}${realizedPnl.toFixed(2)}%`
+                ? `${fmtPctSigned(realizedPnl)}%`
                 : "--"
             }
             color={
@@ -412,11 +413,11 @@ export default function HoldingsPage() {
                       {p.quantity}
                     </span>
                     <span className="w-20 text-right font-mono text-muted-foreground">
-                      ${p.entry_price.toFixed(2)}
+                      {fmtDollarPrice(p.entry_price)}
                     </span>
                     <span className="w-20 text-right font-mono text-muted-foreground">
                       {displayPrice !== undefined
-                        ? `$${displayPrice.toFixed(2)}`
+                        ? fmtDollarPrice(displayPrice)
                         : "--"}
                     </span>
                     <span
@@ -430,7 +431,7 @@ export default function HoldingsPage() {
                       )}
                     >
                       {pnl !== 0
-                        ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%`
+                        ? `${fmtPctSigned(pnl)}%`
                         : "--"}
                     </span>
                     <span className="w-10 text-right text-[10px] text-muted-foreground">

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { safeFetch } from "@/lib/fetch";
+import { fmtPrice } from "@/lib/format";
 
 export function StatusBar() {
   const [stats, setStats] = useState<{
@@ -22,10 +23,10 @@ export function StatusBar() {
           trades: sigObj?.total ?? (typeof d.trades === "number" ? d.trades : 0),
           signals: sigObj?.total ?? (typeof d.signals === "number" ? d.signals : 0),
           cost: typeof d.todayCost === "number"
-            ? `$${d.todayCost.toFixed(3)}`
+            ? `$${fmtPrice(d.todayCost)}`
             : typeof d.cost_today === "number"
-              ? `$${d.cost_today.toFixed(3)}`
-              : "$0.000",
+              ? `$${fmtPrice(d.cost_today)}`
+              : "$0",
           uptime: d.trevor?.running ? "ONLINE" : "OFFLINE",
           rank: d.rank || "Unknown",
         });

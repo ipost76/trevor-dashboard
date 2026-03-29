@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { fmtDollarPrice, fmtDollar, fmtPctSigned } from "@/lib/format";
 import {
   Activity,
   TrendingUp,
@@ -452,7 +453,7 @@ function EditableEntry({ trade: t, onSaved }: { trade: Record<string, unknown>; 
     <div className="group cursor-pointer" onClick={() => { setVal(String(t.entry_price ?? "")); setEditing(true); }}>
       <span className="text-muted-foreground">Entry</span><br />
       <span className={cn("font-mono", flash === "ok" && "text-[var(--neon-green)]")}>
-        ${(t.entry_price as number)?.toFixed(2)}
+        {fmtDollarPrice(t.entry_price as number)}
       </span>
       <Pencil className="h-2 w-2 inline ml-0.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
     </div>
@@ -510,7 +511,7 @@ function MarginEditor({ trade: t, onSaved }: { trade: ActiveTrade; onSaved: () =
     <div className="mt-1.5 flex items-center gap-1.5 text-[10px] group cursor-pointer" onClick={() => { setVal(String(t.margin_usd ?? "")); setEditing(true); }}>
       {t.margin_usd ? (
         <>
-          <span className="text-muted-foreground">\U0001f4b0 ${t.margin_usd.toFixed(2)} margin \u2022 ${notional.toFixed(2)} notional</span>
+          <span className="text-muted-foreground">\U0001f4b0 {fmtDollar(t.margin_usd)} margin \u2022 {fmtDollar(notional)} notional</span>
           <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
         </>
       ) : (
@@ -732,7 +733,7 @@ function ActiveTradesTab({
                 )}
               </div>
               <span className={cn("text-lg font-bold font-mono", pnl >= 0 ? "neon-green" : "neon-red")}>
-                {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}%
+                {fmtPctSigned(pnl)}%
               </span>
             </div>
 
@@ -745,11 +746,11 @@ function ActiveTradesTab({
               </div>
               <div>
                 <span className="text-muted-foreground">SL</span><br />
-                <span className="font-mono neon-red">{t.stop_price != null ? `$${t.stop_price.toFixed(2)}` : "-"}</span>
+                <span className="font-mono neon-red">{t.stop_price != null ? fmtDollarPrice(t.stop_price) : "-"}</span>
               </div>
               <div>
                 <span className="text-muted-foreground">Target</span><br />
-                <span className="font-mono neon-green">{dynTarget ? `$${dynTarget.toFixed(2)}` : "-"}</span>
+                <span className="font-mono neon-green">{dynTarget ? fmtDollarPrice(dynTarget) : "-"}</span>
               </div>
             </div>
 
@@ -831,7 +832,7 @@ function ActiveTradesTab({
                   <div className={cn("panel p-2 border text-[10px]", previewPnl >= 0 ? "border-[rgba(0,255,136,0.3)] bg-[rgba(0,255,136,0.04)]" : "border-[rgba(255,51,102,0.3)] bg-[rgba(255,51,102,0.04)]")}>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Est. P&L</span>
-                      <span className={cn("font-bold font-mono", previewPnl >= 0 ? "neon-green" : "neon-red")}>{previewPnl >= 0 ? "+" : ""}{previewPnl.toFixed(2)}%</span>
+                      <span className={cn("font-bold font-mono", previewPnl >= 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(previewPnl)}%</span>
                     </div>
                   </div>
                 )}
@@ -956,7 +957,7 @@ export default function TradesPage() {
                 onClick={() => { setCapitalInput(String(capital)); setEditingCapital(true); }}
                 className="flex items-center gap-1 text-[11px] text-[var(--neon-green)] hover:brightness-125 transition-colors"
               >
-                ${capital.toFixed(2)}
+                {fmtDollar(capital)}
                 <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
               </button>
             )}

@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { safeFetch } from "@/lib/fetch";
 import { cn } from "@/lib/utils";
+import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import { RefreshCw, Plus, X, Check, Pin, ChevronDown, ChevronRight, Trash2, Edit3, ExternalLink } from "lucide-react";
 
 /* ── types ─────────────────────────────────────────────────────── */
@@ -234,7 +235,7 @@ function TradesTab() {
               <div key={t.id} className="flex items-center justify-between p-3 rounded bg-[rgba(0,240,255,0.03)] border border-[rgba(0,240,255,0.08)]">
                 <div>
                   <span className="font-bold text-xs">{t.ticker}</span> {badge(t.direction, t.direction === "LONG" ? "text-green-400 border-green-400/30 bg-green-400/10" : "text-red-400 border-red-400/30 bg-red-400/10")}
-                  <div className="text-[10px] text-muted-foreground mt-1">${t.entry_price?.toFixed(2)} {t.leverage}x{t.stop_loss ? ` Stop $${t.stop_loss}` : ""} {timeAgo(t.opened_at)}</div>
+                  <div className="text-[10px] text-muted-foreground mt-1">{fmtDollarPrice(t.entry_price)} {t.leverage}x{t.stop_loss ? ` Stop ${fmtDollarPrice(t.stop_loss)}` : ""} {timeAgo(t.opened_at)}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => { setCloseId(t.id); setClosePrice(""); }} className="text-[10px] px-2 py-1 rounded border border-cyan-400/30 text-cyan-400 hover:bg-cyan-400/10">Close</button>
@@ -257,7 +258,7 @@ function TradesTab() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm">{t.outcome === "WIN" ? "\u2705" : t.outcome === "LOSS" ? "\u274c" : "\u2796"}</span>
                   <span className="text-xs font-bold">{t.ticker} {t.direction}</span>
-                  <span className={cn("text-xs font-mono", (t.pnl_pct ?? 0) >= 0 ? "neon-green" : "neon-red")}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? "+" : ""}${t.pnl_pct.toFixed(1)}%` : ""}</span>
+                  <span className={cn("text-xs font-mono", (t.pnl_pct ?? 0) >= 0 ? "neon-green" : "neon-red")}>{t.pnl_pct != null ? `${fmtPctSigned(t.pnl_pct)}%` : ""}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-muted-foreground">{timeAgo(t.closed_at)}</span>
