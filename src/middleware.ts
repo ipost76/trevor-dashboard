@@ -19,6 +19,16 @@ function isApiRoute(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
+  // Redirect direct IP access to domain
+  const host = request.headers.get("host") || "";
+  if (host.startsWith("34.28.231.36")) {
+    const url = request.nextUrl.clone();
+    url.host = "trevor-prime.com";
+    url.port = "";
+    url.protocol = "https";
+    return NextResponse.redirect(url, 301);
+  }
+
   const { pathname } = request.nextUrl;
 
   // Always allow: login page, auth API, static assets
