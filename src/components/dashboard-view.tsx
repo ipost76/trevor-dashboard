@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
+import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import Link from "next/link";
 import { StatBlock } from "@/components/ui/stat-block";
 import { DirectionBadge } from "@/components/ui/direction-badge";
@@ -186,13 +187,13 @@ export function DashboardView() {
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
         <div className="grid grid-cols-4 gap-x-2 gap-y-1 px-2 py-1.5 md:flex md:items-center md:gap-5 md:px-3">
-          <StatBlock label="P&L" value={`${data.totalPnl >= 0 ? "+" : ""}${data.totalPnl.toFixed(1)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
+          <StatBlock label="P&L" value={`${fmtPctSigned(data.totalPnl)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
           <StatBlock label="W/L" value={`${data.wins}/${data.losses}`} sub={`${winPct}%`} />
           <StatBlock label="Win Rate" value={`${winPct}%`} color={Number(winPct) >= 50 ? "neon-green" : "neon-red"} />
           <StatBlock label="Active" value={String(data.activeTrades.length)} color="neon-text" />
           <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
           <StatBlock label="Signals" value={String(data.totalInsights)} />
-          <StatBlock label="Avg P&L" value={`${data.avgPnl >= 0 ? "+" : ""}${data.avgPnl.toFixed(2)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
+          <StatBlock label="Avg P&L" value={`${fmtPctSigned(data.avgPnl)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
         </div>
       </div>
 
@@ -215,7 +216,7 @@ export function DashboardView() {
               </div>
               <span className="text-[9px] text-muted-foreground">{data.totalTrades} trades</span>
               <span className="text-[9px] text-muted-foreground">PF: {data.profitFactor ?? "\u2014"}</span>
-              <span className={cn("text-[9px] font-mono", data.totalPnl >= 0 ? "neon-green" : "neon-red")}>{data.totalPnl >= 0 ? "+" : ""}{data.totalPnl.toFixed(1)}%</span>
+              <span className={cn("text-[9px] font-mono", data.totalPnl >= 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(data.totalPnl)}%</span>
             </div>
           )}
           {/* Signal feed */}
@@ -269,12 +270,12 @@ export function DashboardView() {
                           {t.leverage && t.leverage > 1 && <span className="text-[9px] neon-amber">{t.leverage}x</span>}
                         </div>
                         <span className={cn("text-[11px] font-bold font-mono", pnl >= 0 ? "neon-green" : "neon-red")}>
-                          {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}%
+                          {fmtPctSigned(pnl)}%
                         </span>
                       </div>
                       <div className="flex gap-3 text-[9px] text-muted-foreground">
-                        <span>Entry: {t.entry_price ? `$${t.entry_price.toFixed(t.entry_price < 1 ? 4 : 2)}` : "—"}</span>
-                        {lp ? <span>Now: ${lp.toFixed(lp < 1 ? 4 : 2)}</span> : t.current_price ? <span>Now: ${t.current_price.toFixed(2)}</span> : null}
+                        <span>Entry: {t.entry_price ? fmtDollarPrice(t.entry_price) : "—"}</span>
+                        {lp ? <span>Now: {fmtDollarPrice(lp)}</span> : t.current_price ? <span>Now: {fmtDollarPrice(t.current_price)}</span> : null}
                       </div>
                     </div>
                   );
@@ -353,7 +354,7 @@ function AutoTraderPanel({ data }: { data: AutoData | null }) {
                   <div key={i} className="flex items-center gap-2 px-1 py-[3px] rounded-sm hover:bg-[rgba(0,240,255,0.03)]">
                     <span className="text-[10px] font-bold w-16 truncate">{p.ticker}</span>
                     <DirectionBadge dir={p.side === "BUY" ? "LONG" : "SHORT"} />
-                    <span className="text-[9px] text-muted-foreground flex-1">${p.entry_price?.toFixed(2)}</span>
+                    <span className="text-[9px] text-muted-foreground flex-1">{fmtDollarPrice(p.entry_price)}</span>
                   </div>
                 ))}
               </div>

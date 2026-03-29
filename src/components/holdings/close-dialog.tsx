@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtDollarPrice, fmtDollar, fmtPctSigned } from "@/lib/format";
 import { DirectionBadge } from "@/components/ui/direction-badge";
 import type { Position } from "@/app/holdings/page";
 
@@ -93,7 +94,7 @@ export function CloseDialog({ open, onClose, onConfirm, position }: CloseDialogP
                 <div>
                   <span className="text-muted-foreground">Entry Price</span>
                   <div className="font-mono font-bold">
-                    ${position.entry_price.toFixed(2)}
+                    {fmtDollarPrice(position.entry_price)}
                   </div>
                 </div>
                 <div>
@@ -141,8 +142,7 @@ export function CloseDialog({ open, onClose, onConfirm, position }: CloseDialogP
                         preview.pnlPct >= 0 ? "neon-green" : "neon-red"
                       )}
                     >
-                      {preview.pnlPct >= 0 ? "+" : ""}
-                      {preview.pnlPct.toFixed(2)}%
+                      {fmtPctSigned(preview.pnlPct)}%
                     </div>
                   </div>
                   <div className="text-right">
@@ -153,8 +153,7 @@ export function CloseDialog({ open, onClose, onConfirm, position }: CloseDialogP
                         preview.pnlUsd >= 0 ? "neon-green" : "neon-red"
                       )}
                     >
-                      {preview.pnlUsd >= 0 ? "+" : ""}
-                      ${Math.abs(preview.pnlUsd).toFixed(2)}
+                      {preview.pnlUsd >= 0 ? "+" : "-"}{fmtDollar(Math.abs(preview.pnlUsd))}
                     </div>
                   </div>
                 </div>

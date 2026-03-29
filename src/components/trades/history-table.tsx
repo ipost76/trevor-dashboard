@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
+import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import { DirectionBadge } from "@/components/ui/direction-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -414,11 +415,11 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
                     <DirectionBadge dir={r.direction} />
                     {(r.leverage ?? 1) > 1 && <span className="text-[9px] neon-amber">{r.leverage}x</span>}
                   </div>
-                  <span className={cn("text-[12px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>{pnl > 0 ? "+" : ""}{pnl.toFixed(1)}%</span>
+                  <span className={cn("text-[12px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(pnl)}%</span>
                 </div>
                 <div className="flex gap-3 text-[9px] text-muted-foreground">
-                  <span>Entry: ${r.entry_price?.toFixed(r.entry_price < 1 ? 4 : 2)}</span>
-                  <span>Exit: ${r.exit_price?.toFixed(r.exit_price < 1 ? 4 : 2)}</span>
+                  <span>Entry: {fmtDollarPrice(r.entry_price)}</span>
+                  <span>Exit: {fmtDollarPrice(r.exit_price)}</span>
                   {r.confidence != null && <span>Conf: {r.confidence}</span>}
                   {date && <span>{date}</span>}
                 </div>
@@ -503,8 +504,7 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
                     pnl > 0 ? "neon-green" : pnl < 0 ? "neon-red" : "text-muted-foreground"
                   )}
                 >
-                  {pnl > 0 ? "+" : ""}
-                  {pnl.toFixed(2)}%
+                  {fmtPctSigned(pnl)}%
                 </span>
 
                 {/* Leverage */}

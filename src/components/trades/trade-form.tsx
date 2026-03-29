@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Save, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtPctSigned } from "@/lib/format";
 
 /* ── Types ── */
 
@@ -263,8 +264,7 @@ export function TradeForm({ open, onClose, onSave }: TradeFormProps) {
                       : "text-muted-foreground"
                 )}
               >
-                {previewPnl > 0 ? "+" : ""}
-                {previewPnl.toFixed(2)}%
+                {fmtPctSigned(previewPnl)}%
               </div>
               {levNum > 1 && (
                 <span className="text-[9px] neon-amber">{levNum}x leveraged</span>
