@@ -115,6 +115,40 @@ def main():
         except:
             result["byRegime"] = []
 
+        # ── V3 Pipeline Data ──
+        v3 = {}
+        try:
+            cnt = conn.execute("SELECT COUNT(*) FROM training_exit_patterns").fetchone()[0]
+            by_ticker = conn.execute("SELECT ticker, COUNT(*) as cnt, ROUND(AVG(CASE WHEN recommended_pnl_pct > 0 THEN 1.0 ELSE 0.0 END)*100,1) as wr FROM training_exit_patterns GROUP BY ticker ORDER BY cnt DESC LIMIT 15").fetchall()
+            by_regime = conn.execute("SELECT regime, COUNT(*) as cnt, ROUND(AVG(CASE WHEN recommended_pnl_pct > 0 THEN 1.0 ELSE 0.0 END)*100,1) as wr FROM training_exit_patterns GROUP BY regime").fetchall()
+            by_method = conn.execute("SELECT recommended_method, COUNT(*) as cnt FROM training_exit_patterns GROUP BY recommended_method").fetchall()
+            v3["exit_patterns"] = {
+                "total": cnt,
+                "by_ticker": [{"ticker": r[0], "count": r[1], "win_rate": r[2]} for r in by_ticker],
+                "by_regime": [{"regime": r[0], "count": r[1], "win_rate": r[2]} for r in by_regime],
+                "by_method": {r[0] or "unknown": r[1] for r in by_method},
+            }
+        except Exception:
+            v3["exit_patterns"] = {"total": -1, "by_ticker": [], "by_regime": [], "by_method": {}}
+
+        try:
+            cnt = conn.execute("SELECT COUNT(*) FROM training_regime_transitions").fetchone()[0]
+            by_sev = conn.execute("SELECT severity, COUNT(*) as cnt, ROUND(AVG(survival_rate_4h)*100,1) as avg_surv FROM training_regime_transitions GROUP BY severity").fetchall()
+            v3["regime_transitions"] = {
+                "total": cnt,
+                "by_severity": [{"severity": r[0], "count": r[1], "avg_survival_rate": r[2] or 0} for r in by_sev],
+            }
+        except Exception:
+            v3["regime_transitions"] = {"total": -1, "by_severity": []}
+
+        try:
+            cnt = conn.execute("SELECT COUNT(*) FROM training_learned_outcomes").fetchone()[0]
+            v3["learned_outcomes"] = {"total": cnt}
+        except Exception:
+            v3["learned_outcomes"] = {"total": -1}
+
+        result["v3_pipeline"] = v3
+
         conn.close()
 
         # ChromaDB
@@ -126,10 +160,9 @@ def main():
             chroma_cols = []
             chroma_total = 0
             for col in collections:
-                if "training" in col.name:
-                    cnt = col.count()
-                    chroma_cols.append({"name": col.name, "trainingDocs": cnt})
-                    chroma_total += cnt
+                cnt = col.count()
+                chroma_cols.append({"name": col.name, "trainingDocs": cnt})
+                chroma_total += cnt
             result["chromaStats"] = {"collections": chroma_cols, "totalDocuments": chroma_total}
         except Exception as e:
             result["chromaStats"] = {"collections": [], "totalDocuments": 0, "error": str(e)}
