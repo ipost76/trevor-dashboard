@@ -93,7 +93,7 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const body = await request.json();
-  const { id, ids } = body;
+  const { id, ids, trade_id } = body;
 
   const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
   const pythonPath = join(trevorDir, "venv", "bin", "python3");
@@ -111,15 +111,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(JSON.parse(raw));
     }
 
-    if (id != null) {
+    const deleteId = trade_id || id;
+    if (deleteId != null) {
+      const safeId = String(deleteId).replace(/'/g, "'\"'\"'");
       const raw = execSync(
-        `${pythonPath} ${scriptPath} delete_trade ${String(id)}`,
-        { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
+        `${pythonPath} ${scriptPath} delete_trade '${safeId}'`,
+        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
       ).trim();
       return NextResponse.json(JSON.parse(raw));
     }
 
-    return NextResponse.json({ error: "Missing id or ids" }, { status: 400 });
+    return NextResponse.json({ error: "Missing id, trade_id, or ids" }, { status: 400 });
   } catch (err) {
     return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
   }

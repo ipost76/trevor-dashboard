@@ -94,7 +94,7 @@ def main():
         try:
             total = conn.execute(f"SELECT COUNT(*) FROM active_trades WHERE {where}").fetchone()[0]
             rows = conn.execute(f"""
-                SELECT trade_id, ticker, direction, entry_price, exit_price, pnl_pct,
+                SELECT id, trade_id, ticker, direction, entry_price, exit_price, pnl_pct,
                        leverage, confidence, opened_at as created_at, closed_at, track
                 FROM active_trades WHERE {where}
                 ORDER BY closed_at DESC LIMIT {limit} OFFSET {offset}
@@ -149,42 +149,128 @@ def main():
             conn_rw.close()
 
     elif scope == "delete_trade":
-        trade_id = int(sys.argv[2]) if len(sys.argv) > 2 else None
-        if trade_id is None:
+        trade_id_arg = sys.argv[2] if len(sys.argv) > 2 else None
+        if not trade_id_arg:
             conn.close()
             print(json.dumps({"error": "Missing trade id"}))
             return
-        # Read ticker before deleting (conn is read-only, fine for SELECT)
-        try:
-            row = conn.execute("SELECT ticker FROM trade_outcomes WHERE rowid=?", (trade_id,)).fetchone()
-            ticker = row["ticker"] if row else None
-        except Exception:
-            ticker = None
+
+        purged = {}
+
+        # Find trade in active_trades by trade_id (string) or id (numeric)
+        trade = conn.execute(
+            "SELECT trade_id, ticker, direction, entry_price, exit_price, pnl_pct FROM active_trades WHERE trade_id=? AND status='closed'",
+            (trade_id_arg,)
+        ).fetchone()
+        if not trade:
+            try:
+                trade = conn.execute(
+                    "SELECT trade_id, ticker, direction, entry_price, exit_price, pnl_pct FROM active_trades WHERE id=? AND status='closed'",
+                    (int(trade_id_arg),)
+                ).fetchone()
+            except (ValueError, TypeError):
+                pass
+        if not trade:
+            conn.close()
+            print(json.dumps({"error": "Trade not found", "trade_id": trade_id_arg}))
+            return
+
+        trade_id = trade["trade_id"]
+        ticker = trade["ticker"]
+        direction = trade["direction"]
+        entry_price = trade["entry_price"]
+        exit_price = trade["exit_price"]
+        pnl_pct = trade["pnl_pct"]
         conn.close()
+
+        # SQLite deletions (read-write)
         conn_rw = sqlite3.connect(db_path)
         try:
-            conn_rw.execute("DELETE FROM trade_outcomes WHERE rowid=?", (trade_id,))
+            cur = conn_rw.execute("DELETE FROM active_trades WHERE trade_id=? AND status='closed'", (trade_id,))
+            purged["active_trades"] = cur.rowcount
+
+            cur = conn_rw.execute(
+                "DELETE FROM trade_outcomes WHERE ticker=? AND direction=? AND entry_price=? AND exit_price=?",
+                (ticker, direction, entry_price, exit_price)
+            )
+            purged["trade_outcomes"] = cur.rowcount
+
+            try:
+                cur = conn_rw.execute("DELETE FROM training_learned_outcomes WHERE trade_id=?", (trade_id,))
+                purged["training_learned_outcomes"] = cur.rowcount
+            except Exception:
+                purged["training_learned_outcomes"] = 0
+
             conn_rw.commit()
         except Exception as e:
             conn_rw.close()
-            print(json.dumps({"error": str(e)}))
+            print(json.dumps({"error": str(e), "partial": purged}))
             return
         conn_rw.close()
-        # Attempt ChromaDB cleanup
+
+        # ChromaDB cleanup — all relevant collections
         try:
             import chromadb
             client = chromadb.PersistentClient(path=os.path.join(trevor_dir, "vectordb"))
-            for col_name in ["trade-learnings", "trade_patterns"]:
+
+            # learned-outcomes: deterministic ID format
+            try:
+                col = client.get_collection("learned-outcomes")
+                deleted = 0
+                for prefix in ["learned-manual-", "learned-autotrader-"]:
+                    try:
+                        doc_id = f"{prefix}{trade_id}"
+                        existing = col.get(ids=[doc_id])
+                        if existing and existing["ids"]:
+                            col.delete(ids=[doc_id])
+                            deleted += 1
+                    except Exception:
+                        pass
+                purged["learned-outcomes"] = deleted
+            except Exception:
+                purged["learned-outcomes"] = 0
+
+            # trade-learnings: match by symbol + direction + pnl proximity
+            try:
+                col = client.get_collection("trade-learnings")
+                results = col.get(where={"symbol": ticker}, limit=100)
+                to_delete = []
+                if results and results["ids"]:
+                    for i, meta in enumerate(results.get("metadatas", [])):
+                        if not meta:
+                            continue
+                        if meta.get("direction", "").upper() != (direction or "").upper():
+                            continue
+                        if pnl_pct is not None and meta.get("pnl_pct") is not None:
+                            if abs(float(meta["pnl_pct"]) - float(pnl_pct)) < 1.0:
+                                to_delete.append(results["ids"][i])
+                if to_delete:
+                    col.delete(ids=to_delete)
+                purged["trade-learnings"] = len(to_delete)
+            except Exception:
+                purged["trade-learnings"] = 0
+
+            # trade_patterns + trade_knowledge: match by ticker + direction
+            for col_name in ["trade_patterns", "trade_knowledge"]:
                 try:
                     col = client.get_collection(col_name)
-                    results = col.get(where={"trade_id": str(trade_id)})
+                    results = col.get(where={"ticker": ticker}, limit=100)
+                    to_delete = []
                     if results and results["ids"]:
-                        col.delete(ids=results["ids"])
+                        for i, meta in enumerate(results.get("metadatas", [])):
+                            if meta and meta.get("direction", "").upper() == (direction or "").upper():
+                                if pnl_pct is not None and meta.get("pnl_pct") is not None:
+                                    if abs(float(meta["pnl_pct"]) - float(pnl_pct)) < 1.0:
+                                        to_delete.append(results["ids"][i])
+                    if to_delete:
+                        col.delete(ids=to_delete)
+                    purged[col_name] = len(to_delete)
                 except Exception:
-                    pass
+                    purged[col_name] = 0
         except Exception:
             pass
-        print(json.dumps({"ok": True, "deleted": trade_id, "ticker": ticker}))
+
+        print(json.dumps({"ok": True, "deleted": trade_id, "ticker": ticker, "purged": purged}))
 
     elif scope == "bulk_update":
         ids_json = sys.argv[2] if len(sys.argv) > 2 else "[]"

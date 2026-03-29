@@ -27,6 +27,7 @@ type TrainingStatus = "KEEP" | "EXCLUDE" | "REVIEW" | "IN_MEMORY";
 
 type HistoryRecord = {
   id: number;
+  trade_id?: string;
   ticker: string;
   direction: string;
   entry_price: number;
@@ -69,15 +70,22 @@ const STATUS_STYLES: Record<TrainingStatus, string> = {
 
 function DeleteModal({
   count,
+  trade,
   isChromaDB,
+  isDeleting,
+  deleteError,
   onConfirm,
   onCancel,
 }: {
   count: number;
+  trade?: HistoryRecord | null;
   isChromaDB: boolean;
+  isDeleting?: boolean;
+  deleteError?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const pnl = trade ? (trade.leveraged_pnl_pct ?? trade.pnl_pct ?? 0) : 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="panel p-4 w-full max-w-sm mx-4 space-y-3 border border-[var(--neon-red)] shadow-[0_0_20px_rgba(255,51,102,0.2)]">
@@ -85,6 +93,18 @@ function DeleteModal({
           <AlertTriangle className="h-4 w-4" />
           <span className="text-sm font-bold">Confirm Delete</span>
         </div>
+        {trade && count === 1 && (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded bg-[rgba(255,51,102,0.05)] border border-[rgba(255,51,102,0.15)]">
+            <span className="text-[11px] font-bold">{trade.ticker}</span>
+            <DirectionBadge dir={trade.direction} />
+            <span className="text-[10px] text-muted-foreground">
+              {fmtDollarPrice(trade.entry_price)} → {fmtDollarPrice(trade.exit_price)}
+            </span>
+            <span className={cn("text-[11px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>
+              {fmtPctSigned(pnl)}%
+            </span>
+          </div>
+        )}
         <div className="text-[11px] text-muted-foreground space-y-1">
           <p>
             This will permanently delete{" "}
@@ -94,7 +114,11 @@ function DeleteModal({
           <ul className="list-disc list-inside space-y-0.5 pl-1">
             <li>
               <Database className="h-2.5 w-2.5 inline mr-1" />
-              SQLite trade_outcomes table
+              SQLite active_trades + trade_outcomes
+            </li>
+            <li>
+              <Database className="h-2.5 w-2.5 inline mr-1" />
+              Training learned outcomes
             </li>
             {isChromaDB && (
               <li>
@@ -107,15 +131,21 @@ function DeleteModal({
             This action cannot be undone.
           </p>
         </div>
+        {deleteError && (
+          <p className="text-[10px] text-[var(--neon-red)] bg-[rgba(255,51,102,0.1)] px-2 py-1 rounded">
+            Error: {deleteError}
+          </p>
+        )}
         <div className="flex items-center gap-2 justify-end pt-1">
-          <button onClick={onCancel} className="btn-primary text-[10px] px-3 py-1">
+          <button onClick={onCancel} disabled={isDeleting} className="btn-primary text-[10px] px-3 py-1 disabled:opacity-50">
             CANCEL
           </button>
           <button
             onClick={onConfirm}
-            className="text-[10px] px-3 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.15)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.25)] transition-colors"
+            disabled={isDeleting}
+            className="text-[10px] px-3 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.15)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.25)] transition-colors disabled:opacity-50"
           >
-            DELETE
+            {isDeleting ? "DELETING..." : "DELETE"}
           </button>
         </div>
       </div>
@@ -164,9 +194,13 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
   });
   const [deleteModal, setDeleteModal] = useState<{
     ids: number[];
+    trade?: HistoryRecord | null;
     show: boolean;
   }>({ ids: [], show: false });
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [pnlChart, setPnlChart] = useState<Array<{ date: string; cumulative: number }>>([]);
+  const [pnlRefreshKey, setPnlRefreshKey] = useState(0);
 
   // Fetch cumulative P&L for chart
   useEffect(() => {
@@ -182,7 +216,7 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
         }
       } catch { /* ignore */ }
     })();
-  }, []);
+  }, [pnlRefreshKey]);
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -271,29 +305,53 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
 
   /* ── Delete ── */
 
-  const confirmDelete = (ids: number[]) => {
-    setDeleteModal({ ids, show: true });
+  const confirmDelete = (ids: number[], trade?: HistoryRecord) => {
+    setDeleteError(null);
+    setDeleteModal({ ids, trade: trade || null, show: true });
   };
 
   const executeDelete = async () => {
-    const { ids } = deleteModal;
-    if (ids.length === 1) {
-      await fetch("/api/trades", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: ids[0] }),
-      });
-    } else if (ids.length > 1) {
-      await fetch("/api/trades", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
+    const { ids, trade } = deleteModal;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      let res: Response;
+      if (ids.length === 1 && trade?.trade_id) {
+        res = await fetch("/api/trades", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trade_id: trade.trade_id }),
+        });
+      } else if (ids.length === 1) {
+        res = await fetch("/api/trades", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: ids[0] }),
+        });
+      } else if (ids.length > 1) {
+        res = await fetch("/api/trades", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+      } else {
+        return;
+      }
+      const data = await res.json();
+      if (data.error) {
+        setDeleteError(data.error);
+        return;
+      }
+      setDeleteModal({ ids: [], show: false });
+      setSelected(new Set());
+      setPnlRefreshKey((k) => k + 1);
+      fetchHistory();
+      onRefresh();
+    } catch (err) {
+      setDeleteError(String(err));
+    } finally {
+      setIsDeleting(false);
     }
-    setDeleteModal({ ids: [], show: false });
-    setSelected(new Set());
-    fetchHistory();
-    onRefresh();
   };
 
   /* ── Bulk Actions ── */
@@ -415,7 +473,16 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
                     <DirectionBadge dir={r.direction} />
                     {(r.leverage ?? 1) > 1 && <span className="text-[9px] neon-amber">{r.leverage}x</span>}
                   </div>
-                  <span className={cn("text-[12px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(pnl)}%</span>
+                  <div className="flex items-center gap-2">
+                    <span className={cn("text-[12px] font-bold font-mono", pnl > 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(pnl)}%</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); confirmDelete([r.id], r); }}
+                      className="text-muted-foreground hover:text-[var(--neon-red)] transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex gap-3 text-[9px] text-muted-foreground">
                   <span>Entry: {fmtDollarPrice(r.entry_price)}</span>
@@ -586,7 +653,7 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
                     <Edit3 className="h-3 w-3" />
                   </button>
                   <button
-                    onClick={() => confirmDelete([r.id])}
+                    onClick={() => confirmDelete([r.id], r)}
                     className="text-muted-foreground hover:text-[var(--neon-red)] transition-colors"
                     title="Delete"
                   >
@@ -626,11 +693,19 @@ export function HistoryTable({ onRefresh }: HistoryTableProps) {
       {deleteModal.show && (
         <DeleteModal
           count={deleteModal.ids.length}
+          trade={deleteModal.trade}
           isChromaDB={deleteModal.ids.some((id) =>
             records.find((r) => r.id === id && r.training_status === "IN_MEMORY")
           )}
+          isDeleting={isDeleting}
+          deleteError={deleteError}
           onConfirm={executeDelete}
-          onCancel={() => setDeleteModal({ ids: [], show: false })}
+          onCancel={() => {
+            if (!isDeleting) {
+              setDeleteModal({ ids: [], show: false });
+              setDeleteError(null);
+            }
+          }}
         />
       )}
     </div>
