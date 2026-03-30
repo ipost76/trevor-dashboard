@@ -127,5 +127,7 @@ print(json.dumps(result))
   } catch { /* graceful */ }
 
   data.latencyMs = Date.now() - start;
-  return NextResponse.json(data);
+  return NextResponse.json(data, {
+    headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+  });
 }

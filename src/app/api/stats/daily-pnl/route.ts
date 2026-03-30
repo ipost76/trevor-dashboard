@@ -35,7 +35,9 @@ print(json.dumps(result))
       `${process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor"}/venv/bin/python3 -`,
       { input: code, encoding: "utf-8", timeout: 10000, env: { ...process.env, HOME: "/home/trevor" } }
     ).trim();
-    return NextResponse.json(safeJsonParse(raw, []));
+    return NextResponse.json(safeJsonParse(raw, []), {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    });
   } catch (err) {
     return NextResponse.json([], { status: 500 });
   }

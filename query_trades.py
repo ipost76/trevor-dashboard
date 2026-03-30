@@ -217,6 +217,41 @@ def main():
                 if row:
                     to_id = row[0]
 
+            # Fallback 3: match by pnl_pct proximity (±1.0)
+            if to_id is None and pnl_pct is not None:
+                row = conn_rw.execute(
+                    """SELECT id FROM trade_outcomes
+                       WHERE REPLACE(REPLACE(UPPER(ticker), '-PERP', ''), '/USD', '') = ?
+                       AND UPPER(COALESCE(direction, '')) = UPPER(?)
+                       AND leveraged_pnl_pct IS NOT NULL
+                       AND ABS(leveraged_pnl_pct - ?) < 1.0
+                       ORDER BY id DESC LIMIT 1""",
+                    (norm_ticker, direction, pnl_pct)
+                ).fetchone()
+                if row:
+                    to_id = row[0]
+
+            # Fallback 4: percentage-based price tolerance (5% of entry)
+            if to_id is None and entry_price is not None and exit_price is not None and entry_price > 0:
+                pct_tol = max(entry_price * 0.05, 0.02)
+                row = conn_rw.execute(
+                    """SELECT id FROM trade_outcomes
+                       WHERE REPLACE(REPLACE(UPPER(ticker), '-PERP', ''), '/USD', '') = ?
+                       AND UPPER(COALESCE(direction, '')) = UPPER(?)
+                       AND (
+                           (entry_price IS NOT NULL AND ABS(entry_price - ?) < ?
+                            AND exit_price IS NOT NULL AND ABS(exit_price - ?) < ?)
+                           OR
+                           (open_price IS NOT NULL AND ABS(open_price - ?) < ?
+                            AND close_price IS NOT NULL AND ABS(close_price - ?) < ?)
+                       )
+                       ORDER BY id DESC LIMIT 1""",
+                    (norm_ticker, direction, entry_price, pct_tol, exit_price, pct_tol,
+                     entry_price, pct_tol, exit_price, pct_tol)
+                ).fetchone()
+                if row:
+                    to_id = row[0]
+
             if to_id is not None:
                 cur = conn_rw.execute("DELETE FROM trade_outcomes WHERE id=?", (to_id,))
                 purged["trade_outcomes"] = cur.rowcount

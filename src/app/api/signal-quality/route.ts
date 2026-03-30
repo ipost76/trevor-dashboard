@@ -23,7 +23,9 @@ export async function GET() {
     ).trim();
 
     const data = JSON.parse(raw);
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    });
   } catch (err) {
     return NextResponse.json(
       { error: String(err), overall: { totalTrades: 0 }, calibration: {}, tickerPerformance: [] },
