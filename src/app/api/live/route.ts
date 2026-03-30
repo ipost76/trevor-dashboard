@@ -108,11 +108,14 @@ print(json.dumps(result))
       data.watchlist = db.watchlist || [];
       data.trainingStats = { trades: db.training?.trades || 0, observations: db.training?.observations || 0, sentiment: db.training?.sentiment || 0, vectors: 0 };
 
-      // Derive rank
-      if (data.xp >= 500) data.rank = "Legend";
-      else if (data.xp >= 300) data.rank = "Expert";
-      else if (data.xp >= 150) data.rank = "Analyst";
-      else if (data.xp >= 50) data.rank = "Trader";
+      // Derive rank (matches memory.py RANK_THRESHOLDS)
+      if (data.xp >= 5000) data.rank = "Head of Alpha";
+      else if (data.xp >= 3000) data.rank = "Portfolio Mgr";
+      else if (data.xp >= 1500) data.rank = "Risk Officer";
+      else if (data.xp >= 800) data.rank = "Lead Strategist";
+      else if (data.xp >= 400) data.rank = "Senior Analyst";
+      else if (data.xp >= 150) data.rank = "Desk Analyst";
+      else if (data.xp >= 50) data.rank = "Junior Analyst";
     } catch { /* DB failed — graceful */ }
 
     // Log tail
