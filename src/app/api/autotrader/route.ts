@@ -97,13 +97,35 @@ try:
 except: pass
 
 conn.close()
+
+# Alpaca account (live equity from broker)
+try:
+    import sys
+    sys.path.insert(0, '/home/trevor/trevor')
+    from dotenv import load_dotenv
+    load_dotenv('/home/trevor/trevor/.env')
+    from alpaca.trading.client import TradingClient
+    key = os.environ.get('ALPACA_PAPER_API_KEY', '')
+    secret = os.environ.get('ALPACA_PAPER_SECRET_KEY', '')
+    if key and secret:
+        client = TradingClient(key, secret, paper=True)
+        acct = client.get_account()
+        result["account"] = {
+            "equity": round(float(acct.equity), 2),
+            "cash": round(float(acct.cash), 2),
+            "buying_power": round(float(acct.buying_power), 2),
+            "daytradeCount": acct.daytrade_count,
+            "status": str(acct.status),
+        }
+except: result["account"] = {"equity": 0, "cash": 0, "error": "alpaca_unavailable"}
+
 print(json.dumps(result, default=str))
 `;
 
     try {
       const pyResult = execSync(
-        `python3 -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-        { encoding: "utf-8", timeout: 10000, cwd: "/home/trevor/trevor" }
+        `/home/trevor/trevor/venv/bin/python3 -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
+        { encoding: "utf-8", timeout: 15000, cwd: "/home/trevor/trevor", env: { ...process.env, HOME: "/home/trevor" } }
       ).trim();
       const db = JSON.parse(pyResult);
 
@@ -118,6 +140,7 @@ print(json.dumps(result, default=str))
         data.budget = db.budget || data.budget;
         data.calibration = db.calibration || null;
         data.lastScan = db.lastScan || null;
+        if (db.account) data.account = db.account;
       }
     } catch { /* DB query failed */ }
 
