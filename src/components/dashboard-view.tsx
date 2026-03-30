@@ -82,12 +82,26 @@ function formatET(ts: string): string {
   return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" });
 }
 
+type KillSwitchState = { active: boolean; activated_at?: string; reason?: string };
+type SystemHealth = {
+  scanner?: { status: string; last_signal_at: string | null };
+  signals?: { today: number; seven_day_avg: number; change_pct: number };
+  api?: { hyperliquid: { healthy: boolean; latency_ms: number } };
+  kill_switch?: { active: boolean };
+  autotrader_paused?: { active: boolean; reason?: string };
+  circuit_breakers?: Array<{ ticker: string; status: string; win_rate: number; trades: number }>;
+};
+
 export function DashboardView() {
   const [data, setData] = useState<DashboardData>(EMPTY);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [killSwitch, setKillSwitch] = useState<KillSwitchState>({ active: false });
+  const [health, setHealth] = useState<SystemHealth>({});
+  const [ksConfirm, setKsConfirm] = useState<"activate" | "deactivate" | null>(null);
+  const [ksLoading, setKsLoading] = useState(false);
 
   const fetchDashboard = useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -129,6 +143,37 @@ export function DashboardView() {
     const i = setInterval(fetchDashboard, 30000);
     return () => clearInterval(i);
   }, [fetchDashboard]);
+
+  // Kill switch + system health polling
+  useEffect(() => {
+    const fetchKs = async () => {
+      const [ks, sh] = await Promise.all([
+        safeFetch<KillSwitchState>("/api/kill-switch", { active: false }),
+        safeFetch<SystemHealth>("/api/system-health", {}),
+      ]);
+      if (ks) setKillSwitch(ks);
+      if (sh) setHealth(sh);
+    };
+    fetchKs();
+    const iv = setInterval(fetchKs, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const toggleKillSwitch = async () => {
+    setKsLoading(true);
+    try {
+      const action = killSwitch.active ? "deactivate" : "activate";
+      const res = await fetch("/api/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason: `${action === "activate" ? "Emergency stop" : "Resumed"} via Hub at ${new Date().toISOString()}` }),
+      });
+      const d = await res.json();
+      setKillSwitch({ active: d.active });
+    } catch { /* ignore */ }
+    setKsLoading(false);
+    setKsConfirm(null);
+  };
 
   // Live prices for active trade cards
   useEffect(() => {
@@ -184,6 +229,71 @@ export function DashboardView() {
 
   return (
     <div className="flex-1 overflow-hidden p-2 flex flex-col gap-1.5 md:gap-2">
+      {/* ── Kill Switch Confirmation Dialog ── */}
+      {ksConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="panel p-4 max-w-sm w-full mx-4 space-y-3">
+            <div className="text-sm font-bold text-foreground">
+              {ksConfirm === "activate" ? "HALT ALL SYSTEMS?" : "RESUME ALL SYSTEMS?"}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {ksConfirm === "activate"
+                ? "This will halt ALL signal generation and AutoTrader execution immediately."
+                : "Resume all signal generation and AutoTrader execution?"}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setKsConfirm(null)} className="px-3 py-1.5 text-[11px] rounded border border-[var(--border)] text-muted-foreground hover:text-foreground">Cancel</button>
+              <button onClick={toggleKillSwitch} disabled={ksLoading}
+                className={cn("px-3 py-1.5 text-[11px] rounded font-bold", ksConfirm === "activate" ? "bg-red-600 text-white" : "bg-green-600 text-white")}>
+                {ksLoading ? "..." : ksConfirm === "activate" ? "CONFIRM HALT" : "CONFIRM RESUME"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Kill Switch Banner ── */}
+      <div className={cn("panel shrink-0 px-3 py-2 flex items-center justify-between gap-2",
+        killSwitch.active ? "border-red-500/50 bg-red-500/5" : "border-green-500/20")}>
+        <div className="flex items-center gap-2">
+          <span className={cn("text-[11px] font-bold", killSwitch.active ? "neon-red" : "neon-green")}>
+            {killSwitch.active ? "SYSTEM HALTED" : "SYSTEM ACTIVE"}
+          </span>
+          {killSwitch.active && killSwitch.reason && (
+            <span className="text-[9px] text-muted-foreground">{killSwitch.reason}</span>
+          )}
+        </div>
+        <button onClick={() => setKsConfirm(killSwitch.active ? "deactivate" : "activate")}
+          className={cn("px-2 py-1 text-[10px] font-bold rounded",
+            killSwitch.active ? "bg-green-600/20 text-green-400 hover:bg-green-600/30" : "bg-red-600/20 text-red-400 hover:bg-red-600/30")}>
+          {killSwitch.active ? "RESUME" : "EMERGENCY STOP"}
+        </button>
+      </div>
+
+      {/* ── System Health ── */}
+      <div className="panel shrink-0 px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px]">
+          <span className="text-muted-foreground">
+            Scanner: {health.scanner?.status === "running" ? <span className="neon-green">Running</span> : <span className="neon-red">Unknown</span>}
+          </span>
+          <span className="text-muted-foreground">
+            API: {health.api?.hyperliquid?.healthy ? <span className="neon-green">OK ({health.api.hyperliquid.latency_ms}ms)</span> : <span className="neon-red">DOWN</span>}
+          </span>
+          <span className="text-muted-foreground">
+            Today: <span className="text-foreground font-mono">{health.signals?.today ?? "?"}</span>
+            {health.signals?.change_pct != null && health.signals.change_pct < -30 && (
+              <span className="neon-red ml-1">({health.signals.change_pct > 0 ? "+" : ""}{health.signals.change_pct}%)</span>
+            )}
+          </span>
+          {health.autotrader_paused?.active && (
+            <span className="neon-amber">AT: PAUSED</span>
+          )}
+          {health.circuit_breakers?.filter(cb => cb.status === "TRIPPED").map(cb => (
+            <span key={cb.ticker} className="neon-red">{cb.ticker}: TRIPPED</span>
+          ))}
+        </div>
+      </div>
+
       {/* ── Stat Strip ── */}
       <div className="col-span-full panel shrink-0">
         <div className="grid grid-cols-4 gap-x-2 gap-y-1 px-2 py-1.5 md:flex md:items-center md:gap-5 md:px-3">

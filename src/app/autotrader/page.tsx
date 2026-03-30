@@ -76,8 +76,38 @@ export default function AutoTraderPage() {
   const dailyPnl = (data?.dailyPnl as number) || 0;
   const lastScan = data?.lastScan as Record<string, unknown> | null;
 
+  // Check if autotrader is paused via flag file
+  const [atPaused, setAtPaused] = useState<{ active: boolean; reason?: string }>({ active: false });
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch("/api/system-health");
+        if (res.ok) {
+          const d = await res.json();
+          setAtPaused(d.autotrader_paused || { active: false });
+        }
+      } catch { /* ignore */ }
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {/* AutoTrader PAUSED banner */}
+      {atPaused.active && (
+        <div className="panel border-amber-500/50 bg-amber-500/5 p-4 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">&#x23F8;&#xFE0F;</span>
+            <span className="text-sm font-bold neon-amber">AUTOTRADER PAUSED</span>
+          </div>
+          {atPaused.reason && (
+            <p className="text-[11px] text-muted-foreground">{atPaused.reason}</p>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
