@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StyledBarChart } from "@/components/charts/StyledBarChart";
 import { StyledLineChart } from "@/components/charts/StyledLineChart";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { CHART_COLORS } from "@/components/charts/theme";
 import { CONF_DIST_COLORS, CAL_BUCKET_COLORS } from "@/components/charts/theme";
 
 /* ── Types ── */
@@ -432,13 +434,29 @@ export default function SignalsPage() {
       {tickerPerf.length > 0 && (
         <div className="panel p-3">
           <div className="panel-header mb-2">P&L BY TICKER</div>
-          <StyledBarChart
-            data={tickerPerf.map(t => ({ name: t.symbol, pnl: t.totalPnl }))}
-            dataKey="pnl"
-            nameKey="name"
-            height={160}
-            colorByValue
-          />
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={tickerPerf.map(t => ({ name: t.symbol, pnl: t.totalPnl, trades: t.trades, winRate: t.winRate, wins: t.wins }))} margin={{ left: 0, right: 0, top: 5, bottom: 5 }}>
+              <XAxis dataKey="name" tick={{ fill: CHART_COLORS.textMuted, fontSize: 10 }} />
+              <YAxis tick={{ fill: CHART_COLORS.textMuted, fontSize: 10 }} width={40} />
+              <Tooltip content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const d = payload[0].payload;
+                return (
+                  <div style={{ background: "#161b22", border: "1px solid #30363d", padding: "8px 12px", borderRadius: 4, fontSize: 11, fontFamily: "monospace" }}>
+                    <div style={{ color: "#58a6ff", fontWeight: 700, marginBottom: 4 }}>{d.name}</div>
+                    <div style={{ color: d.pnl >= 0 ? "#00ff88" : "#ff4444" }}>P&L: {d.pnl >= 0 ? "+" : ""}{d.pnl.toFixed(2)}%</div>
+                    <div style={{ color: "#e0e0e8" }}>Trades: {d.trades} ({d.wins}W)</div>
+                    <div style={{ color: d.winRate >= 50 ? "#00ff88" : "#ff4444" }}>Win Rate: {d.winRate}%</div>
+                  </div>
+                );
+              }} />
+              <Bar dataKey="pnl" fillOpacity={0.7} radius={[3, 3, 0, 0]}>
+                {tickerPerf.map((t, i) => (
+                  <Cell key={i} fill={t.totalPnl >= 0 ? CHART_COLORS.green : CHART_COLORS.red} fillOpacity={0.7} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
 

@@ -63,6 +63,22 @@ for r in rows:
     worst = day_trades[-1] if day_trades else None
     trade_list = [f"{t['ticker']} {t['direction']} {(t['pnl_pct'] or 0):+.1f}%" for t in day_trades]
 
+    # Exit condition distribution
+    exit_rows = conn.execute("""
+        SELECT COALESCE(last_exit_condition, 'manual') as er, COUNT(*) as cnt
+        FROM active_trades
+        WHERE status='closed' AND date(closed_at) = ?
+        GROUP BY er
+    """, (d["trade_date"],)).fetchall()
+    exit_parts = [f"{r['cnt']} {r['er'].lower()}" for r in exit_rows if r['er']]
+
+    # Avg hold duration
+    hold_row = conn.execute("""
+        SELECT ROUND(AVG((julianday(closed_at) - julianday(created_at)) * 24), 1) as avg_h
+        FROM active_trades WHERE status='closed' AND date(closed_at) = ?
+    """, (d["trade_date"],)).fetchone()
+    avg_hold = hold_row['avg_h'] if hold_row and hold_row['avg_h'] else None
+
     wr = round(d["wins"] / d["trades"] * 100) if d["trades"] else 0
     content = f"**Trades closed:** {d['trades']} ({d['wins']}W / {d['losses']}L)\\n"
     content += f"**Day P&L:** {d['total_pnl']:+.1f}% | Win Rate: {wr}%\\n"
@@ -70,6 +86,10 @@ for r in rows:
         content += f"**Best:** {best['ticker']} {best['direction']} {(best['pnl_pct'] or 0):+.1f}% ({best['leverage']}x)\\n"
     if worst and worst != best:
         content += f"**Worst:** {worst['ticker']} {worst['direction']} {(worst['pnl_pct'] or 0):+.1f}% ({worst['leverage']}x)\\n"
+    if exit_parts:
+        content += f"**Exits:** {', '.join(exit_parts)}\\n"
+    if avg_hold is not None:
+        content += f"**Avg Hold:** {avg_hold}h\\n"
     content += f"**All:** {', '.join(trade_list)}"
 
     entries.append({

@@ -1006,11 +1006,22 @@ export default function TradesPage() {
           )}
 
           {tab === "lt" && (
-            <SignalTable
-              signals={ltSignals}
-              loading={loading}
-              emptyMessage="No long-term signals"
-            />
+            ltSignals.length > 0 ? (
+              <SignalTable
+                signals={ltSignals}
+                loading={loading}
+                emptyMessage="No long-term signals"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+                <span className="text-3xl">&#x1F680;</span>
+                <span className="text-sm font-bold tracking-wider">LONG-TERM SIGNALS</span>
+                <span className="text-xs font-bold neon-amber">Coming Soon</span>
+                <p className="text-[10px] text-center max-w-xs leading-relaxed opacity-70">
+                  Multi-day swing signals with 4h/1D timeframe analysis. Targets 3-14 day holds with macro confluence.
+                </p>
+              </div>
+            )
           )}
 
           {tab === "history" && <HistoryTable onRefresh={handleRefresh} />}

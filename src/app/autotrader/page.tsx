@@ -246,23 +246,32 @@ export default function AutoTraderPage() {
             <div className="text-xs text-muted-foreground py-3 text-center">No trades yet</div>
           ) : (
             <div className="space-y-1 max-h-64 overflow-y-auto">
-              {trades.map((t, i) => (
-                <div key={i} className="flex items-center justify-between py-1 text-[10px]">
-                  <div className="flex items-center gap-1.5">
-                    <span className={t.pnl > 0 ? "text-green-400" : t.pnl < 0 ? "text-red-400" : "text-muted-foreground"}>
-                      {t.pnl > 0 ? "W" : t.pnl < 0 ? "L" : "S"}
-                    </span>
-                    <span className="font-bold">{t.ticker}</span>
+              {trades.map((t, i) => {
+                const holdH = t.entry_time && t.exit_time
+                  ? ((new Date(t.exit_time).getTime() - new Date(t.entry_time).getTime()) / 3600000).toFixed(1)
+                  : null;
+                return (
+                  <div key={i} className="flex items-center justify-between py-1 text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className={t.pnl > 0 ? "text-green-400" : t.pnl < 0 ? "text-red-400" : "text-muted-foreground"}>
+                        {t.pnl > 0 ? "W" : t.pnl < 0 ? "L" : "S"}
+                      </span>
+                      <span className="font-bold">{t.ticker}</span>
+                      {t.entry_price > 0 && (
+                        <span className="text-muted-foreground font-mono">@{t.entry_price < 1 ? t.entry_price.toFixed(4) : t.entry_price < 100 ? t.entry_price.toFixed(2) : t.entry_price.toFixed(0)}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`font-mono ${t.pnl > 0 ? "text-green-400" : t.pnl < 0 ? "text-red-400" : ""}`}>
+                        {fmtPctSigned(t.pnl_pct)}%
+                      </span>
+                      <span className="text-muted-foreground">{fmtDollarPrice(Math.abs(t.pnl || 0))}</span>
+                      <span className="text-muted-foreground">{t.exit_reason}</span>
+                      {holdH && <span className="text-muted-foreground">{holdH}h</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`font-mono ${t.pnl > 0 ? "text-green-400" : t.pnl < 0 ? "text-red-400" : ""}`}>
-                      {fmtPctSigned(t.pnl_pct)}%
-                    </span>
-                    <span className="text-muted-foreground">{fmtDollarPrice(Math.abs(t.pnl || 0))}</span>
-                    <span className="text-muted-foreground">{t.exit_reason}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
