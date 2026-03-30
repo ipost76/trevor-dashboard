@@ -37,30 +37,62 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const message = body.message || "";
+// Rate limiting — 30 messages per hour
+const _chatLog: number[] = [];
+const MAX_PER_HOUR = 30;
 
-  if (!message.trim()) {
-    return NextResponse.json({ error: "Message required" }, { status: 400 });
+export async function POST(request: NextRequest) {
+  // Rate limit check
+  const now = Date.now();
+  while (_chatLog.length > 0 && _chatLog[0] < now - 3600000) _chatLog.shift();
+  if (_chatLog.length >= MAX_PER_HOUR) {
+    return NextResponse.json({ error: "Rate limit exceeded (30/hour)" }, { status: 429 });
+  }
+  _chatLog.push(now);
+
+  const body = await request.json();
+  const messages = body.messages;
+
+  // Support both old format (message string) and new format (messages array)
+  if (!messages && body.message) {
+    // Legacy single-message format — route through old chat_bridge
+    const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
+    const pythonPath = join(trevorDir, "venv", "bin", "python3");
+    const scriptPath = join(process.cwd(), "chat_bridge.py");
+    try {
+      const { execSync } = await import("child_process");
+      const sanitized = (body.message as string).replace(/[`$\\!#]/g, "").replace(/"/g, '\\"').slice(0, 2000);
+      const raw = execSync(
+        `${pythonPath} ${scriptPath} chat "${sanitized}"`,
+        { encoding: "utf-8", timeout: 90000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
+      ).trim();
+      return NextResponse.json(JSON.parse(raw));
+    } catch (err) {
+      return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
+    }
+  }
+
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return NextResponse.json({ error: "No messages provided" }, { status: 400 });
   }
 
   const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
   const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "chat_bridge.py");
+  const aiScript = join(process.cwd(), "chat_ai.py");
 
   try {
     const { execSync } = await import("child_process");
-    const sanitized = message
-      .replace(/[`$\\!#]/g, "")
-      .replace(/"/g, '\\"')
-      .slice(0, 2000);
+    const input = JSON.stringify({ messages: messages.slice(-10) });
     const raw = execSync(
-      `${pythonPath} ${scriptPath} chat "${sanitized}"`,
-      { encoding: "utf-8", timeout: 90000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
+      `echo ${JSON.stringify(input)} | ${pythonPath} ${aiScript}`,
+      { encoding: "utf-8", timeout: 30000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
     ).trim();
-    return NextResponse.json(JSON.parse(raw));
+    const data = JSON.parse(raw);
+    if (data.error) {
+      return NextResponse.json({ error: data.error }, { status: 502 });
+    }
+    return NextResponse.json(data);
   } catch (err) {
-    return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

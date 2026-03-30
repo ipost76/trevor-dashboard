@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, ArrowLeftRight, Terminal, SquareTerminal,
+  LayoutDashboard, ArrowLeftRight, Terminal,
   ChevronLeft, ChevronRight, Shield, BookOpen,
   Search, MessageSquare, Activity, Briefcase, Settings, ClipboardList, Zap,
   MoreHorizontal, X, Bell,
@@ -13,14 +13,13 @@ import { useState, useCallback, useEffect } from "react";
 type NavItem = { label: string; icon: React.ComponentType<{ className?: string }>; href: string; group?: string };
 
 const navItems: NavItem[] = [
-  { group: "COMMAND", label: "Terminal", icon: SquareTerminal, href: "/terminal" },
+  { group: "COMMAND", label: "Chat", icon: MessageSquare, href: "/terminal" },
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Holdings", icon: Briefcase, href: "/holdings" },
   { label: "Trades", icon: ArrowLeftRight, href: "/trades" },
   { group: "TRADING", label: "AutoTrader", icon: Terminal, href: "/autotrader" },
   { group: "INTEL", label: "Signals", icon: Activity, href: "/signals" },
   { label: "Research", icon: Search, href: "/research" },
-  { label: "Chat", icon: MessageSquare, href: "/chat" },
   { label: "Reminders", icon: Bell, href: "/reminders" },
   { group: "GHOST", label: "Ghost HQ", icon: Zap, href: "/ghost" },
   { group: "SYSTEM", label: "Control Panel", icon: Settings, href: "/control" },
@@ -29,7 +28,7 @@ const navItems: NavItem[] = [
 ];
 
 // Bottom tab bar: 5 most-used pages + More
-const TAB_HREFS = ["/terminal", "/dashboard", "/trades", "/signals", "/chat"];
+const TAB_HREFS = ["/terminal", "/dashboard", "/trades", "/signals", "/autotrader"];
 const TAB_ITEMS = TAB_HREFS.map(h => navItems.find(n => n.href === h)!);
 const MORE_ITEMS = navItems.filter(n => !TAB_HREFS.includes(n.href));
 

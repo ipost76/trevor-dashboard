@@ -1,47 +1,69 @@
 "use client";
-import dynamic from "next/dynamic";
 
-function TerminalLoading() {
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#0d1117",
-        gap: 12,
-      }}
-    >
-      <div
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          backgroundColor: "#58a6ff",
-          animation: "termPulse 1.5s ease-in-out infinite",
-        }}
-      />
-      <span style={{ color: "#8b949e", fontSize: 14, fontFamily: "'JetBrains Mono', monospace" }}>
-        Connecting to trevor-prime...
-      </span>
-      <style>{`@keyframes termPulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
-    </div>
-  );
-}
+import { useEffect, useState, useRef, useCallback } from "react";
+import { Send, MessageSquare } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { TypingDots } from "@/components/typing-dots";
 
-const TerminalView = dynamic(
-  () => import("@/components/terminal/TerminalView").then((m) => ({ default: m.TerminalView })),
-  { ssr: false, loading: () => <TerminalLoading /> }
-);
+type Message = { role: "user" | "assistant"; content: string; timestamp: number; tokens?: { input: number; output: number } };
 
-export default function TerminalPage() {
+export default function ChatPage() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
+  }, [messages, sending]);
+
+  const send = useCallback(async () => {
+    const msg = input.trim();
+    if (!msg || sending || msg.length > 500) return;
+    setInput("");
+    setSending(true);
+
+    const userMsg: Message = { role: "user", content: msg, timestamp: Date.now() };
+    const newMsgs = [...messages, userMsg];
+    setMessages(newMsgs);
+
+    try {
+      const apiMessages = newMsgs.slice(-10).map(m => ({ role: m.role, content: m.content }));
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: "Server error" }));
+        setMessages(prev => [...prev, { role: "assistant", content: errData.error || "Server error", timestamp: Date.now() }]);
+      } else {
+        const data = await res.json();
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: data.reply || data.response || "No response.",
+          timestamp: Date.now(),
+          tokens: data.tokens,
+        }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Try again.", timestamp: Date.now() }]);
+    }
+    setSending(false);
+    inputRef.current?.focus();
+  }, [input, sending, messages]);
+
+  const formatTime = (ts: number) =>
+    new Date(ts).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" });
+
   return (
     <>
+      {/* Termius-blue theme scoped to this page */}
       <style>{`
-        /* Nuclear override: force navy on EVERYTHING when terminal page is active */
         html, body { background: #0d1117 !important; background-image: none !important; }
         body > div, body > div > div, body > div > div > div { background: #0d1117 !important; }
         body::before, body::after { display: none !important; }
@@ -50,15 +72,122 @@ export default function TerminalPage() {
         main { background: #0d1117 !important; }
         main > * { background: #0d1117 !important; }
         footer, [class*="status-bar"], [class*="StatusBar"] { background: #1c2333 !important; border-color: #30363d !important; }
-        /* Hub sidebar on desktop */
         aside { background: #0d1117 !important; border-color: #30363d !important; }
-        /* Hub bottom tab bar on mobile */
         nav[class*="fixed"] { background: #161b22 !important; border-color: #30363d !important; }
-        /* Terminal scrollbar — blue instead of Hub cyan */
-        .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(88,166,255,0.3) !important; }
-        .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(88,166,255,0.5) !important; }
       `}</style>
-      <TerminalView />
+
+      <div className="flex-1 overflow-hidden flex flex-col" style={{ background: "#0d1117" }}>
+        {/* Header */}
+        <div className="shrink-0 flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: "#30363d", background: "#161b22" }}>
+          <div className="flex items-center gap-2">
+            <span style={{ color: "#58a6ff", fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700 }}>
+              &gt;_ TREVOR CHAT
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full" style={{ background: "#3fb950" }} />
+            <span style={{ color: "#8b949e", fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}>ONLINE</span>
+          </div>
+        </div>
+        {/* Blue accent line */}
+        <div className="shrink-0" style={{ height: 1, background: "linear-gradient(90deg, transparent, #58a6ff, transparent)" }} />
+
+        {/* Messages */}
+        <div ref={scrollRef} className="flex-1 overflow-auto px-3 py-4 space-y-3" style={{ background: "#0d1117" }}>
+          {messages.length === 0 && !sending && (
+            <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: "#8b949e" }}>
+              <MessageSquare className="h-10 w-10 opacity-20" />
+              <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>Hey Ghost. What do you want to know?</span>
+              <div className="flex flex-wrap gap-2 justify-center max-w-sm">
+                {["How am I doing?", "Analyze BTC", "AutoTrader status"].map(q => (
+                  <button key={q} onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                    className="px-2.5 py-1 rounded text-xs transition-colors"
+                    style={{ background: "#1a2332", border: "1px solid #30363d", color: "#58a6ff", fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+              <div className="max-w-[85%] md:max-w-[70%]">
+                <div className="mb-0.5" style={{ fontSize: 9, color: "#8b949e", textAlign: m.role === "user" ? "right" : "left" }}>
+                  {m.role === "user" ? "Ghost" : ">_ TREVOR"}
+                </div>
+                <div className="rounded-lg px-3 py-2" style={{
+                  background: m.role === "user" ? "#1a2332" : "#161b22",
+                  border: `1px solid ${m.role === "user" ? "rgba(88,166,255,0.2)" : "#30363d"}`,
+                  color: "#e6edf3",
+                  fontSize: 12,
+                  fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
+                  lineHeight: 1.6,
+                }}>
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  <div style={{ fontSize: 8, color: "#484f58", marginTop: 4, textAlign: "right" }}>
+                    {formatTime(m.timestamp)}
+                    {m.tokens && <span className="ml-2">{m.tokens.input + m.tokens.output} tok</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] md:max-w-[70%]">
+                <div className="mb-0.5" style={{ fontSize: 9, color: "#8b949e" }}>&gt;_ TREVOR</div>
+                <div className="rounded-lg px-3 py-2" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+                  <TypingDots size="sm" className="text-[#58a6ff]" />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input */}
+        <div className="shrink-0 p-2" style={{ borderTop: "1px solid #30363d", background: "#161b22" }}>
+          <div className="flex items-center gap-2">
+            <span style={{ color: "#58a6ff", fontSize: 14, fontWeight: 700, fontFamily: "monospace" }}>&gt;</span>
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value.slice(0, 500))}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+              placeholder="Ask TREVOR anything..."
+              disabled={sending}
+              maxLength={500}
+              autoFocus
+              className="flex-1 outline-none"
+              style={{
+                background: "#0d1117",
+                border: "1px solid #30363d",
+                borderRadius: 6,
+                padding: "8px 12px",
+                color: "#e6edf3",
+                fontSize: 13,
+                fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
+              }}
+            />
+            <button
+              onClick={send}
+              disabled={sending || !input.trim()}
+              className="flex items-center gap-1 disabled:opacity-30 transition-opacity"
+              style={{
+                background: "#58a6ff",
+                color: "#0d1117",
+                border: "none",
+                borderRadius: 6,
+                padding: "8px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                fontFamily: "monospace",
+                cursor: sending || !input.trim() ? "not-allowed" : "pointer",
+              }}>
+              <Send className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      </div>
     </>
   );
 }
