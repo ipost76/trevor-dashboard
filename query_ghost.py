@@ -45,27 +45,7 @@ def init_tables():
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
-    CREATE TABLE IF NOT EXISTS ghost_training (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL, content TEXT,
-        type TEXT DEFAULT 'study' CHECK(type IN ('study','course','book','video','practice','research','other')),
-        topic TEXT,
-        status TEXT DEFAULT 'in-progress' CHECK(status IN ('not-started','in-progress','completed','paused')),
-        progress_pct INTEGER DEFAULT 0, source_url TEXT, tags TEXT,
-        started_at TEXT, completed_at TEXT,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-    );
-    CREATE TABLE IF NOT EXISTS ghost_tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL, description TEXT,
-        priority TEXT DEFAULT 'medium' CHECK(priority IN ('low','medium','high','urgent')),
-        status TEXT DEFAULT 'todo' CHECK(status IN ('todo','in-progress','done','blocked','cancelled')),
-        category TEXT, due_date TEXT, tags TEXT,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now')),
-        completed_at TEXT
-    );
+    -- ghost_training and ghost_tasks removed (2026-03-30 GCC overhaul)
     """)
     conn.commit()
     conn.close()
@@ -169,24 +149,6 @@ def trade_stats():
     wr = round(wins / closed * 100, 1) if closed > 0 else 0
     return {"total": total, "wins": wins, "losses": losses, "open": open_count, "win_rate": wr, "avg_pnl": avg_pnl}
 
-# ── TASK STATS ───────────────────────────────────────────────────
-def task_stats():
-    conn = get_conn()
-    total = conn.execute("SELECT COUNT(*) FROM ghost_tasks").fetchone()[0]
-    open_count = conn.execute("SELECT COUNT(*) FROM ghost_tasks WHERE status IN ('todo','in-progress','blocked')").fetchone()[0]
-    done = conn.execute("SELECT COUNT(*) FROM ghost_tasks WHERE status='done'").fetchone()[0]
-    overdue = conn.execute("SELECT COUNT(*) FROM ghost_tasks WHERE due_date < date('now') AND status NOT IN ('done','cancelled')").fetchone()[0]
-    conn.close()
-    return {"total": total, "open": open_count, "done": done, "overdue": overdue}
-
-# ── TRAINING STATS ───────────────────────────────────────────────
-def training_stats():
-    conn = get_conn()
-    active = conn.execute("SELECT COUNT(*) FROM ghost_training WHERE status='in-progress'").fetchone()[0]
-    completed = conn.execute("SELECT COUNT(*) FROM ghost_training WHERE status='completed'").fetchone()[0]
-    conn.close()
-    return {"active": active, "completed": completed}
-
 # ── MAIN DISPATCH ────────────────────────────────────────────────
 if __name__ == "__main__":
     init_tables()
@@ -199,8 +161,6 @@ if __name__ == "__main__":
         "trades": "ghost_trades",
         "strategies": "ghost_strategies",
         "notes": "ghost_notes",
-        "training": "ghost_training",
-        "tasks": "ghost_tasks",
     }
     table_key = args[0]
     action = args[1]
@@ -258,10 +218,6 @@ if __name__ == "__main__":
         elif action == "stats":
             if table_key == "trades":
                 result = trade_stats()
-            elif table_key == "tasks":
-                result = task_stats()
-            elif table_key == "training":
-                result = training_stats()
             else:
                 result = {"error": "No stats for this table"}
 
