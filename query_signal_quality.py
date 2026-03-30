@@ -195,6 +195,31 @@ def get_data():
     # Trade performance for P&L tracker
     trade_perf = get_trade_performance(conn)
 
+    # Expectancy calculation
+    avg_win = round(sum(win_pnls) / len(win_pnls), 2) if win_pnls else 0
+    avg_loss = round(sum(loss_pnls) / len(loss_pnls), 2) if loss_pnls else 0
+    wr_dec = wins / total if total > 0 else 0
+    exp_pct = (wr_dec * avg_win) + ((1 - wr_dec) * avg_loss) if total > 0 else 0
+    breakeven_wr = (abs(avg_loss) / (avg_win + abs(avg_loss)) * 100) if (avg_win + abs(avg_loss)) > 0 else 50
+    expectancy = {
+        "per_trade_pct": round(exp_pct, 2),
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "win_rate": round(wr_dec * 100, 1),
+        "breakeven_wr": round(breakeven_wr, 1),
+        "interpretation": "Negative edge" if exp_pct < -0.5 else ("Positive edge" if exp_pct > 0.5 else "Near breakeven"),
+    }
+
+    # Circuit breaker status
+    circuit_breakers = []
+    try:
+        import sys
+        sys.path.insert(0, '/home/trevor/trevor')
+        from confidence_calibrator import get_circuit_breaker_status
+        circuit_breakers = get_circuit_breaker_status()
+    except Exception:
+        pass
+
     conn.close()
 
     return {
@@ -202,6 +227,8 @@ def get_data():
         "calibration": buckets,
         "tickerPerformance": ticker_perf,
         "tradePerformance": trade_perf,
+        "expectancy": expectancy,
+        "circuitBreakers": circuit_breakers,
     }
 
 

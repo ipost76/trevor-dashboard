@@ -108,7 +108,7 @@ print(json.dumps(out))
       const summaryData = JSON.parse(pyResult);
 
       // Also get quality metrics from query_signal_quality.py
-      let quality: { overall: unknown; calibration: Record<string, unknown>; tickerPerformance: unknown[]; tradePerformance: unknown } = { overall: null, calibration: {}, tickerPerformance: [], tradePerformance: null };
+      let quality: { overall: unknown; calibration: Record<string, unknown>; tickerPerformance: unknown[]; tradePerformance: unknown; expectancy: unknown; circuitBreakers: unknown[] } = { overall: null, calibration: {}, tickerPerformance: [], tradePerformance: null, expectancy: null, circuitBreakers: [] };
       try {
         const qResult = execSync(
           `/home/trevor/trevor/venv/bin/python3 /home/trevor/trevor-dashboard/query_signal_quality.py`,
@@ -125,6 +125,8 @@ print(json.dumps(out))
           ticker_performance: quality.tickerPerformance || [],
         },
         trade_performance: quality.tradePerformance || null,
+        expectancy: quality.expectancy || null,
+        circuit_breakers: quality.circuitBreakers || [],
         timestamp: new Date().toISOString(),
         latencyMs: Date.now() - start,
       });

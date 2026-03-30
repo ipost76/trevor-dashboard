@@ -42,6 +42,15 @@ type TradePerformance = {
   long_exposure_pct: number | null; short_exposure_pct: number | null;
 };
 
+type Expectancy = {
+  per_trade_pct: number; avg_win: number; avg_loss: number;
+  win_rate: number; breakeven_wr: number; interpretation: string;
+};
+type CircuitBreaker = {
+  ticker: string; trades: number; wins: number; win_rate: number;
+  status: string; threshold: number; cooldown_remaining_hours?: number;
+};
+
 type SignalData = {
   summary: Summary;
   by_ticker: TickerRow[];
@@ -53,6 +62,8 @@ type SignalData = {
     ticker_performance: TickerPerf[];
   };
   trade_performance: TradePerformance | null;
+  expectancy: Expectancy | null;
+  circuit_breakers: CircuitBreaker[];
 };
 
 const EMPTY_SUMMARY: Summary = {
@@ -102,6 +113,8 @@ export default function SignalsPage() {
   const calibration = data?.quality?.calibration ?? {};
   const tickerPerf = data?.quality?.ticker_performance ?? [];
   const byTicker = data?.by_ticker ?? [];
+  const expectancy = data?.expectancy;
+  const circuitBreakers = data?.circuit_breakers ?? [];
   const confDist = data?.confidence_distribution ?? {};
   const dirTrend = data?.direction_over_time ?? [];
   const perf = data?.trade_performance;
@@ -300,6 +313,75 @@ export default function SignalsPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Expectancy Card ── */}
+      {expectancy && overall && overall.totalTrades > 0 && (
+        <div className="panel">
+          <div className="panel-header flex items-center gap-1.5">
+            <span>EXPECTANCY</span>
+          </div>
+          <div className="p-3 space-y-2">
+            <div className="flex items-center gap-3">
+              <span className={cn("text-2xl font-bold font-mono", expectancy.per_trade_pct > 0.5 ? "neon-green" : expectancy.per_trade_pct < -0.5 ? "neon-red" : "neon-amber")}>
+                {expectancy.per_trade_pct > 0 ? "+" : ""}{expectancy.per_trade_pct}%
+              </span>
+              <span className="text-[10px] text-muted-foreground">per trade</span>
+              <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", expectancy.per_trade_pct > 0.5 ? "bg-green-500/20 text-green-400" : expectancy.per_trade_pct < -0.5 ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400")}>
+                {expectancy.interpretation.toUpperCase()}
+              </span>
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono leading-relaxed">
+              ({expectancy.win_rate}% x {expectancy.avg_win > 0 ? "+" : ""}{expectancy.avg_win}%) + ({(100 - expectancy.win_rate).toFixed(1)}% x {expectancy.avg_loss}%) = {expectancy.per_trade_pct > 0 ? "+" : ""}{expectancy.per_trade_pct}%
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              Breakeven win rate: <span className="font-bold text-foreground">{expectancy.breakeven_wr}%</span>
+              {expectancy.win_rate < expectancy.breakeven_wr && (
+                <span className="neon-red ml-1">(currently {(expectancy.breakeven_wr - expectancy.win_rate).toFixed(1)}% below)</span>
+              )}
+              {expectancy.win_rate >= expectancy.breakeven_wr && (
+                <span className="neon-green ml-1">(currently {(expectancy.win_rate - expectancy.breakeven_wr).toFixed(1)}% above)</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Circuit Breakers ── */}
+      {circuitBreakers.length > 0 && (
+        <div className="panel">
+          <div className="panel-header flex items-center gap-1.5">
+            <span>CIRCUIT BREAKERS</span>
+          </div>
+          <div className="p-2">
+            <div className="flex items-center gap-2 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground border-b border-[var(--border)]">
+              <span className="w-16">Ticker</span>
+              <span className="w-8 text-center">St</span>
+              <span className="w-14 text-right">Win Rate</span>
+              <span className="flex-1 text-right">Trades</span>
+            </div>
+            {circuitBreakers.map((cb) => (
+              <div key={cb.ticker} className="flex items-center gap-2 px-2 py-1.5 text-[10px] border-b border-[rgba(0,240,255,0.04)]">
+                <span className="w-16 font-bold text-foreground">{cb.ticker}</span>
+                <span className="w-8 text-center">
+                  {cb.status === 'OK' && '🟢'}
+                  {cb.status === 'WARNING' && '🟡'}
+                  {cb.status === 'TRIPPED' && '🔴'}
+                  {cb.status === 'INSUFFICIENT_DATA' && '⚪'}
+                </span>
+                <span className={cn("w-14 text-right font-mono font-bold", cb.win_rate >= 50 ? "neon-green" : cb.win_rate >= 30 ? "neon-amber" : "neon-red")}>
+                  {cb.trades > 0 ? `${cb.win_rate}%` : "—"}
+                </span>
+                <span className="flex-1 text-right text-muted-foreground font-mono">
+                  {cb.trades}/{cb.threshold >= 0 ? 10 : "?"}
+                  {cb.cooldown_remaining_hours != null && (
+                    <span className="neon-red ml-1">({cb.cooldown_remaining_hours}h left)</span>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
