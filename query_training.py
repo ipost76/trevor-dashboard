@@ -32,7 +32,7 @@ def main():
             wins = result["outcomes"].get("WIN", 0)
             losses = result["outcomes"].get("LOSS", 0)
             decided = wins + losses
-            result["winRate"] = round((wins / decided) * 100) if decided > 0 else 0
+            result["winRate"] = round((wins / decided) * 100, 1) if decided > 0 else 0
         except:
             result["outcomes"] = {}
             result["winRate"] = 0
@@ -57,7 +57,7 @@ def main():
             tickers = []
             for r in rows:
                 c, w, l = r[1], int(r[2] or 0), int(r[3] or 0)
-                tickers.append({"ticker": r[0], "count": c, "wins": w, "losses": l, "winRate": round((w / (w + l)) * 100) if (w + l) > 0 else 0})
+                tickers.append({"ticker": r[0], "count": c, "wins": w, "losses": l, "winRate": round((w / (w + l)) * 100, 1) if (w + l) > 0 else 0})
             result["topTickers"] = tickers
         except:
             result["topTickers"] = []
@@ -68,7 +68,7 @@ def main():
             strats = []
             for r in rows:
                 c, w, l = r[1], int(r[2] or 0), int(r[3] or 0)
-                strats.append({"strategy": r[0], "count": c, "wins": w, "losses": l, "winRate": round((w / (w + l)) * 100) if (w + l) > 0 else 0})
+                strats.append({"strategy": r[0], "count": c, "wins": w, "losses": l, "winRate": round((w / (w + l)) * 100, 1) if (w + l) > 0 else 0})
             result["strategyBreakdown"] = strats
         except:
             result["strategyBreakdown"] = []

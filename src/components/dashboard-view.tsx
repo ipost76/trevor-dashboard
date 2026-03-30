@@ -180,7 +180,7 @@ export function DashboardView() {
   }
 
   const decided = data.wins + data.losses;
-  const winPct = decided > 0 ? ((data.wins / decided) * 100).toFixed(0) : "0";
+  const winPct = decided > 0 ? ((data.wins / decided) * 100).toFixed(1) : "0";
 
   return (
     <div className="flex-1 overflow-hidden p-2 flex flex-col gap-1.5 md:gap-2">
@@ -342,7 +342,7 @@ function AutoTraderPanel({ data }: { data: AutoData | null }) {
             <div className="grid grid-cols-4 gap-1.5">
               <MiniStat label="Equity" value={`$${equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
               <MiniStat label="Total P&L" value={`$${(stats?.totalPnl ?? 0) >= 0 ? "+" : ""}${(stats?.totalPnl ?? 0).toFixed(0)}`} color={(stats?.totalPnl ?? 0) >= 0 ? "neon-green" : "neon-red"} />
-              <MiniStat label="Win Rate" value={`${(stats?.winRate ?? 0).toFixed(0)}%`} color={(stats?.winRate ?? 0) >= 50 ? "neon-green" : "neon-red"} />
+              <MiniStat label="Win Rate" value={`${(stats?.winRate ?? 0).toFixed(1)}%`} color={(stats?.winRate ?? 0) >= 50 ? "neon-green" : "neon-red"} />
               <MiniStat label="Daily P&L" value={`$${(data?.dailyPnl ?? 0) >= 0 ? "+" : ""}${(data?.dailyPnl ?? 0).toFixed(0)}`} color={(data?.dailyPnl ?? 0) >= 0 ? "neon-green" : "neon-red"} />
             </div>
 

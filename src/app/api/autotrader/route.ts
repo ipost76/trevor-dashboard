@@ -58,7 +58,7 @@ try:
     all_trades = conn.execute("SELECT pnl, pnl_pct FROM trades WHERE exit_price IS NOT NULL").fetchall()
     total = len(all_trades)
     wins = sum(1 for t in all_trades if t[0] and t[0] > 0)
-    losses = sum(1 for t in all_trades if t[0] and t[0] < 0)
+    losses = sum(1 for t in all_trades if not t[0] or t[0] <= 0)
     total_won = sum(t[0] for t in all_trades if t[0] and t[0] > 0)
     total_lost = abs(sum(t[0] for t in all_trades if t[0] and t[0] < 0))
     pf = total_won / total_lost if total_lost > 0 else (999.99 if total_won > 0 else 0)

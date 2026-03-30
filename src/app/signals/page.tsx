@@ -318,7 +318,7 @@ export default function SignalsPage() {
               <span className="w-12 text-right">Signals</span>
               <span className="w-16 text-right">L / S</span>
               <span className="flex-1 text-right">Avg Conf</span>
-              {tickerPerf.length > 0 && <span className="w-14 text-right">Win Rate</span>}
+              {tickerPerf.length > 0 && <span className="w-20 text-right">Win Rate</span>}
             </div>
             {/* Rows */}
             {byTicker.slice(0, 12).map((t) => {
@@ -334,8 +334,9 @@ export default function SignalsPage() {
                   </span>
                   <span className="flex-1 text-right font-mono text-muted-foreground">{t.avg_confidence}%</span>
                   {tickerPerf.length > 0 && (
-                    <span className={cn("w-14 text-right font-bold font-mono", tp ? wrColor(tp.winRate) : "text-muted-foreground")}>
+                    <span className={cn("w-20 text-right font-bold font-mono", tp ? wrColor(tp.winRate) : "text-muted-foreground")}>
                       {tp ? `${tp.winRate}%` : "—"}
+                      {tp && <span className="text-muted-foreground font-normal text-[8px] ml-0.5">({tp.trades})</span>}
                     </span>
                   )}
                 </div>

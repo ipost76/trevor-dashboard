@@ -118,11 +118,11 @@ def get_data():
 
     total = len(trades)
     wins = sum(1 for t in trades if (t['pnl_pct'] or 0) > 0)
-    losses = total - wins
+    losses = sum(1 for t in trades if (t['pnl_pct'] or 0) < 0)
     pnls = [float(t['leveraged_pnl_pct'] or t['pnl_pct'] or 0) for t in trades]
     total_pnl = sum(pnls)
     win_pnls = [p for p in pnls if p > 0]
-    loss_pnls = [p for p in pnls if p <= 0]
+    loss_pnls = [p for p in pnls if p < 0]
 
     overall = {
         "totalTrades": total,
