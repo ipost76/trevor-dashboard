@@ -189,11 +189,39 @@ def main():
             cur = conn_rw.execute("DELETE FROM active_trades WHERE trade_id=? AND status='closed'", (trade_id,))
             purged["active_trades"] = cur.rowcount
 
-            cur = conn_rw.execute(
-                "DELETE FROM trade_outcomes WHERE ticker=? AND direction=? AND entry_price=? AND exit_price=?",
+            # Find matching trade_outcome (exact match first, then fuzzy)
+            norm_ticker = ticker.replace('-PERP', '').replace('/USD', '').upper()
+            to_id = None
+            row = conn_rw.execute(
+                "SELECT id FROM trade_outcomes WHERE ticker=? AND direction=? AND entry_price=? AND exit_price=? LIMIT 1",
                 (ticker, direction, entry_price, exit_price)
-            )
-            purged["trade_outcomes"] = cur.rowcount
+            ).fetchone()
+            if row:
+                to_id = row[0]
+
+            if to_id is None and entry_price is not None and exit_price is not None:
+                row = conn_rw.execute(
+                    """SELECT id FROM trade_outcomes
+                       WHERE REPLACE(REPLACE(UPPER(ticker), '-PERP', ''), '/USD', '') = ?
+                       AND UPPER(COALESCE(direction, '')) = UPPER(?)
+                       AND (
+                           (entry_price IS NOT NULL AND ABS(entry_price - ?) < 0.02
+                            AND exit_price IS NOT NULL AND ABS(exit_price - ?) < 0.02)
+                           OR
+                           (open_price IS NOT NULL AND ABS(open_price - ?) < 0.02
+                            AND close_price IS NOT NULL AND ABS(close_price - ?) < 0.02)
+                       )
+                       ORDER BY id DESC LIMIT 1""",
+                    (norm_ticker, direction, entry_price, exit_price, entry_price, exit_price)
+                ).fetchone()
+                if row:
+                    to_id = row[0]
+
+            if to_id is not None:
+                cur = conn_rw.execute("DELETE FROM trade_outcomes WHERE id=?", (to_id,))
+                purged["trade_outcomes"] = cur.rowcount
+            else:
+                purged["trade_outcomes"] = 0
 
             try:
                 cur = conn_rw.execute("DELETE FROM training_learned_outcomes WHERE trade_id=?", (trade_id,))

@@ -14,7 +14,7 @@ export async function GET() {
     xp: 0,
     rank: "Apprentice",
     recentSignals: [] as Array<{ id?: number; ticker: string; signal_type?: string; direction: string; confidence: number; outcome: string | null; entry_price?: number | null; target_price?: number | null; stop_price?: number | null; timeframe?: string; timestamp: string }>,
-    activeScalps: [] as Array<{ ticker: string; direction: string; confidence: number; timestamp: string }>,
+    activeScalps: [] as Array<{ ticker: string; direction: string; confidence: number; timestamp: string; entry_price?: number | null; leverage?: number; stop_price?: number | null; target_price?: number | null }>,
     watchlist: [] as Array<{ ticker: string; track: string; type: string }>,
     trainingStats: { trades: 0, observations: 0, sentiment: 0, vectors: 0 },
     logs: [] as string[],
@@ -78,8 +78,8 @@ except: result["training"] = {"trades": 0, "observations": 0, "sentiment": 0}
 
 # Active trades (DB-persisted on TAKE/BUILDING)
 try:
-    rows = conn.execute("SELECT ticker, direction, confidence, opened_at FROM active_trades WHERE status='open' ORDER BY opened_at DESC").fetchall()
-    result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
+    rows = conn.execute("SELECT ticker, direction, confidence, opened_at, entry_price, leverage, stop_price, target_price FROM active_trades WHERE status='open' ORDER BY opened_at DESC").fetchall()
+    result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2] or 0), "timestamp": r[3] or "", "entry_price": r[4], "leverage": r[5] or 1, "stop_price": r[6], "target_price": r[7]} for r in rows]
 except: result["active"] = []
 
 # Cost tracking (today)
