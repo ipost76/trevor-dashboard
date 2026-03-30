@@ -28,10 +28,13 @@
 | File | Purpose |
 |------|---------|
 | `query_brain.py` | XP, rank, brain files, costs, ChromaDB stats |
-| `query_trades.py` | Signals, active trades, history, watchlist |
+| `query_trades.py` | Signals, active trades, history, watchlist, trade delete |
+| `query_trevor_trades.py` | READ-ONLY query for TREVOR trade data (trade_outcomes + active_trades + ghost_trades) |
 | `query_training.py` | Training summary stats (aggregated queries) |
 | `query_research.py` | Signal analyses, vector search |
+| `query_signal_quality.py` | Signal quality metrics from trade_outcomes |
 | `chat_bridge.py` | Direct Anthropic API chat with brain context |
+| `query_ghost.py` | CRUD backend for ghost_trades, ghost_strategies, ghost_notes |
 | `manage_watchlist.py` | Watchlist CRUD (Hub-side metadata) |
 
 ### API Routes
@@ -65,7 +68,7 @@
 | Table | Rows | Notes |
 |-------|------|-------|
 | trade_insights | 429 | Signal feed (NO `direction` column!) |
-| trade_outcomes | 3 | Closed trades with P&L |
+| trade_outcomes | 40 | Closed trades with P&L |
 | watchlist | 24 | Tracked tickers |
 | xp_ledger | 8 | XP transactions (use `SUM(amount)` for total) |
 | security_events | 864 | Code scans, alerts |
@@ -210,3 +213,45 @@ sudo systemctl restart trevor-dashboard
 - node-pty: native module, needs build-essential, in serverExternalPackages
 - SSR: disabled via dynamic import (xterm needs window)
 - SystemD ExecStart: /usr/bin/node /home/trevor/trevor-dashboard/server.js
+
+## Ghost Command Center Overhaul (2026-03-30)
+
+### Page: `/ghost` (was 6 tabs, now 4)
+- **Removed**: Training tab, Tasks tab, ghost_training table, ghost_tasks table, `/api/ghost/training`, `/api/ghost/tasks`
+- **Page file**: `src/app/ghost/page.tsx` — slim tab router (~45 lines), imports component files
+- **Components**: `src/components/ghost/` — vault-tab.tsx, trades-tab.tsx, strategies-tab.tsx, notes-tab.tsx, shared.tsx
+
+### Vault Tab
+- `/api/ghost` now returns parsed heartbeat + memory sections (not just raw text)
+- Heartbeat parsed: last_active, signals_today, trades_closed, api_budget, alive_status (alive/warn/dead)
+- Memory split into collapsible sections by `## ` headings
+- Daily timeline: horizontal scrollable date pills (reads from brain/memory/*.md, 18 files)
+- Sync status: compact single-line bar with green/red indicator
+
+### Trades Tab
+- **NEW API**: `/api/ghost/trevor-trades` — READ-ONLY query of active_trades + trade_outcomes + ghost_trades
+- **Python helper**: `query_trevor_trades.py` — computes stats, hold duration, win/loss, best/worst
+- Active positions section (from active_trades WHERE status='open')
+- Trade history with ALL/WINS/LOSSES filter tabs (from active_trades WHERE status='closed')
+- Manual journal section (collapsible, preserves ghost_trades CRUD)
+- Stats bar: total, W/L, WR%, avg P&L, total P&L, best/worst
+
+### Strategies Tab
+- **11 new columns** added to ghost_strategies: assets, direction, timeframe, entry_conditions, exit_rules, risk_per_trade, min_confidence, win_count, loss_count, total_pnl, last_triggered_at
+- Status filter tabs: ALL/ACTIVE/TESTING/RETIRED/IDEAS
+- Cards: collapsed (title + badges) / expanded (full detail + edit/archive/delete)
+- Create/Edit modal with all structured fields
+- **NEW API**: `/api/ghost/strategies/match?ticker=SOL&direction=LONG&confidence=62` — returns active strategies matching criteria (future TREVOR integration hook)
+
+### Notes Tab
+- Extracted to component file, unchanged functionality
+- Search, pin, CRUD all preserved
+
+### Ghost DB Tables (current state)
+| Table | Rows | Status |
+|-------|------|--------|
+| ghost_trades | 1 | Active (manual journal) |
+| ghost_strategies | 2 | Active (11 new columns) |
+| ghost_notes | 2 | Active |
+| ghost_training | — | DROPPED |
+| ghost_tasks | — | DROPPED |
