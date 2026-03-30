@@ -19,6 +19,7 @@ rows = conn.execute("""
   WHERE status='closed' AND closed_at IS NOT NULL
   GROUP BY date(closed_at)
   ORDER BY date(closed_at) ASC
+  LIMIT 90
 """).fetchall()
 conn.close()
 result = [{"date": r["date"], "trades": r["trades"], "pnl": r["daily_pnl"], "wins": r["wins"]} for r in rows]

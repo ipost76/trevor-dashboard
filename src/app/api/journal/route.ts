@@ -45,6 +45,7 @@ rows = conn.execute("""
     WHERE status = 'closed' AND closed_at IS NOT NULL
     GROUP BY date(closed_at)
     ORDER BY date(closed_at) DESC
+    LIMIT 90
 """).fetchall()
 
 entries = []
