@@ -1,18 +1,11 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  TrendingUp, Activity, Zap, Clock,
-  Send, Wifi, WifiOff, Target, Bot,
-  AlertTriangle, ChevronRight,
-} from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
-import { fmtDollarPrice, fmtPctSigned, fmtPrice } from "@/lib/format";
+import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import Link from "next/link";
 import { DirectionBadge } from "@/components/ui/direction-badge";
-import { ConfidenceBar } from "@/components/ui/confidence-bar";
-import { StatStripSkeleton, PanelSkeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
 
 /* ── Types (unchanged) ── */
 type Signal = {
@@ -24,23 +17,12 @@ type ActiveTrade = {
   current_price?: number; pnl_pct?: number; leverage?: number;
   leveraged_pnl_pct?: number;
 };
-type ChatMsg = { role: "user" | "assistant"; content: string; timestamp?: string };
-type CalBucket = { trades: number; wins: number; winRate: number | null };
-
-type AutoPosition = {
-  ticker: string; side: string; entry_price: number; qty: number;
-  stop_price?: number; target_price?: number; entry_time: string; signal_score?: number;
-};
-type AutoSignal = {
-  ticker: string; direction: string; tier3_score?: number;
-  action: string; created_at: string;
-};
 type AutoData = {
   status: string;
-  positions: AutoPosition[];
+  positions: Array<Record<string, unknown>>;
   recentTrades: Array<Record<string, unknown>>;
-  recentSignals: AutoSignal[];
-  stats: { total: number; wins: number; losses: number; winRate: number; profitFactor: number; totalPnl: number; avgPnlPct?: number };
+  recentSignals: Array<Record<string, unknown>>;
+  stats: { total: number; wins: number; losses: number; winRate: number; profitFactor: number; totalPnl: number };
   dailyPnl: number;
   budget: { spent: number; remaining: number; calls: number; exceeded: boolean };
 };
@@ -53,8 +35,9 @@ type DashboardData = {
   avgPnl: number; totalPnl: number; wins: number; losses: number;
   avgWin: number; avgLoss: number; rrRatio: number; expectancy: number;
   bestTrade: number; worstTrade: number;
-  calibration: Record<string, CalBucket>;
-  chatMessages: ChatMsg[]; chatHealth: boolean;
+  calibration: Record<string, { trades: number; wins: number; winRate: number | null }>;
+  chatMessages: Array<{ role: string; content: string; timestamp?: string }>;
+  chatHealth: boolean;
   auto: AutoData | null;
 };
 
@@ -70,23 +53,6 @@ const EMPTY: DashboardData = {
   auto: null,
 };
 
-function timeAgo(ts: string): string {
-  if (!ts) return "";
-  const d = new Date(ts.endsWith("Z") ? ts : ts.includes("+") ? ts : ts + "Z");
-  if (isNaN(d.getTime())) return "";
-  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m ago`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
-}
-
-function formatET(ts: string): string {
-  if (!ts) return "";
-  const d = new Date(ts.endsWith("Z") ? ts : ts.includes("+") ? ts : ts + "Z");
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" });
-}
-
 type KillSwitchState = { active: boolean; activated_at?: string; reason?: string };
 type SystemHealth = {
   scanner?: { status: string; last_signal_at: string | null };
@@ -94,7 +60,28 @@ type SystemHealth = {
   api?: { hyperliquid: { healthy: boolean; latency_ms: number } };
   kill_switch?: { active: boolean };
   autotrader_paused?: { active: boolean; reason?: string };
-  circuit_breakers?: Array<{ ticker: string; status: string; win_rate: number; trades: number }>;
+};
+
+/* ── Colors ── */
+const C = {
+  bg: "#0a0e14",
+  surface: "var(--card)",
+  surfaceRaised: "#161e28",
+  border: "var(--border)",
+  borderSolid: "#1e2a3a",
+  accent: "#00ff88",
+  accentDim: "rgba(0,255,136,0.12)",
+  accentGlow: "rgba(0,255,136,0.25)",
+  red: "#ff3b5c",
+  redDim: "rgba(255,59,92,0.12)",
+  redGlow: "rgba(255,59,92,0.2)",
+  yellow: "#ffb800",
+  yellowDim: "rgba(255,184,0,0.12)",
+  cyan: "#00d4ff",
+  cyanDim: "rgba(0,212,255,0.1)",
+  textPrimary: "#e8edf4",
+  textSecondary: "#7a8a9e",
+  textTertiary: "#4a5568",
 };
 
 /* ── Main Component ── */
@@ -102,24 +89,19 @@ export function DashboardView() {
   const [data, setData] = useState<DashboardData>(EMPTY);
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [chatInput, setChatInput] = useState("");
-  const [chatSending, setChatSending] = useState(false);
   const [killSwitch, setKillSwitch] = useState<KillSwitchState>({ active: false });
   const [health, setHealth] = useState<SystemHealth>({});
   const [ksConfirm, setKsConfirm] = useState<"activate" | "deactivate" | null>(null);
   const [ksLoading, setKsLoading] = useState(false);
+  const [clock, setClock] = useState("");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [live, sq, chat, auto] = await Promise.all([
+    const [live, sq] = await Promise.all([
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       safeFetch<any>("/api/live", null),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       safeFetch<any>("/api/signal-quality", null),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      safeFetch<any>("/api/chat?action=history&limit=5", null),
-      safeFetch<AutoData | null>("/api/autotrader", null),
     ]);
     setData({
       xp: live?.xp ?? 0,
@@ -143,9 +125,9 @@ export function DashboardView() {
       bestTrade: sq?.overall?.bestTrade ?? 0,
       worstTrade: sq?.overall?.worstTrade ?? 0,
       calibration: sq?.calibration ?? {},
-      chatMessages: chat?.messages ?? [],
-      chatHealth: chat?.ok !== false,
-      auto: auto ?? null,
+      chatMessages: [],
+      chatHealth: false,
+      auto: null,
     });
     setLoading(false);
   }, []);
@@ -163,6 +145,13 @@ export function DashboardView() {
     };
     fetchKs();
     const iv = setInterval(fetchKs, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    const tick = () => setClock(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "America/New_York" }));
+    tick();
+    const iv = setInterval(tick, 1000);
     return () => clearInterval(iv);
   }, []);
 
@@ -197,60 +186,48 @@ export function DashboardView() {
     fp(); const iv = setInterval(fp, 30000); return () => clearInterval(iv);
   }, [data.activeTrades]);
 
-  const sendChat = useCallback(async () => {
-    const msg = chatInput.trim();
-    if (!msg || chatSending) return;
-    setChatInput("");
-    setChatSending(true);
-    setData(prev => ({ ...prev, chatMessages: [...prev.chatMessages, { role: "user", content: msg, timestamp: new Date().toISOString() }] }));
-    try {
-      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
-      const d = await res.json();
-      setData(prev => ({ ...prev, chatMessages: [...prev.chatMessages, { role: "assistant", content: d.response || d.error || "No response", timestamp: new Date().toISOString() }] }));
-    } catch {
-      setData(prev => ({ ...prev, chatMessages: [...prev.chatMessages, { role: "assistant", content: "[Connection error]", timestamp: new Date().toISOString() }] }));
-    }
-    setChatSending(false);
-  }, [chatInput, chatSending]);
-
   if (loading) {
     return (
-      <div className="flex-1 overflow-hidden p-2 flex flex-col gap-2">
-        <StatStripSkeleton />
-        <div className="grid grid-cols-1 gap-2 flex-1">
-          <PanelSkeleton title="LOADING..." />
-        </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.textTertiary, fontFamily: "var(--font-mono)", fontSize: 12 }}>
+        Loading...
       </div>
     );
   }
 
   const decided = data.wins + data.losses;
-  const winPct = decided > 0 ? ((data.wins / decided) * 100).toFixed(1) : "0";
-  const wrColor = Number(winPct) >= 55 ? "neon-green" : Number(winPct) >= 40 ? "neon-amber" : "neon-red";
-  const atStats = data.auto?.stats;
-  const atEquity = (data.auto as Record<string, unknown>)?.account
-    ? ((data.auto as Record<string, unknown>).account as Record<string, number>)?.equity ?? 0
-    : 0;
+  const winPct = decided > 0 ? ((data.wins / decided) * 100) : 0;
+  const winBarPct = decided > 0 ? (data.wins / decided) * 100 : 50;
+  const apiMs = health.api?.hyperliquid?.latency_ms ?? 0;
+  const apiOk = health.api?.hyperliquid?.healthy ?? false;
+  const hasActive = data.activeTrades.length > 0;
+
+  const edgeFix = data.expectancy < 0 && data.rrRatio < 1
+    ? "WR and R:R both underwater"
+    : data.expectancy < 0
+    ? `Need WR > ${(1 / (1 + data.rrRatio) * 100).toFixed(0)}%`
+    : null;
+  const asymmetric = Math.abs(data.worstTrade) > data.bestTrade;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 pb-16 md:pb-3 space-y-3">
+    <>
+      <style>{`
+        @keyframes pulseRing { 0% { transform: scale(0.5); opacity: 0.4; } 100% { transform: scale(1.3); opacity: 0; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
 
-      {/* ── Kill Switch Confirmation Dialog ── */}
+      {/* Kill Switch Dialog */}
       {ksConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="panel p-4 max-w-sm w-full mx-4 space-y-3">
-            <div className="text-sm font-bold text-foreground">
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)" }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10, padding: 16, maxWidth: 340, width: "calc(100% - 32px)" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>
               {ksConfirm === "activate" ? "HALT ALL SYSTEMS?" : "RESUME ALL SYSTEMS?"}
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              {ksConfirm === "activate"
-                ? "This will halt ALL signal generation and AutoTrader execution."
-                : "Resume all signal generation and AutoTrader execution?"}
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 14, lineHeight: 1.4 }}>
+              {ksConfirm === "activate" ? "This will halt ALL signal generation and AutoTrader execution." : "Resume all signal generation and AutoTrader execution?"}
             </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setKsConfirm(null)} className="px-3 py-1.5 text-[11px] rounded border border-[var(--border)] text-muted-foreground hover:text-foreground">Cancel</button>
-              <button onClick={toggleKillSwitch} disabled={ksLoading}
-                className={cn("px-3 py-1.5 text-[11px] rounded font-bold", ksConfirm === "activate" ? "bg-red-600 text-white" : "bg-green-600 text-white")}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setKsConfirm(null)} style={{ padding: "6px 12px", fontSize: 11, borderRadius: 4, border: `1px solid ${C.borderSolid}`, background: "transparent", color: C.textSecondary, cursor: "pointer" }}>Cancel</button>
+              <button onClick={toggleKillSwitch} disabled={ksLoading} style={{ padding: "6px 12px", fontSize: 11, borderRadius: 4, border: "none", background: ksConfirm === "activate" ? "#dc2626" : "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
                 {ksLoading ? "..." : ksConfirm === "activate" ? "CONFIRM HALT" : "CONFIRM RESUME"}
               </button>
             </div>
@@ -258,318 +235,301 @@ export function DashboardView() {
         </div>
       )}
 
-      {/* ── System Status Bar (compact) ── */}
-      <div className={cn("panel px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]",
-        killSwitch.active && "border-red-500/50 bg-red-500/5")}>
-        {/* Kill switch state */}
-        {killSwitch.active ? (
-          <button onClick={() => setKsConfirm("deactivate")} className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/15 border border-red-500/30 text-[var(--neon-red)] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--neon-red)]" />HALTED
-          </button>
-        ) : (
-          <span className="flex items-center gap-1.5 text-muted-foreground">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--neon-green)] shadow-[0_0_4px_var(--neon-green)] animate-[pulseLive_2s_ease-in-out_infinite]" />
-            <span className="neon-green font-bold">LIVE</span>
-          </span>
-        )}
-        <span className="text-muted-foreground">
-          Scanner: {health.scanner?.status === "running" ? <span className="neon-green">OK</span> : <span className="neon-red">?</span>}
-        </span>
-        <span className="text-muted-foreground">
-          API: {health.api?.hyperliquid?.healthy ? <span className="neon-green">{health.api.hyperliquid.latency_ms}ms</span> : <span className="neon-red">DOWN</span>}
-        </span>
-        <span className="text-muted-foreground">
-          Today: <span className="text-foreground font-mono">{health.signals?.today ?? 0} signals</span>
-        </span>
-        {health.autotrader_paused?.active && (
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 border border-amber-500/30 neon-amber">AT: PAUSED</span>
-        )}
-        {!killSwitch.active && (
-          <button onClick={() => setKsConfirm("activate")} className="ml-auto text-[10px] font-semibold uppercase tracking-wide px-2.5 py-0.5 rounded-md bg-transparent border border-[rgba(255,68,68,0.25)] text-[rgba(255,68,68,0.7)] hover:bg-[rgba(255,68,68,0.1)] hover:text-[#ff4444] hover:border-[rgba(255,68,68,0.5)] transition-all">
-            STOP
-          </button>
-        )}
-      </div>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 90 }}>
 
-      {/* ── Portfolio Stats (2×2 grid) ── */}
-      <div className="grid grid-cols-2 gap-px bg-[rgba(255,255,255,0.04)] rounded-lg overflow-hidden">
-        <StatCell label="P&L" value={`${fmtPctSigned(data.totalPnl)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
-        <StatCell label="W / L" value={`${data.wins}W · ${data.losses}L`} sub={`${winPct}% WR`} />
-        <StatCell label="Win Rate" value={`${winPct}%`} color={wrColor} />
-        <StatCell label="Active" value={String(data.activeTrades.length)} color={data.activeTrades.length > 0 ? "neon-green" : "text-muted-foreground"} />
-      </div>
-
-      {/* ── Secondary Stats (3-col) ── */}
-      <div className="grid grid-cols-3 gap-px bg-[rgba(255,255,255,0.04)] rounded-lg overflow-hidden">
-        <StatCell label="XP" value={String(data.xp)} sub={data.rank} color="neon-green" size="sm" />
-        <StatCell label="Signals" value={String(data.totalInsights)} size="sm" />
-        <StatCell label="Avg P&L" value={`${fmtPctSigned(data.avgPnl)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} size="sm" />
-      </div>
-
-      {/* ── Edge Analysis Card ── */}
-      {data.totalTrades > 0 && (
-        <div className="panel overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.3),0_0_1px_rgba(255,255,255,0.05)] rounded-[10px]">
-          <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--panel-header)]">
-            <span className="text-[9px] font-bold tracking-[0.1em] uppercase text-muted-foreground">Edge Analysis</span>
+        {/* ─── 1. TOP BAR (sticky) ─── */}
+        <div style={{
+          position: "sticky", top: 0, zIndex: 100, padding: "12px 16px 8px",
+          background: `linear-gradient(to bottom, ${C.bg} 70%, transparent)`,
+          backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ position: "relative", width: 7, height: 7 }}>
+              <span style={{ position: "absolute", inset: -4, borderRadius: "50%", background: C.accent, opacity: 0.25, animation: "pulseRing 2s ease-out infinite" }} />
+              <span style={{ display: "block", width: 7, height: 7, borderRadius: "50%", background: C.accent, boxShadow: `0 0 6px ${C.accent}` }} />
+            </span>
+            <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 11, fontWeight: 700, color: C.accent, letterSpacing: 1 }}>LIVE</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: C.textTertiary }}>{clock}</span>
           </div>
-          <div className="px-3 py-2.5 space-y-2">
-            {/* R:R + Expectancy row */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">R:R Ratio</div>
-                <div className={cn("text-lg font-bold font-mono", data.rrRatio >= 1.5 ? "neon-green" : data.rrRatio >= 1 ? "neon-amber" : "neon-red")}>
-                  {data.rrRatio.toFixed(2)}R
-                </div>
-                <div className="text-[9px] text-muted-foreground font-mono">
-                  Win: <span className="neon-green">+{data.avgWin}%</span> · Loss: <span className="neon-red">{data.avgLoss}%</span>
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Expectancy</div>
-                <div className={cn("text-lg font-bold font-mono", data.expectancy > 0 ? "neon-green" : data.expectancy > -0.5 ? "neon-amber" : "neon-red")}>
-                  {fmtPctSigned(data.expectancy)}%
-                </div>
-                <div className={cn("text-[9px]", data.expectancy >= 0 ? "neon-green" : "neon-amber")}>
-                  {data.expectancy < 0 && data.rrRatio < 1
-                    ? "Fix: WR and R:R both underwater"
-                    : data.expectancy < 0
-                    ? `Need WR > ${(1 / (1 + data.rrRatio) * 100).toFixed(0)}%`
-                    : "Edge positive"}
-                </div>
-              </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: C.cyan }}>⚡{data.xp}</span>
+          </div>
+        </div>
+
+        <div style={{ padding: "0 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+          {/* ─── 2. SYSTEM STATUS STRIP ─── */}
+          <div style={{
+            background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 8,
+            padding: "8px 12px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 6,
+          }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {killSwitch.active ? (
+                <Badge color={C.red} bg={C.redDim} onClick={() => setKsConfirm("deactivate")}>HALTED</Badge>
+              ) : (
+                <Badge color={C.accent} bg={C.accentDim}>Scanner {health.scanner?.status === "running" ? "OK" : "?"}</Badge>
+              )}
+              <Badge color={apiOk && apiMs <= 200 ? C.accent : C.yellow} bg={apiOk && apiMs <= 200 ? C.accentDim : C.yellowDim}>
+                API {apiMs}ms
+              </Badge>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: C.textSecondary }}>
+                {health.signals?.today ?? 0} signals
+              </span>
             </div>
-            {/* Best / Worst */}
-            <div className="flex items-center justify-between pt-2 border-t border-[var(--border)] text-[10px] font-mono">
-              <span>Best: <span className="neon-green">+{data.bestTrade}%</span></span>
-              <span>Worst: <span className="neon-red">{data.worstTrade}%</span></span>
-              {Math.abs(data.worstTrade) > data.bestTrade && (
-                <span className="text-[9px] text-muted-foreground">asymmetric ↓</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {health.autotrader_paused?.active && (
+                <Badge color={C.yellow} bg={C.yellowDim} glow>AT: PAUSED</Badge>
+              )}
+              {!killSwitch.active && (
+                <button onClick={() => setKsConfirm("activate")} style={{
+                  background: "transparent", border: `1px solid rgba(255,59,92,0.25)`, borderRadius: 4,
+                  padding: "3px 8px", fontSize: 9, fontWeight: 700, color: "rgba(255,59,92,0.7)",
+                  fontFamily: "var(--font-mono)", letterSpacing: 0.5, textTransform: "uppercase", cursor: "pointer",
+                }}>STOP</button>
               )}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ── Active Trades ── */}
-      <Link href="/trades" className={cn("panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-all rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]", data.activeTrades.length > 0 && "border-[rgba(0,255,136,0.15)] shadow-[0_2px_8px_rgba(0,0,0,0.3),0_0_20px_rgba(0,255,136,0.04)]")}>
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Activity className="h-3 w-3" />
-            <span>ACTIVE TRADES</span>
-            {data.activeTrades.length > 0 && (
-              <span className="ml-1 px-1.5 py-0 rounded-full text-[8px] font-bold bg-[var(--neon-green)] text-[#06060b]">{data.activeTrades.length}</span>
-            )}
-          </div>
-          <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        </div>
-        <div className="p-2">
-          {data.activeTrades.length > 0 ? (
-            <div className="space-y-1.5">
-              {data.activeTrades.slice(0, 4).map((t, i) => {
-                const tk = t.ticker?.replace("-PERP", "").replace("/USD", "") || "";
-                const lp = livePrices[tk] || t.current_price;
-                let pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
-                if (lp && t.entry_price && t.entry_price > 0) {
-                  const raw = t.direction?.toUpperCase() === "SHORT"
-                    ? ((t.entry_price - lp) / t.entry_price) * 100
-                    : ((lp - t.entry_price) / t.entry_price) * 100;
-                  pnl = raw * (t.leverage || 1);
-                }
-                return (
-                  <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.04)]">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold">{t.ticker}</span>
-                      <DirectionBadge dir={t.direction} />
-                      {t.leverage && t.leverage > 1 && <span className="text-[9px] neon-amber">{t.leverage}x</span>}
+          {/* ─── 3. ACTIVE TRADES ─── */}
+          <Link href="/trades" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.4s ease" }}>
+            <div style={{
+              background: C.surface, borderRadius: 10, padding: "14px 16px",
+              border: hasActive ? `1px solid rgba(0,255,136,0.25)` : `1px solid ${C.borderSolid}`,
+              boxShadow: hasActive ? `0 0 20px ${C.accentGlow}, inset 0 1px 0 rgba(0,255,136,0.1)` : undefined,
+            }}>
+              <SectionHeader icon="⚡" label="ACTIVE TRADES" count={data.activeTrades.length} chevron />
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {hasActive ? data.activeTrades.map((t, i) => {
+                  const tk = t.ticker?.replace("-PERP", "").replace("/USD", "") || "";
+                  const lp = livePrices[tk] || t.current_price;
+                  let pnl = t.leveraged_pnl_pct ?? t.pnl_pct ?? 0;
+                  if (lp && t.entry_price && t.entry_price > 0) {
+                    const raw = t.direction?.toUpperCase() === "SHORT"
+                      ? ((t.entry_price - lp) / t.entry_price) * 100
+                      : ((lp - t.entry_price) / t.entry_price) * 100;
+                    pnl = raw * (t.leverage || 1);
+                  }
+                  return (
+                    <div key={i} style={{
+                      background: C.surfaceRaised, border: `1px solid ${C.borderSolid}`, borderRadius: 8,
+                      padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{tk}</span>
+                        <DirectionBadge dir={t.direction} />
+                        {t.leverage && t.leverage > 1 && (
+                          <span style={{ fontSize: 10, color: C.textTertiary, fontWeight: 600 }}>{t.leverage}x</span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {lp && <span style={{ fontSize: 11, color: C.textSecondary, fontFamily: "var(--font-mono)" }}>{fmtDollarPrice(lp)}</span>}
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: pnl >= 0 ? C.accent : C.red }}>
+                          {fmtPctSigned(pnl)}%
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px]">
-                      {lp && <span className="text-muted-foreground">{fmtDollarPrice(lp)}</span>}
-                      <span className={cn("font-bold font-mono", pnl >= 0 ? "neon-green" : "neon-red")}>
-                        {fmtPctSigned(pnl)}%
-                      </span>
-                    </div>
+                  );
+                }) : (
+                  <div style={{ textAlign: "center", padding: "12px 0", color: C.textTertiary, fontSize: 11, fontStyle: "italic" }}>
+                    No active trades
                   </div>
-                );
-              })}
+                )}
+              </div>
             </div>
-          ) : (
-            <div className="py-4 text-center">
-              <Target className="h-5 w-5 mx-auto text-muted-foreground/30 mb-1" />
-              <div className="text-[11px] text-muted-foreground">No active positions</div>
+          </Link>
+
+          {/* ─── 4. P&L HERO ─── */}
+          <div style={{
+            background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10,
+            padding: "20px 16px 18px", textAlign: "center", animation: "slideUp 0.5s ease",
+          }}>
+            <div style={{ fontSize: 9, fontWeight: 500, letterSpacing: 1.2, textTransform: "uppercase", color: C.textTertiary, fontFamily: "var(--font-mono)" }}>TOTAL P&L</div>
+            <div style={{
+              fontFamily: "Orbitron, sans-serif", fontSize: 38, fontWeight: 800, letterSpacing: -1,
+              color: data.totalPnl >= 0 ? C.accent : C.red, margin: "6px 0 14px",
+              textShadow: `0 0 30px ${data.totalPnl >= 0 ? C.accentGlow : C.redGlow}`,
+            }}>
+              {fmtPctSigned(data.totalPnl)}%
+            </div>
+
+            {/* W/L Visual Bar */}
+            <div style={{ width: "100%", height: 4, borderRadius: 2, background: "#151d28", display: "flex", overflow: "hidden" }}>
+              <div style={{ width: `${winBarPct}%`, background: C.accent, borderRadius: "2px 0 0 2px" }} />
+              <div style={{ flex: 1, background: "rgba(255,59,92,0.6)", borderRadius: "0 2px 2px 0" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, color: C.accent }}>{data.wins}W</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: C.textTertiary }}>{winPct.toFixed(1)}%</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, color: C.red }}>{data.losses}L</span>
+            </div>
+
+            <div style={{ height: 1, background: C.borderSolid, margin: "14px 0 12px" }} />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, textAlign: "center" }}>
+              <MiniStat label="WIN RATE" value={`${winPct.toFixed(1)}%`} color={C.accent} />
+              <MiniStat label="ACTIVE" value={String(data.activeTrades.length)} color={C.textPrimary} />
+            </div>
+          </div>
+
+          {/* ─── 5. XP / SIGNALS / AVG P&L ─── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, animation: "slideUp 0.55s ease" }}>
+            <CompactCard label="XP" value={String(data.xp)} sub={data.rank} valueColor={C.cyan} />
+            <CompactCard label="SIGNALS" value={String(data.totalInsights)} sub="Lifetime" />
+            <CompactCard label="AVG P&L" value={`${fmtPctSigned(data.avgPnl)}%`} sub="Per trade" valueColor={data.avgPnl >= 0 ? C.accent : C.red} />
+          </div>
+
+          {/* ─── 6. EDGE ANALYSIS ─── */}
+          {data.totalTrades > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10, padding: "14px 16px", animation: "slideUp 0.6s ease" }}>
+              <SectionHeader icon="🔬" label="EDGE ANALYSIS" />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "12px 0 14px" }}>
+                {/* R:R Ratio */}
+                <div style={{ background: C.surfaceRaised, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.borderSolid}` }}>
+                  <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>R:R RATIO</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-mono)", color: data.rrRatio >= 1 ? C.accent : C.red, marginTop: 2 }}>
+                    {data.rrRatio.toFixed(2)}R
+                  </div>
+                  <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", marginTop: 6, display: "flex", gap: 4 }}>
+                    <span style={{ color: C.accent }}>W: +{data.avgWin}%</span>
+                    <span style={{ color: C.textTertiary }}>·</span>
+                    <span style={{ color: C.red }}>L: {data.avgLoss}%</span>
+                  </div>
+                </div>
+
+                {/* Expectancy */}
+                <div style={{ background: C.surfaceRaised, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.borderSolid}` }}>
+                  <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>EXPECTANCY</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-mono)", color: data.expectancy >= 0 ? C.accent : C.red, marginTop: 2 }}>
+                    {fmtPctSigned(data.expectancy)}%
+                  </div>
+                  {/* Expectancy bar */}
+                  <div style={{ marginTop: 6, position: "relative", height: 4, background: "#151d28", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ position: "absolute", left: "50%", top: -1, width: 1, height: 6, background: C.textTertiary }} />
+                    {data.expectancy < 0 ? (
+                      <div style={{ position: "absolute", right: "50%", top: 0, height: 4, width: `${Math.min(Math.abs(data.expectancy), 10) / 20 * 100}%`, background: C.red, borderRadius: 2 }} />
+                    ) : (
+                      <div style={{ position: "absolute", left: "50%", top: 0, height: 4, width: `${Math.min(data.expectancy, 10) / 20 * 100}%`, background: C.accent, borderRadius: 2 }} />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Advisory Banner */}
+              {edgeFix && (
+                <div style={{
+                  background: C.yellowDim, border: "1px solid rgba(255,184,0,0.25)", borderRadius: 6,
+                  padding: "8px 10px", marginBottom: 12, display: "flex", alignItems: "flex-start", gap: 6,
+                }}>
+                  <span style={{ fontSize: 11, marginTop: 1 }}>⚠️</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: C.yellow, fontWeight: 500, lineHeight: 1.4 }}>
+                    Fix: {edgeFix}
+                  </span>
+                </div>
+              )}
+
+              {/* Best / Worst */}
+              <div style={{
+                background: C.surfaceRaised, border: `1px solid ${C.borderSolid}`, borderRadius: 6,
+                padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>BEST</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.accent, fontFamily: "var(--font-mono)" }}>+{data.bestTrade}%</div>
+                </div>
+                <div style={{ width: 1, height: 28, background: C.borderSolid }} />
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>WORST</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.red, fontFamily: "var(--font-mono)" }}>{data.worstTrade}%</div>
+                </div>
+                {asymmetric && (
+                  <Badge color={C.red} bg={C.redDim} small>asymmetric ↓</Badge>
+                )}
+              </div>
             </div>
           )}
-        </div>
-      </Link>
 
-      {/* ── Signals & Quality (compact) ── */}
-      <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Zap className="h-3 w-3" />
-            <span>SIGNALS & QUALITY</span>
-          </div>
-          <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        </div>
-        {data.totalTrades > 0 ? (
-          <div className="px-3 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-3 text-[11px] font-mono">
-              <span className={cn("font-bold", wrColor)}>{data.winRate}%</span>
-              <span className="text-muted-foreground">{data.totalTrades} trades</span>
-              <span className="text-muted-foreground">PF: {data.profitFactor ?? "—"}</span>
+          {/* ─── 7. SIGNALS & QUALITY ─── */}
+          <Link href="/signals" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.65s ease" }}>
+            <div style={{
+              background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10,
+              padding: "14px 16px", cursor: "pointer",
+            }}>
+              <SectionHeader icon="⚡" label="SIGNALS & QUALITY" chevron />
+              {data.totalTrades > 0 ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 4, textAlign: "center", marginTop: 12 }}>
+                  <MiniStat label="WIN %" value={`${data.winRate}%`} color={C.accent} />
+                  <MiniStat label="TRADES" value={String(data.totalTrades)} color={C.textPrimary} />
+                  <MiniStat label="PF" value={data.profitFactor != null ? data.profitFactor.toFixed(1) : "\u2014"} color={data.profitFactor != null && data.profitFactor >= 1 ? C.accent : C.red} />
+                  <MiniStat label="P&L" value={`${fmtPctSigned(data.totalPnl)}%`} color={data.totalPnl >= 0 ? C.accent : C.red} />
+                </div>
+              ) : (
+                <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: C.textTertiary }}>No trade data yet</div>
+              )}
             </div>
-            <span className={cn("text-sm font-bold font-mono", data.totalPnl >= 0 ? "neon-green" : "neon-red")}>
-              {fmtPctSigned(data.totalPnl)}%
-            </span>
-          </div>
-        ) : (
-          <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">No trade data yet</div>
-        )}
-        {/* Recent signal feed (compact, max 4) */}
-        {data.recentSignals.length > 0 && (
-          <div className="border-t border-[var(--border)] px-2 py-1.5 space-y-0">
-            {data.recentSignals.slice(0, 4).map((s, i) => (
-              <div key={i} className="flex items-center gap-2 px-1 py-[3px] rounded-sm hover:bg-[rgba(0,240,255,0.03)]">
-                <span className="font-bold text-foreground w-[68px] truncate text-[10px]">{s.ticker}</span>
-                <DirectionBadge dir={s.direction || s.signal_type || "long"} />
-                <div className="flex-1" />
-                <ConfidenceBar value={s.confidence} />
-                <span className="text-[8px] text-muted-foreground w-10 text-right">{timeAgo(s.timestamp || s.created_at || "")}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Link>
+          </Link>
 
-      {/* ── AutoTrader (compact card) ── */}
-      <Link href="/autotrader" className="panel hover:border-[rgba(0,240,255,0.25)] transition-colors block rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Bot className="h-3 w-3" />
-            <span>AUTOTRADER</span>
-            <span className={cn("ml-1 px-1.5 py-0 rounded-full text-[8px] font-bold",
-              !data.auto || data.auto.status === "not_deployed"
-                ? "bg-[#333] text-[#888]"
-                : "bg-[var(--neon-green)] text-[#06060b]"
-            )}>
-              {!data.auto || data.auto.status === "not_deployed" ? "INACTIVE" : "PAPER"}
-            </span>
-            {health.autotrader_paused?.active && (
-              <span className="px-1.5 py-0 rounded-full text-[8px] font-bold bg-amber-500/15 neon-amber border border-amber-500/30">PAUSED</span>
-            )}
-          </div>
-          <ChevronRight className="h-3 w-3 text-muted-foreground" />
         </div>
-        {atStats && atStats.total > 0 ? (
-          <div className="px-3 py-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-mono text-muted-foreground">
-            <span>Equity: <span className="text-foreground">${atEquity.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></span>
-            <span>P&L: <span className={cn(atStats.totalPnl >= 0 ? "neon-green" : "neon-red")}>${atStats.totalPnl >= 0 ? "+" : ""}{atStats.totalPnl.toFixed(0)}</span></span>
-            <span>WR: <span className={cn(atStats.winRate >= 50 ? "neon-green" : "neon-red")}>{atStats.winRate.toFixed(1)}%</span></span>
-            <span>{atStats.total} trades</span>
-          </div>
-        ) : (
-          <div className="px-3 py-2 text-[11px] text-muted-foreground">
-            {data.auto ? `${atStats?.total ?? 0} trades completed` : "Not active"}
-          </div>
-        )}
-      </Link>
-
-      {/* ── Chat Preview ── */}
-      <div className="panel overflow-hidden rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
-        <div className="panel-header flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Send className="h-3 w-3" />
-            <span>CHAT</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {data.chatHealth ? (
-              <><Wifi className="h-2.5 w-2.5 text-[var(--neon-green)]" /><span className="text-[8px] neon-green font-normal">ON</span></>
-            ) : (
-              <><WifiOff className="h-2.5 w-2.5 text-[var(--neon-red)]" /><span className="text-[8px] neon-red font-normal">OFF</span></>
-            )}
-          </div>
-        </div>
-        <ChatMini messages={data.chatMessages} input={chatInput} setInput={setChatInput} onSend={sendChat} sending={chatSending} />
       </div>
+    </>
+  );
+}
+
+/* ── Sub-Components ── */
+
+function Badge({ color, bg, glow, small, children, onClick }: {
+  color: string; bg: string; glow?: boolean; small?: boolean; children: React.ReactNode; onClick?: () => void;
+}) {
+  return (
+    <span onClick={onClick} style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: small ? "2px 6px" : "3px 8px", borderRadius: 4,
+      fontSize: small ? 9 : 10, fontWeight: 600, fontFamily: "var(--font-mono)",
+      letterSpacing: 0.5, textTransform: "uppercase",
+      color, background: bg,
+      boxShadow: glow ? `0 0 12px ${bg}` : undefined,
+      cursor: onClick ? "pointer" : undefined,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function SectionHeader({ icon, label, count, chevron }: {
+  icon: string; label: string; count?: number; chevron?: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 12, opacity: 0.7 }}>{icon}</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: C.textSecondary }}>{label}</span>
+        {count != null && count > 0 && (
+          <span style={{ fontSize: 9, fontWeight: 700, background: C.accentDim, color: C.accent, borderRadius: 4, padding: "1px 5px" }}>{count}</span>
+        )}
+      </div>
+      {chevron && <ChevronRight size={14} color={C.textTertiary} />}
     </div>
   );
 }
 
-/* ── Stat Cell (for grid layouts) ── */
-function StatCell({ label, value, sub, color, size = "md" }: {
-  label: string; value: string; sub?: string; color?: string; size?: "sm" | "md";
-}) {
+function MiniStat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-[var(--card)] flex flex-col items-center justify-center py-3 px-3 gap-0.5">
-      <div className="stat-label">{label}</div>
-      <div className={cn(
-        "font-bold font-mono tabular-nums",
-        size === "sm" ? "text-base" : "text-xl",
-        color || "text-foreground"
-      )}>{value}</div>
-      {sub && <div className="text-[9px] text-muted-foreground truncate max-w-full">{sub}</div>}
+    <div>
+      <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: color || C.textPrimary, fontFamily: "var(--font-mono)", marginTop: 2 }}>{value}</div>
     </div>
   );
 }
 
-/* ── Chat Mini Component ── */
-function ChatMini({
-  messages, input, setInput, onSend, sending,
-}: {
-  messages: ChatMsg[];
-  input: string;
-  setInput: (v: string) => void;
-  onSend: () => void;
-  sending: boolean;
+function CompactCard({ label, value, sub, valueColor }: {
+  label: string; value: string; sub?: string; valueColor?: string;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, sending]);
-
-  const last = messages.slice(-3);
-
   return (
-    <div className="flex flex-col min-h-0">
-      <div ref={scrollRef} className="overflow-auto p-2 space-y-1.5 min-h-0 max-h-24">
-        {last.length === 0 && !sending && (
-          <div className="flex items-center justify-center py-2 text-[10px] text-muted-foreground/40">Ask TREVOR anything</div>
-        )}
-        {last.map((m, i) => (
-          <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-            <div className={cn(
-              "max-w-[85%] rounded px-2 py-1 text-[10px] font-mono",
-              m.role === "user"
-                ? "bg-[rgba(0,180,255,0.08)] border border-[rgba(0,180,255,0.15)]"
-                : "bg-[var(--card)] border border-[var(--border)] border-l-2 border-l-[var(--neon-green)]"
-            )}>
-              <div className="whitespace-pre-wrap break-words line-clamp-2">{m.content}</div>
-            </div>
-          </div>
-        ))}
-        {sending && (
-          <div className="flex justify-start">
-            <div className="bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-[10px]">
-              <span className="animate-pulse neon-text">...</span>
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="border-t border-[var(--border)] p-1.5">
-        <div className="flex items-center gap-1.5">
-          <span className="neon-text text-[10px] font-bold">&gt;</span>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && onSend()}
-            placeholder="Ask TREVOR anything..."
-            disabled={sending}
-            className="bg-transparent border-none outline-none text-[10px] flex-1 text-foreground placeholder:text-muted-foreground font-mono"
-          />
-          <button onClick={onSend} disabled={sending || !input.trim()} className="neon-text disabled:opacity-30 p-1">
-            <Send className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
+    <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 8, padding: "12px 10px", textAlign: "center" }}>
+      <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: "var(--font-mono)" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: valueColor || C.textPrimary, fontFamily: "var(--font-mono)", marginTop: 4 }}>{value}</div>
+      {sub && <div style={{ fontSize: 8, color: valueColor ? `${valueColor}99` : C.textTertiary, marginTop: 3, fontFamily: "var(--font-mono)" }}>{sub}</div>}
     </div>
   );
 }
