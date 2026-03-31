@@ -45,11 +45,29 @@ export default function AutoTraderPage() {
     setLoading(false);
   }, []);
 
+  // Check if autotrader is paused via flag file
+  const [atPaused, setAtPaused] = useState<{ active: boolean; reason?: string }>({ active: false });
+
   useEffect(() => {
     fetchData();
     const iv = setInterval(fetchData, 30000);
     return () => clearInterval(iv);
   }, [fetchData]);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch("/api/system-health");
+        if (res.ok) {
+          const d = await res.json();
+          setAtPaused(d.autotrader_paused || { active: false });
+        }
+      } catch { /* ignore */ }
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+  }, []);
 
   if (loading) {
     return (
@@ -75,23 +93,6 @@ export default function AutoTraderPage() {
   const signals = (data?.recentSignals as Signal[]) || [];
   const dailyPnl = (data?.dailyPnl as number) || 0;
   const lastScan = data?.lastScan as Record<string, unknown> | null;
-
-  // Check if autotrader is paused via flag file
-  const [atPaused, setAtPaused] = useState<{ active: boolean; reason?: string }>({ active: false });
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const res = await fetch("/api/system-health");
-        if (res.ok) {
-          const d = await res.json();
-          setAtPaused(d.autotrader_paused || { active: false });
-        }
-      } catch { /* ignore */ }
-    };
-    check();
-    const iv = setInterval(check, 30000);
-    return () => clearInterval(iv);
-  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
