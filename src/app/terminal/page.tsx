@@ -93,7 +93,7 @@ export default function ChatPage() {
         <div className="shrink-0" style={{ height: 1, background: "linear-gradient(90deg, transparent, #58a6ff, transparent)" }} />
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-auto px-3 py-4 space-y-3" style={{ background: "#0d1117" }}>
+        <div ref={scrollRef} className="flex-1 overflow-auto px-3 py-4 pb-6 space-y-3" style={{ background: "#0d1117" }}>
           {messages.length === 0 && !sending && (
             <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: "#8b949e" }}>
               <MessageSquare className="h-10 w-10 opacity-20" />
@@ -112,22 +112,28 @@ export default function ChatPage() {
           {messages.map((m, i) => (
             <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
               <div className="max-w-[85%] md:max-w-[70%]">
-                <div className="mb-0.5" style={{ fontSize: 9, color: "#8b949e", textAlign: m.role === "user" ? "right" : "left" }}>
-                  {m.role === "user" ? "Ghost" : ">_ TREVOR"}
+                <div className="mb-1" style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const,
+                  color: m.role === "assistant" ? "#00ff88" : "#58a6ff",
+                  textAlign: m.role === "user" ? "right" : "left",
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {m.role === "user" ? "GHOST" : ">_ TREVOR"}
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{
                   background: m.role === "user" ? "#1a2332" : "#161b22",
                   border: `1px solid ${m.role === "user" ? "rgba(88,166,255,0.2)" : "#30363d"}`,
+                  borderLeft: m.role === "assistant" ? "3px solid #00ff88" : undefined,
                   color: "#e6edf3",
-                  fontSize: 12,
+                  fontSize: 13,
                   fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
                   lineHeight: 1.6,
                 }}>
                   <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                  <div style={{ fontSize: 8, color: "#484f58", marginTop: 4, textAlign: "right" }}>
-                    {formatTime(m.timestamp)}
-                    {m.tokens && <span className="ml-2">{m.tokens.input + m.tokens.output} tok</span>}
-                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: "#484f58", marginTop: 3, textAlign: m.role === "user" ? "right" : "left", paddingLeft: m.role === "assistant" ? 2 : 0, paddingRight: m.role === "user" ? 2 : 0 }}>
+                  {formatTime(m.timestamp)}
+                  {m.tokens && <span className="ml-2" style={{ opacity: 0.6 }}>{m.tokens.input + m.tokens.output} tok</span>}
                 </div>
               </div>
             </div>
@@ -135,8 +141,8 @@ export default function ChatPage() {
           {sending && (
             <div className="flex justify-start">
               <div className="max-w-[85%] md:max-w-[70%]">
-                <div className="mb-0.5" style={{ fontSize: 9, color: "#8b949e" }}>&gt;_ TREVOR</div>
-                <div className="rounded-lg px-3 py-2" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+                <div className="mb-1" style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#00ff88", fontFamily: "'JetBrains Mono', monospace" }}>&gt;_ TREVOR</div>
+                <div className="rounded-lg px-3 py-2" style={{ background: "#161b22", border: "1px solid #30363d", borderLeft: "3px solid #00ff88" }}>
                   <TypingDots size="sm" className="text-[#58a6ff]" />
                 </div>
               </div>
@@ -144,10 +150,10 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Input */}
-        <div className="shrink-0 p-2" style={{ borderTop: "1px solid #30363d", background: "#161b22" }}>
+        {/* Input — fixed above mobile tab bar */}
+        <div className="shrink-0 p-2 pb-14 md:pb-2" style={{ borderTop: "1px solid #30363d", background: "#161b22" }}>
           <div className="flex items-center gap-2">
-            <span style={{ color: "#58a6ff", fontSize: 14, fontWeight: 700, fontFamily: "monospace" }}>&gt;</span>
+            <span style={{ color: "#00ff88", fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>&gt;</span>
             <input
               ref={inputRef}
               value={input}
@@ -161,29 +167,32 @@ export default function ChatPage() {
               style={{
                 background: "#0d1117",
                 border: "1px solid #30363d",
-                borderRadius: 6,
-                padding: "8px 12px",
+                borderRadius: 8,
+                padding: "10px 14px",
                 color: "#e6edf3",
                 fontSize: 13,
                 fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
+                minHeight: 44,
               }}
+              onFocus={e => { (e.target as HTMLInputElement).style.borderColor = "rgba(0,255,136,0.4)"; (e.target as HTMLInputElement).style.boxShadow = "0 0 0 2px rgba(0,255,136,0.08)"; }}
+              onBlur={e => { (e.target as HTMLInputElement).style.borderColor = "#30363d"; (e.target as HTMLInputElement).style.boxShadow = "none"; }}
             />
             <button
               onClick={send}
               disabled={sending || !input.trim()}
-              className="flex items-center gap-1 disabled:opacity-30 transition-opacity"
+              className="flex items-center justify-center disabled:opacity-30 transition-opacity shrink-0"
               style={{
-                background: "#58a6ff",
+                background: "#00ff88",
                 color: "#0d1117",
                 border: "none",
-                borderRadius: 6,
-                padding: "8px 14px",
-                fontSize: 12,
+                borderRadius: 8,
+                width: 44,
+                height: 44,
+                fontSize: 14,
                 fontWeight: 700,
-                fontFamily: "monospace",
                 cursor: sending || !input.trim() ? "not-allowed" : "pointer",
               }}>
-              <Send className="h-3 w-3" />
+              <Send className="h-4 w-4" />
             </button>
           </div>
         </div>

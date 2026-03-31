@@ -187,7 +187,7 @@ export function Sidebar() {
               <span className="relative">
                 <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_rgba(0,240,255,0.6)]")} />
                 {signalBadge > 0 && (item.href === "/signals" || item.href === "/trades") && (
-                  <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-[#ff3366] text-white text-[8px] font-bold px-0.5">{signalBadge}</span>
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-[#ff4444] text-white text-[9px] font-bold leading-none border-2 border-[var(--sidebar)]">{signalBadge}</span>
                 )}
               </span>
             </Link>

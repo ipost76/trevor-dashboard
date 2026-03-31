@@ -285,7 +285,7 @@ export function DashboardView() {
           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 border border-amber-500/30 neon-amber">AT: PAUSED</span>
         )}
         {!killSwitch.active && (
-          <button onClick={() => setKsConfirm("activate")} className="ml-auto text-[9px] text-muted-foreground/50 hover:text-[var(--neon-red)] transition-colors">
+          <button onClick={() => setKsConfirm("activate")} className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[rgba(255,68,68,0.1)] border border-[rgba(255,68,68,0.3)] text-[#ff4444] hover:bg-[rgba(255,68,68,0.2)] transition-colors">
             STOP
           </button>
         )}
@@ -301,7 +301,7 @@ export function DashboardView() {
 
       {/* ── Secondary Stats (3-col) ── */}
       <div className="grid grid-cols-3 gap-px bg-[var(--border)] rounded-lg overflow-hidden">
-        <StatCell label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" size="sm" />
+        <StatCell label="XP" value={String(data.xp)} sub={data.rank} color="neon-green" size="sm" />
         <StatCell label="Signals" value={String(data.totalInsights)} size="sm" />
         <StatCell label="Avg P&L" value={`${fmtPctSigned(data.avgPnl)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} size="sm" />
       </div>
@@ -329,7 +329,7 @@ export function DashboardView() {
                 <div className={cn("text-lg font-bold font-mono", data.expectancy > 0 ? "neon-green" : data.expectancy > -0.5 ? "neon-amber" : "neon-red")}>
                   {fmtPctSigned(data.expectancy)}%
                 </div>
-                <div className="text-[9px] text-muted-foreground">
+                <div className={cn("text-[9px]", data.expectancy >= 0 ? "neon-green" : "neon-amber")}>
                   {data.expectancy < 0 && data.rrRatio < 1
                     ? "Fix: WR and R:R both underwater"
                     : data.expectancy < 0
