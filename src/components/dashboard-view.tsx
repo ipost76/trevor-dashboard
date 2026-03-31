@@ -353,21 +353,24 @@ export function DashboardView() {
               {fmtPctSigned(data.totalPnl)}%
             </div>
 
-            {/* W/L Visual Bar */}
-            <div style={{ width: "100%", height: 4, borderRadius: 2, background: "#151d28", display: "flex", overflow: "hidden" }}>
-              <div style={{ width: `${winBarPct}%`, background: C.accent, borderRadius: "2px 0 0 2px" }} />
-              <div style={{ flex: 1, background: "rgba(255,59,92,0.6)", borderRadius: "0 2px 2px 0" }} />
+            {/* W/L Counts */}
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "baseline", gap: 12, marginBottom: 10 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 700, color: C.accent }}>{data.wins}<span style={{ fontSize: 11, fontWeight: 500, opacity: 0.7 }}>W</span></span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: C.textTertiary }}>·</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 700, color: C.red }}>{data.losses}<span style={{ fontSize: 11, fontWeight: 500, opacity: 0.7 }}>L</span></span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, color: C.accent }}>{data.wins}W</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: C.textTertiary }}>{winPct.toFixed(1)}%</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, fontWeight: 600, color: C.red }}>{data.losses}L</span>
+
+            {/* W/L Visual Bar */}
+            <div style={{ width: "100%", height: 6, borderRadius: 3, background: "#151d28", display: "flex", overflow: "hidden" }}>
+              <div style={{ width: `${winBarPct}%`, background: C.accent, borderRadius: "3px 0 0 3px" }} />
+              <div style={{ flex: 1, background: "rgba(255,59,92,0.6)", borderRadius: "0 3px 3px 0" }} />
             </div>
 
             <div style={{ height: 1, background: C.borderSolid, margin: "14px 0 12px" }} />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, textAlign: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, textAlign: "center" }}>
               <MiniStat label="WIN RATE" value={`${winPct.toFixed(1)}%`} color={C.accent} />
+              <MiniStat label="TRADES" value={String(data.totalTrades)} color={C.textPrimary} />
               <MiniStat label="ACTIVE" value={String(data.activeTrades.length)} color={C.textPrimary} />
             </div>
           </div>
