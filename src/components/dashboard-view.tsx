@@ -51,6 +51,8 @@ type DashboardData = {
   logTail: string[];
   winRate: number; totalTrades: number; profitFactor: number | null;
   avgPnl: number; totalPnl: number; wins: number; losses: number;
+  avgWin: number; avgLoss: number; rrRatio: number; expectancy: number;
+  bestTrade: number; worstTrade: number;
   calibration: Record<string, CalBucket>;
   chatMessages: ChatMsg[]; chatHealth: boolean;
   auto: AutoData | null;
@@ -60,7 +62,10 @@ const EMPTY: DashboardData = {
   xp: 0, rank: "Unknown", totalInsights: 0, todayCost: 0,
   recentSignals: [], activeTrades: [], logTail: [],
   winRate: 0, totalTrades: 0, profitFactor: null, avgPnl: 0,
-  totalPnl: 0, wins: 0, losses: 0, calibration: {},
+  totalPnl: 0, wins: 0, losses: 0,
+  avgWin: 0, avgLoss: 0, rrRatio: 0, expectancy: 0,
+  bestTrade: 0, worstTrade: 0,
+  calibration: {},
   chatMessages: [], chatHealth: false,
   auto: null,
 };
@@ -130,6 +135,12 @@ export function DashboardView() {
       totalPnl: sq?.overall?.totalPnl ?? 0,
       wins: sq?.overall?.wins ?? 0,
       losses: sq?.overall?.losses ?? 0,
+      avgWin: sq?.overall?.avgWin ?? 0,
+      avgLoss: sq?.overall?.avgLoss ?? 0,
+      rrRatio: sq?.overall?.rrRatio ?? 0,
+      expectancy: sq?.overall?.expectancy ?? 0,
+      bestTrade: sq?.overall?.bestTrade ?? 0,
+      worstTrade: sq?.overall?.worstTrade ?? 0,
       calibration: sq?.calibration ?? {},
       chatMessages: chat?.messages ?? [],
       chatHealth: chat?.ok !== false,
@@ -280,13 +291,10 @@ export function DashboardView() {
             API: {health.api?.hyperliquid?.healthy ? <span className="neon-green">OK ({health.api.hyperliquid.latency_ms}ms)</span> : <span className="neon-red">DOWN</span>}
           </span>
           <span className="text-muted-foreground">
-            Today: <span className="text-foreground font-mono">{health.signals?.today ?? "?"}</span>
-            {health.signals?.change_pct != null && health.signals.change_pct < -30 && (
-              <span className="neon-red ml-1">({health.signals.change_pct > 0 ? "+" : ""}{health.signals.change_pct}%)</span>
-            )}
+            Today: <span className="text-foreground font-mono">{health.signals?.today ?? "?"} signals</span>
           </span>
           {health.autotrader_paused?.active && (
-            <span className="neon-amber">AT: PAUSED</span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 neon-amber">AT: PAUSED</span>
           )}
           {health.circuit_breakers?.filter(cb => cb.status === "TRIPPED").map(cb => (
             <span key={cb.ticker} className="neon-red">{cb.ticker}: TRIPPED</span>
@@ -295,16 +303,33 @@ export function DashboardView() {
       </div>
 
       {/* ── Stat Strip ── */}
-      <div className="col-span-full panel shrink-0">
-        <div className="grid grid-cols-4 gap-x-2 gap-y-1 px-2 py-1.5 md:flex md:items-center md:gap-5 md:px-3">
+      <div className="col-span-full panel shrink-0 px-2 py-1.5 md:px-3 space-y-1">
+        {/* Row 1: Core metrics */}
+        <div className="grid grid-cols-4 gap-x-2">
           <StatBlock label="P&L" value={`${fmtPctSigned(data.totalPnl)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
-          <StatBlock label="W/L" value={`${data.wins}/${data.losses}`} sub={`${winPct}%`} />
+          <StatBlock label="W/L" value={`${data.wins}W · ${data.losses}L`} />
           <StatBlock label="Win Rate" value={`${winPct}%`} color={Number(winPct) >= 50 ? "neon-green" : "neon-red"} />
           <StatBlock label="Active" value={String(data.activeTrades.length)} color="neon-text" />
+        </div>
+        {/* Row 2: Context metrics */}
+        <div className="grid grid-cols-3 gap-x-2">
           <StatBlock label="XP" value={String(data.xp)} sub={data.rank} color="neon-text" />
           <StatBlock label="Signals" value={String(data.totalInsights)} />
           <StatBlock label="Avg P&L" value={`${fmtPctSigned(data.avgPnl)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} />
         </div>
+        {/* Row 3: Analytics */}
+        {data.totalTrades > 0 && (
+          <>
+            <div className="grid grid-cols-2 gap-x-2">
+              <StatBlock label="R:R Ratio" value={`${data.rrRatio.toFixed(2)}R`} color={data.rrRatio >= 1.5 ? "neon-green" : data.rrRatio >= 1.0 ? "neon-amber" : "neon-red"} sub={`Win: +${data.avgWin}% | Loss: ${data.avgLoss}%`} />
+              <StatBlock label="Expectancy" value={`${fmtPctSigned(data.expectancy)}%`} color={data.expectancy > 0 ? "neon-green" : data.expectancy > -0.5 ? "neon-amber" : "neon-red"} sub={data.expectancy < 0 && data.rrRatio < 1 ? "Fix: WR and R:R both underwater" : data.expectancy < 0 ? `Need WR > ${(1 / (1 + data.rrRatio) * 100).toFixed(0)}%` : "Edge positive"} />
+            </div>
+            <div className="text-[9px] text-muted-foreground font-mono px-0.5">
+              Best: <span className="neon-green">+{data.bestTrade}%</span> | Worst: <span className="neon-red">{data.worstTrade}%</span>
+              {Math.abs(data.worstTrade) > data.bestTrade && <span className="text-muted-foreground"> | asymmetric (downside)</span>}
+            </div>
+          </>
+        )}
       </div>
 
       {/* ── Main Grid (2×2 desktop, stack mobile) ── */}
@@ -315,7 +340,9 @@ export function DashboardView() {
           <div className="panel-header flex items-center gap-1.5">
             <Zap className="h-3 w-3" />
             <span>SIGNALS & QUALITY</span>
-            <span className="ml-auto text-muted-foreground font-normal text-[9px]">{data.recentSignals.length}</span>
+            {data.recentSignals.length > 0 && (
+              <span className="ml-auto text-muted-foreground font-normal text-[9px]">Recent: {data.recentSignals.length}</span>
+            )}
           </div>
           {/* Quality stats ribbon */}
           {data.totalTrades > 0 && (
@@ -532,7 +559,7 @@ function ChatMini({
     <div className="flex flex-col flex-1 min-h-0">
       <div ref={scrollRef} className="flex-1 overflow-auto p-2 space-y-1.5 min-h-0">
         {last.length === 0 && !sending && (
-          <div className="flex items-center justify-center h-full text-[9px] text-muted-foreground opacity-50">Type a command below</div>
+          <div className="flex items-center justify-center h-full text-[9px] text-muted-foreground opacity-50">Ask TREVOR anything</div>
         )}
         {last.map((m, i) => (
           <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
@@ -559,7 +586,7 @@ function ChatMini({
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && onSend()}
-            placeholder="Command..."
+            placeholder="Ask TREVOR anything..."
             disabled={sending}
             className="bg-transparent border-none outline-none text-[10px] flex-1 text-foreground placeholder:text-muted-foreground font-mono"
           />

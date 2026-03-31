@@ -118,11 +118,18 @@ def get_data():
 
     total = len(trades)
     wins = sum(1 for t in trades if (t['pnl_pct'] or 0) > 0)
-    losses = sum(1 for t in trades if (t['pnl_pct'] or 0) < 0)
+    losses = sum(1 for t in trades if (t['pnl_pct'] or 0) <= 0)  # breakeven = loss
     pnls = [float(t['leveraged_pnl_pct'] or t['pnl_pct'] or 0) for t in trades]
     total_pnl = sum(pnls)
     win_pnls = [p for p in pnls if p > 0]
     loss_pnls = [p for p in pnls if p < 0]
+
+    avg_win = round(sum(win_pnls) / len(win_pnls), 2) if win_pnls else 0
+    avg_loss_raw = round(sum(loss_pnls) / len(loss_pnls), 2) if loss_pnls else 0
+    avg_loss_abs = abs(avg_loss_raw)
+    rr_ratio = round(avg_win / avg_loss_abs, 2) if avg_loss_abs > 0 else 0
+    wr_dec = wins / total if total > 0 else 0
+    expectancy = round(wr_dec * avg_win - (1 - wr_dec) * avg_loss_abs, 2) if total > 0 else 0
 
     overall = {
         "totalTrades": total,
@@ -131,10 +138,14 @@ def get_data():
         "winRate": round(wins / total * 100, 1) if total > 0 else 0,
         "totalPnl": round(total_pnl, 2),
         "avgPnl": round(total_pnl / total, 2) if total > 0 else 0,
-        "avgWin": round(sum(win_pnls) / len(win_pnls), 2) if win_pnls else 0,
-        "avgLoss": round(sum(loss_pnls) / len(loss_pnls), 2) if loss_pnls else 0,
+        "avgWin": avg_win,
+        "avgLoss": avg_loss_raw,
         "profitFactor": round(abs(sum(win_pnls)) / abs(sum(loss_pnls)), 2)
         if loss_pnls and sum(loss_pnls) != 0 else None,
+        "rrRatio": rr_ratio,
+        "expectancy": expectancy,
+        "bestTrade": round(max(pnls), 2) if pnls else 0,
+        "worstTrade": round(min(pnls), 2) if pnls else 0,
     }
 
     # Calibration — use active_trades (has confidence + pnl_pct for closed trades)
