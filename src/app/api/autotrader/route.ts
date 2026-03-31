@@ -2,8 +2,22 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache (60s TTL) — avoids 1.5-8s Alpaca API call on every poll
+let _atCache: { data: unknown; ts: number } | null = null;
+const AT_CACHE_TTL = 60_000; // 60 seconds
+
 export async function GET() {
   const start = Date.now();
+
+  // Return cached response if fresh
+  if (_atCache && (Date.now() - _atCache.ts) < AT_CACHE_TTL) {
+    return NextResponse.json({
+      ...(_atCache.data as Record<string, unknown>),
+      cached: true,
+      latencyMs: Date.now() - start,
+    });
+  }
+
   const dbPath = "/home/trevor/trevor/autotrader/autotrader.db";
 
   const data: Record<string, unknown> = {
@@ -147,6 +161,7 @@ print(json.dumps(result, default=str))
   } catch { /* graceful */ }
 
   data.latencyMs = Date.now() - start;
+  _atCache = { data: { ...data }, ts: Date.now() };
   return NextResponse.json(data);
 }
 

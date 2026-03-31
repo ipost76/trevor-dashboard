@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache for scope=summary (60s TTL)
+let _sigSummaryCache: { data: unknown; ts: number } | null = null;
+const SIG_CACHE_TTL = 60_000;
+
 export async function GET(request: NextRequest) {
   const start = Date.now();
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
@@ -14,6 +18,13 @@ export async function GET(request: NextRequest) {
 
     // ── scope=summary: aggregated stats only, no individual signals ──
     if (scope === "summary") {
+      if (_sigSummaryCache && (Date.now() - _sigSummaryCache.ts) < SIG_CACHE_TTL) {
+        return NextResponse.json({
+          ...(_sigSummaryCache.data as Record<string, unknown>),
+          cached: true,
+          latencyMs: Date.now() - start,
+        });
+      }
       const pyScript = `
 import sqlite3, json
 conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
@@ -117,7 +128,7 @@ print(json.dumps(out))
         quality = JSON.parse(qResult);
       } catch { /* quality data optional */ }
 
-      return NextResponse.json({
+      const summaryResponse = {
         ...summaryData,
         quality: {
           overall: quality.overall || null,
@@ -129,7 +140,9 @@ print(json.dumps(out))
         circuit_breakers: quality.circuitBreakers || [],
         timestamp: new Date().toISOString(),
         latencyMs: Date.now() - start,
-      });
+      };
+      _sigSummaryCache = { data: summaryResponse, ts: Date.now() };
+      return NextResponse.json(summaryResponse);
     }
 
     // ── scope=list (default): paginated individual signals ──

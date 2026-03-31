@@ -6,8 +6,21 @@ export const dynamic = "force-dynamic";
 const KILL_SWITCH_PATH = "/home/trevor/trevor/.kill_switch";
 const AT_PAUSED_PATH = "/home/trevor/trevor/.autotrader_paused";
 
+// In-memory cache (5 min TTL) — avoids 500ms Hyperliquid API ping on every call
+let _healthCache: { data: unknown; ts: number } | null = null;
+const HEALTH_CACHE_TTL = 300_000; // 5 minutes
+
 export async function GET() {
   const start = Date.now();
+
+  // Return cached response if fresh
+  if (_healthCache && (Date.now() - _healthCache.ts) < HEALTH_CACHE_TTL) {
+    return NextResponse.json({
+      ...(_healthCache.data as Record<string, unknown>),
+      cached: true,
+      latencyMs: Date.now() - start,
+    });
+  }
 
   try {
     const { execSync } = await import("child_process");
@@ -102,12 +115,14 @@ print(json.dumps(result, default=str))
       };
     }
 
-    return NextResponse.json({
+    const responseData = {
       ...data,
       autotrader_paused: atPaused,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
-    });
+    };
+    _healthCache = { data: responseData, ts: Date.now() };
+    return NextResponse.json(responseData);
   } catch (e) {
     return NextResponse.json(
       { error: String(e), timestamp: new Date().toISOString(), latencyMs: Date.now() - start },
