@@ -203,7 +203,7 @@ export function DashboardView() {
 
   const edgeFix = data.expectancy < 0 && data.rrRatio < 1
     ? "WR and R:R both underwater"
-    : data.expectancy < 0
+    : data.expectancy < 0 && data.rrRatio > 0
     ? `Need WR > ${(1 / (1 + data.rrRatio) * 100).toFixed(0)}%`
     : null;
   const asymmetric = Math.abs(data.worstTrade) > data.bestTrade;
@@ -235,7 +235,7 @@ export function DashboardView() {
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 90 }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", paddingBottom: 90 }}>
 
         {/* ─── 1. TOP BAR (sticky) ─── */}
         <div style={{
@@ -315,8 +315,8 @@ export function DashboardView() {
                       background: C.surfaceRaised, border: `1px solid ${C.borderSolid}`, borderRadius: 8,
                       padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{tk}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 15, fontWeight: 700, color: C.textPrimary, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tk}</span>
                         <DirectionBadge dir={t.direction} />
                         {t.leverage && t.leverage > 1 && (
                           <span style={{ fontSize: 10, color: C.textTertiary, fontWeight: 600 }}>{t.leverage}x</span>
