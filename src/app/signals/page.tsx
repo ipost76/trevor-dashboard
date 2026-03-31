@@ -517,6 +517,91 @@ export default function SignalsPage() {
       {!data && !loading && (
         <EmptyState icon={Activity} message="No signal data available" />
       )}
+
+      {/* ── Confidence Tier Analysis ── */}
+      <ConfidenceTierSection />
+    </div>
+  );
+}
+
+/* ── Confidence Tier Analytics ── */
+function ConfidenceTierSection() {
+  const [tiers, setTiers] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    safeFetch<Record<string, unknown>>("/api/analytics/confidence-tiers", {}).then(d => {
+      if (d && Object.keys(d).length > 0) setTiers(d);
+    });
+  }, []);
+
+  if (!tiers?.available) {
+    if (tiers && !tiers.available) {
+      return (
+        <div className="panel p-3 mt-2">
+          <div className="panel-header flex items-center gap-1.5 mb-2">
+            <Target className="h-3 w-3" />
+            <span>SIGNAL QUALITY BY CONFIDENCE</span>
+          </div>
+          <div className="text-[11px] text-muted-foreground text-center py-4">
+            {String(tiers.reason ?? "Confidence tier data not available.")}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  type Tier = { confidence_range: string; label: string; trade_count: number; wins: number; losses: number; win_rate: number; avg_pnl_pct: number; total_pnl_pct: number; profit_factor: number | null; recommendation: string };
+  const tierList = (tiers.tiers as Tier[]) ?? [];
+  const rec = tiers.overall_recommendation as Record<string, unknown> | null;
+  const takeRate = Number(tiers.take_rate ?? 0);
+  const totalSignals = Number(tiers.total_signals ?? 0);
+  const taken = Number(tiers.signals_taken ?? 0);
+
+  return (
+    <div className="panel p-3 mt-2 space-y-3">
+      <div className="panel-header flex items-center gap-1.5">
+        <Target className="h-3 w-3" />
+        <span>SIGNAL QUALITY BY CONFIDENCE</span>
+      </div>
+
+      {/* Take rate */}
+      <div className="text-[10px] text-muted-foreground">
+        You take <span className="text-foreground font-bold">{takeRate}%</span> of generated signals ({taken} of {totalSignals}).
+      </div>
+
+      {/* Tier cards */}
+      <div className="space-y-1.5">
+        {tierList.map(t => {
+          const borderColor = t.trade_count < 3 ? "border-l-amber-500/50" : (t.profit_factor ?? 0) >= 1 ? "border-l-green-500/50" : "border-l-red-500/50";
+          return (
+            <div key={t.confidence_range} className={cn("border-l-2 px-2.5 py-2 rounded-r bg-[rgba(255,255,255,0.02)]", borderColor)}>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[11px] font-bold">{t.label}</span>
+                <span className="text-[9px] text-muted-foreground">{t.trade_count} taken</span>
+              </div>
+              {t.trade_count > 0 ? (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                  <span>WR: <span className={cn("font-mono", t.win_rate >= 50 ? "neon-green" : "neon-red")}>{t.win_rate}%</span></span>
+                  <span>Avg: <span className={cn("font-mono", t.avg_pnl_pct >= 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(t.avg_pnl_pct)}%</span></span>
+                  <span>PF: <span className="font-mono">{t.profit_factor ?? "—"}</span></span>
+                  <span>P&L: <span className={cn("font-mono", t.total_pnl_pct >= 0 ? "neon-green" : "neon-red")}>{fmtPctSigned(t.total_pnl_pct)}%</span></span>
+                </div>
+              ) : (
+                <div className="text-[10px] text-muted-foreground/50">No trades taken at this level</div>
+              )}
+              <div className="text-[9px] text-muted-foreground/70 mt-0.5">{t.recommendation}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Recommendation */}
+      {rec && (
+        <div className="border-l-2 border-amber-500/50 bg-amber-500/5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+          <span className="font-bold text-amber-400">RECOMMENDATION:</span> {String(rec.impact ?? "")}
+        </div>
+      )}
     </div>
   );
 }

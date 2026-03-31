@@ -1030,6 +1030,9 @@ export default function TradesPage() {
         </div>
       </div>
 
+      {/* ── Analytics Sections ── */}
+      <TradeAnalytics />
+
       {/* Manual Trade Form Modal */}
       <TradeForm
         open={tradeFormOpen}
@@ -1038,4 +1041,139 @@ export default function TradesPage() {
       />
     </div>
   );
+}
+
+/* ── Trade Analytics (Duration + Regime) ── */
+function TradeAnalytics() {
+  const [duration, setDuration] = useState<Record<string, unknown> | null>(null);
+  const [regime, setRegime] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const [d, r] = await Promise.all([
+        safeFetch<Record<string, unknown>>("/api/analytics/duration", {}),
+        safeFetch<Record<string, unknown>>("/api/analytics/regime-performance", {}),
+      ]);
+      if (d && Object.keys(d).length > 0) setDuration(d);
+      if (r && Object.keys(r).length > 0) setRegime(r);
+    };
+    load();
+  }, []);
+
+  return (
+    <div className="mt-2 space-y-2">
+      {/* Duration Analysis */}
+      {duration && duration.available === true && <DurationSection data={duration} />}
+
+      {/* Regime Performance */}
+      {regime && <RegimeSection data={regime} />}
+    </div>
+  );
+}
+
+function fmtHoldTime(mins: number): string {
+  if (!mins && mins !== 0) return "—";
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function DurationSection({ data }: { data: any }) {
+  const s = data.summary ?? {};
+  const dist = data.distribution ?? {};
+  const opt = data.optimal_window ?? {};
+
+  const avgW = Number(s.avg_hold_minutes_winners ?? 0);
+  const avgL = Number(s.avg_hold_minutes_losers ?? 0);
+  const medW = Number(s.median_hold_minutes_winners ?? 0);
+  const medL = Number(s.median_hold_minutes_losers ?? 0);
+  const ratio = Number(s.ratio ?? 0);
+  const insight = String(s.insight ?? "");
+
+  return (
+    <div className="panel p-3 space-y-3">
+      <div className="panel-header flex items-center gap-1.5">
+        <Clock className="h-3 w-3" />
+        <span>HOLD TIME ANALYSIS</span>
+      </div>
+
+      {/* Comparison cards */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="panel p-2 text-center">
+          <div className="text-[8px] text-muted-foreground uppercase mb-1">Avg Hold — Winners</div>
+          <div className="text-sm font-bold font-mono neon-green">{fmtHoldTime(avgW)}</div>
+          <div className="text-[9px] text-muted-foreground">median: {fmtHoldTime(medW)}</div>
+        </div>
+        <div className="panel p-2 text-center">
+          <div className="text-[8px] text-muted-foreground uppercase mb-1">Avg Hold — Losers</div>
+          <div className={cn("text-sm font-bold font-mono", ratio > 1.5 ? "neon-red" : "text-foreground")}>{fmtHoldTime(avgL)}</div>
+          <div className="text-[9px] text-muted-foreground">median: {fmtHoldTime(medL)}</div>
+        </div>
+      </div>
+
+      {/* Duration distribution */}
+      <div className="space-y-0.5">
+        <div className="text-[8px] text-muted-foreground uppercase mb-1">Distribution by Bucket</div>
+        {((dist.winners ?? []) as Array<{ bucket: string; count: number; avg_pnl_pct: number }>).map((w: { bucket: string; count: number; avg_pnl_pct: number }, i: number) => {
+          const losers = (dist.losers ?? []) as Array<{ count: number; avg_pnl_pct: number }>;
+          const l = losers[i] ?? { count: 0, avg_pnl_pct: 0 };
+          const winners = (dist.winners ?? []) as Array<{ count: number }>;
+          const maxCount = Math.max(...winners.map((x: { count: number }) => x.count), ...losers.map((x: { count: number }) => x.count), 1);
+          return (
+            <div key={w.bucket} className="flex items-center gap-2 text-[10px]">
+              <span className="w-14 text-muted-foreground font-mono">{w.bucket}</span>
+              <div className="flex-1 flex items-center gap-1 h-4">
+                <div className="h-3 rounded bg-green-500/40" style={{ width: `${(w.count / maxCount) * 100}%`, minWidth: w.count > 0 ? "4px" : 0 }} />
+                <span className="text-[9px] neon-green">{w.count}W</span>
+              </div>
+              <div className="flex-1 flex items-center gap-1 h-4">
+                <div className="h-3 rounded bg-red-500/40" style={{ width: `${(l.count / maxCount) * 100}%`, minWidth: l.count > 0 ? "4px" : 0 }} />
+                <span className="text-[9px] neon-red">{l.count}L</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Optimal window */}
+      {opt.best_bucket && (
+        <div className="text-[10px] text-muted-foreground">
+          Optimal: <span className="neon-green font-bold">{String(opt.best_bucket)}</span> — {Number(opt.best_win_rate ?? 0)}% WR, {fmtPctSigned(Number(opt.best_avg_pnl ?? 0))}% avg
+        </div>
+      )}
+
+      {/* Insight */}
+      {insight && (
+        <div className="border-l-2 border-amber-500/50 bg-amber-500/5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+          {insight}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function RegimeSection({ data }: { data: any }) {
+  if (!data) return null;
+
+  if (!data.available) {
+    return (
+      <div className="panel p-3">
+        <div className="panel-header flex items-center gap-1.5 mb-2">
+          <Activity className="h-3 w-3" />
+          <span>REGIME PERFORMANCE</span>
+        </div>
+        <div className="panel border-[rgba(0,240,255,0.15)] bg-[rgba(0,240,255,0.03)] p-3 text-center space-y-1">
+          <p className="text-[11px] text-muted-foreground">Regime data not available.</p>
+          <p className="text-[10px] text-muted-foreground/60">
+            {String(data.reason ?? "regime_at_entry is not populated for closed trades. This will activate when the engine starts recording regime at trade entry.")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null; // Full regime UI will render when data becomes available
 }
