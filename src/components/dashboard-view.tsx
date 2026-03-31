@@ -233,7 +233,7 @@ export function DashboardView() {
     : 0;
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 pb-16 md:pb-3 space-y-2">
+    <div className="flex-1 overflow-y-auto p-3 pb-16 md:pb-3 space-y-3">
 
       {/* ── Kill Switch Confirmation Dialog ── */}
       {ksConfirm && (
@@ -285,14 +285,14 @@ export function DashboardView() {
           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 border border-amber-500/30 neon-amber">AT: PAUSED</span>
         )}
         {!killSwitch.active && (
-          <button onClick={() => setKsConfirm("activate")} className="ml-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-[rgba(255,68,68,0.1)] border border-[rgba(255,68,68,0.3)] text-[#ff4444] hover:bg-[rgba(255,68,68,0.2)] transition-colors">
+          <button onClick={() => setKsConfirm("activate")} className="ml-auto text-[10px] font-semibold uppercase tracking-wide px-2.5 py-0.5 rounded-md bg-transparent border border-[rgba(255,68,68,0.25)] text-[rgba(255,68,68,0.7)] hover:bg-[rgba(255,68,68,0.1)] hover:text-[#ff4444] hover:border-[rgba(255,68,68,0.5)] transition-all">
             STOP
           </button>
         )}
       </div>
 
       {/* ── Portfolio Stats (2×2 grid) ── */}
-      <div className="grid grid-cols-2 gap-px bg-[var(--border)] rounded-lg overflow-hidden">
+      <div className="grid grid-cols-2 gap-px bg-[rgba(255,255,255,0.04)] rounded-lg overflow-hidden">
         <StatCell label="P&L" value={`${fmtPctSigned(data.totalPnl)}%`} color={data.totalPnl >= 0 ? "neon-green" : "neon-red"} />
         <StatCell label="W / L" value={`${data.wins}W · ${data.losses}L`} sub={`${winPct}% WR`} />
         <StatCell label="Win Rate" value={`${winPct}%`} color={wrColor} />
@@ -300,7 +300,7 @@ export function DashboardView() {
       </div>
 
       {/* ── Secondary Stats (3-col) ── */}
-      <div className="grid grid-cols-3 gap-px bg-[var(--border)] rounded-lg overflow-hidden">
+      <div className="grid grid-cols-3 gap-px bg-[rgba(255,255,255,0.04)] rounded-lg overflow-hidden">
         <StatCell label="XP" value={String(data.xp)} sub={data.rank} color="neon-green" size="sm" />
         <StatCell label="Signals" value={String(data.totalInsights)} size="sm" />
         <StatCell label="Avg P&L" value={`${fmtPctSigned(data.avgPnl)}%`} color={data.avgPnl >= 0 ? "neon-green" : "neon-red"} size="sm" />
@@ -308,7 +308,7 @@ export function DashboardView() {
 
       {/* ── Edge Analysis Card ── */}
       {data.totalTrades > 0 && (
-        <div className="panel overflow-hidden">
+        <div className="panel overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.3),0_0_1px_rgba(255,255,255,0.05)] rounded-[10px]">
           <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--panel-header)]">
             <span className="text-[9px] font-bold tracking-[0.1em] uppercase text-muted-foreground">Edge Analysis</span>
           </div>
@@ -351,7 +351,7 @@ export function DashboardView() {
       )}
 
       {/* ── Active Trades ── */}
-      <Link href="/trades" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors">
+      <Link href="/trades" className={cn("panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-all rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]", data.activeTrades.length > 0 && "border-[rgba(0,255,136,0.15)] shadow-[0_2px_8px_rgba(0,0,0,0.3),0_0_20px_rgba(0,255,136,0.04)]")}>
         <div className="panel-header flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Activity className="h-3 w-3" />
@@ -402,7 +402,7 @@ export function DashboardView() {
       </Link>
 
       {/* ── Signals & Quality (compact) ── */}
-      <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors">
+      <Link href="/signals" className="panel flex flex-col overflow-hidden hover:border-[rgba(0,240,255,0.25)] transition-colors rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
         <div className="panel-header flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Zap className="h-3 w-3" />
@@ -441,7 +441,7 @@ export function DashboardView() {
       </Link>
 
       {/* ── AutoTrader (compact card) ── */}
-      <Link href="/autotrader" className="panel hover:border-[rgba(0,240,255,0.25)] transition-colors block">
+      <Link href="/autotrader" className="panel hover:border-[rgba(0,240,255,0.25)] transition-colors block rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
         <div className="panel-header flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Bot className="h-3 w-3" />
@@ -474,7 +474,7 @@ export function DashboardView() {
       </Link>
 
       {/* ── Chat Preview ── */}
-      <div className="panel overflow-hidden">
+      <div className="panel overflow-hidden rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
         <div className="panel-header flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Send className="h-3 w-3" />
@@ -499,7 +499,7 @@ function StatCell({ label, value, sub, color, size = "md" }: {
   label: string; value: string; sub?: string; color?: string; size?: "sm" | "md";
 }) {
   return (
-    <div className="bg-[var(--card)] flex flex-col items-center justify-center py-2.5 px-2 gap-0.5">
+    <div className="bg-[var(--card)] flex flex-col items-center justify-center py-3 px-3 gap-0.5">
       <div className="stat-label">{label}</div>
       <div className={cn(
         "font-bold font-mono tabular-nums",
