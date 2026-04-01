@@ -62,6 +62,15 @@ type ActiveTrade = {
   atr_at_entry?: number;
   entry_groups?: string;
   margin_usd?: number;
+  // Position scaling fields
+  original_entry_price?: number;
+  avg_entry_price?: number;
+  original_margin?: number;
+  remaining_margin?: number;
+  total_margin?: number;
+  total_realized_pnl?: number;
+  partials_count?: number;
+  additions_count?: number;
 };
 
 type Signal = {
@@ -451,9 +460,9 @@ function EditableEntry({ trade: t, onSaved }: { trade: Record<string, unknown>; 
 
   return (
     <div className="group cursor-pointer" onClick={() => { setVal(String(t.entry_price ?? "")); setEditing(true); }}>
-      <span className="text-muted-foreground">Entry</span><br />
+      <span className="text-muted-foreground">{t.avg_entry_price ? "Avg Entry" : "Entry"}</span><br />
       <span className={cn("font-mono", flash === "ok" && "text-[var(--neon-green)]")}>
-        {fmtDollarPrice(t.entry_price as number)}
+        {fmtDollarPrice((t.avg_entry_price || t.entry_price) as number)}
       </span>
       <Pencil className="h-2 w-2 inline ml-0.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
     </div>
@@ -511,7 +520,15 @@ function MarginEditor({ trade: t, onSaved }: { trade: ActiveTrade; onSaved: () =
     <div className="mt-1.5 flex items-center gap-1.5 text-[10px] group cursor-pointer" onClick={() => { setVal(String(t.margin_usd ?? "")); setEditing(true); }}>
       {t.margin_usd ? (
         <>
-          <span className="text-muted-foreground">\U0001f4b0 {fmtDollar(t.margin_usd)} margin \u2022 {fmtDollar(notional)} notional</span>
+          <span className="text-muted-foreground">
+            {t.remaining_margin && t.remaining_margin !== t.margin_usd
+              ? `\U0001f4b0 ${fmtDollar(t.remaining_margin)} remaining \u2022 ${fmtDollar((t.remaining_margin || 0) * (t.leverage || 1))} notional`
+              : `\U0001f4b0 ${fmtDollar(t.margin_usd)} margin \u2022 ${fmtDollar(notional)} notional`
+            }
+            {(t.partials_count || 0) > 0 && ` \u2022 ${t.partials_count} partial${t.partials_count === 1 ? "" : "s"}`}
+            {(t.additions_count || 0) > 0 && ` \u2022 ${(t.additions_count || 0) + 1} entries`}
+            {(t.total_realized_pnl || 0) !== 0 && ` \u2022 Realized: ${t.total_realized_pnl! >= 0 ? "+" : ""}$${t.total_realized_pnl!.toFixed(2)}`}
+          </span>
           <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover:opacity-50" />
         </>
       ) : (
@@ -532,7 +549,15 @@ function ActiveTradesTab({
 }) {
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
   const [actionId, setActionId] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<"close" | "flip" | null>(null);
+  const [actionType, setActionType] = useState<"close" | "flip" | "partial" | "add" | null>(null);
+  const [partialAmtStr, setPartialAmtStr] = useState("");
+  const [partialPriceStr, setPartialPriceStr] = useState("");
+  const [addAmtStr, setAddAmtStr] = useState("");
+  const [addPriceStr, setAddPriceStr] = useState("");
+  const [scalingStatus, setScalingStatus] = useState<"idle" | "submitting" | "done" | "error">("idle");
+  const [scalingError, setScalingError] = useState("");
+  const [trancheData, setTrancheData] = useState<Record<string, { entries: unknown[]; exits: unknown[]; summary: Record<string, number> } | null>>({});
+  const [trancheOpen, setTrancheOpen] = useState<Record<string, boolean>>({});
 
   // Fetch live prices for open trades
   useEffect(() => {
@@ -569,6 +594,58 @@ function ActiveTradesTab({
     setNewLevStr("");
     setCloseStatus("idle");
     setCloseError("");
+    setPartialAmtStr("");
+    setPartialPriceStr("");
+    setAddAmtStr("");
+    setAddPriceStr("");
+    setScalingStatus("idle");
+    setScalingError("");
+  };
+
+  const handlePartialClose = async (tradeId: string) => {
+    const amt = parseFloat(partialAmtStr);
+    if (isNaN(amt) || amt <= 0) return;
+    setScalingStatus("submitting");
+    setScalingError("");
+    try {
+      const body: Record<string, unknown> = { trade_id: tradeId, amount: amt };
+      const p = parseFloat(partialPriceStr);
+      if (!isNaN(p) && p > 0) body.price = p;
+      const res = await fetch("/api/trades/partial-close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.error) { setScalingStatus("error"); setScalingError(data.error); return; }
+      setScalingStatus("done");
+      setTimeout(() => { resetAction(); onRefresh(); }, 1500);
+    } catch (err) { setScalingStatus("error"); setScalingError(String(err)); }
+  };
+
+  const handleAddPosition = async (tradeId: string) => {
+    const amt = parseFloat(addAmtStr);
+    if (isNaN(amt) || amt <= 0) return;
+    setScalingStatus("submitting");
+    setScalingError("");
+    try {
+      const body: Record<string, unknown> = { trade_id: tradeId, amount: amt };
+      const p = parseFloat(addPriceStr);
+      if (!isNaN(p) && p > 0) body.price = p;
+      const res = await fetch("/api/trades/add-position", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (data.error) { setScalingStatus("error"); setScalingError(data.error); return; }
+      setScalingStatus("done");
+      setTimeout(() => { resetAction(); onRefresh(); }, 1500);
+    } catch (err) { setScalingStatus("error"); setScalingError(String(err)); }
+  };
+
+  const loadTranches = async (tradeId: string) => {
+    if (trancheData[tradeId]) { setTrancheOpen(p => ({ ...p, [tradeId]: !p[tradeId] })); return; }
+    try {
+      const res = await fetch(`/api/trades/tranches?trade_id=${tradeId}`);
+      const data = await res.json();
+      if (!data.error) {
+        setTrancheData(p => ({ ...p, [tradeId]: data }));
+        setTrancheOpen(p => ({ ...p, [tradeId]: true }));
+      }
+    } catch { /* ignore */ }
   };
 
   const pollForCompletion = (tradeId: string, endpoint: string) => {
@@ -812,6 +889,14 @@ function ActiveTradesTab({
                   className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,165,2,0.1)] text-[var(--neon-amber)] border border-[rgba(255,165,2,0.3)] rounded hover:bg-[rgba(255,165,2,0.2)] transition-colors">
                   <ArrowRightLeft className="h-3 w-3" /> Flip
                 </button>
+                <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("partial"); }}
+                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(0,255,136,0.1)] text-[var(--neon-green)] border border-[rgba(0,255,136,0.3)] rounded hover:bg-[rgba(0,255,136,0.2)] transition-colors">
+                  <TrendingDown className="h-3 w-3" /> Partial
+                </button>
+                <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("add"); }}
+                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,165,2,0.1)] text-[var(--neon-amber)] border border-[rgba(255,165,2,0.3)] rounded hover:bg-[rgba(255,165,2,0.2)] transition-colors">
+                  <Plus className="h-3 w-3" /> Add
+                </button>
               </div>
             )}
 
@@ -860,6 +945,73 @@ function ActiveTradesTab({
                 </button>
                 {closeStatus === "error" && closeError && <div className="text-[10px] neon-red">{closeError}</div>}
                 {closeStatus === "done" && <div className="text-[10px] neon-green font-bold">Flipped. New trade posted to Discord.</div>}
+              </div>
+            )}
+
+            {/* ── Partial Close Panel ── */}
+            {isActive && actionType === "partial" && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Partial Close</span>
+                  <button onClick={resetAction} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={partialAmtStr} onChange={(e) => setPartialAmtStr(e.target.value)} placeholder={`Amount (max $${t.remaining_margin || t.margin_usd || "?"})`} type="number" step="any" min="0" className="input-terminal flex-1" autoFocus />
+                  <input value={partialPriceStr} onChange={(e) => setPartialPriceStr(e.target.value)} placeholder="Price (blank=market)" type="number" step="any" min="0" className="input-terminal flex-1" />
+                  <button onClick={() => handlePartialClose(tradeId)} disabled={!parseFloat(partialAmtStr) || scalingStatus !== "idle"} className={cn("btn-primary whitespace-nowrap", (!parseFloat(partialAmtStr) || scalingStatus !== "idle") && "opacity-50 pointer-events-none")}>
+                    {scalingStatus === "idle" ? "Close" : scalingStatus === "submitting" ? "Sending..." : scalingStatus === "done" ? "Done!" : "Retry"}
+                  </button>
+                </div>
+                {scalingStatus === "error" && scalingError && <div className="text-[10px] neon-red">{scalingError}</div>}
+                {scalingStatus === "done" && <div className="text-[10px] neon-green font-bold">Partial close recorded.</div>}
+              </div>
+            )}
+
+            {/* ── Add to Position Panel ── */}
+            {isActive && actionType === "add" && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Add to Position</span>
+                  <button onClick={resetAction} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input value={addAmtStr} onChange={(e) => setAddAmtStr(e.target.value)} placeholder="Amount ($)" type="number" step="any" min="0" className="input-terminal flex-1" autoFocus />
+                  <input value={addPriceStr} onChange={(e) => setAddPriceStr(e.target.value)} placeholder="Price (blank=market)" type="number" step="any" min="0" className="input-terminal flex-1" />
+                  <button onClick={() => handleAddPosition(tradeId)} disabled={!parseFloat(addAmtStr) || scalingStatus !== "idle"} className={cn("btn-primary whitespace-nowrap", (!parseFloat(addAmtStr) || scalingStatus !== "idle") && "opacity-50 pointer-events-none")}>
+                    {scalingStatus === "idle" ? "Add" : scalingStatus === "submitting" ? "Sending..." : scalingStatus === "done" ? "Done!" : "Retry"}
+                  </button>
+                </div>
+                {scalingStatus === "error" && scalingError && <div className="text-[10px] neon-red">{scalingError}</div>}
+                {scalingStatus === "done" && <div className="text-[10px] neon-green font-bold">Position added.</div>}
+              </div>
+            )}
+
+            {/* ── Tranche History ── */}
+            {((t.partials_count || 0) > 0 || (t.additions_count || 0) > 0) && t.trade_id && (
+              <div className="mt-2">
+                <button onClick={() => loadTranches(t.trade_id!)} className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+                  {trancheOpen[t.trade_id!] ? <ChevronDown className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+                  History ({(t.additions_count || 0) + 1} entries, {t.partials_count || 0} exits)
+                </button>
+                {trancheOpen[t.trade_id!] && trancheData[t.trade_id!] && (
+                  <div className="mt-1 pl-3 border-l border-[var(--border)] space-y-0.5">
+                    {(trancheData[t.trade_id!]!.entries as Array<{type: string; amount: number; price: number; avg_after?: number; timestamp?: string}>).map((e, i) => (
+                      <div key={`e-${i}`} className="text-[9px] text-muted-foreground">
+                        <span className="text-[var(--neon-cyan)]">{e.type === "original" ? "➡️" : "➡️"}</span>{" "}
+                        {e.type === "original" ? "Entry" : "Add"}: ${e.amount} @ ${fmtDollarPrice(e.price)}
+                        {e.avg_after ? ` (avg → $${fmtDollarPrice(e.avg_after)})` : ""}
+                        {e.timestamp ? ` — ${e.timestamp}` : ""}
+                      </div>
+                    ))}
+                    {(trancheData[t.trade_id!]!.exits as Array<{amount: number; price: number; pnl_pct: number; pnl_usd: number; timestamp?: string}>).map((x, i) => (
+                      <div key={`x-${i}`} className="text-[9px] text-muted-foreground">
+                        <span className="text-[var(--neon-red)]">⬅️</span>{" "}
+                        Sold: ${x.amount} @ ${fmtDollarPrice(x.price)} → <span className={x.pnl_pct >= 0 ? "neon-green" : "neon-red"}>{fmtPctSigned(x.pnl_pct)}%</span> ({x.pnl_usd >= 0 ? "+" : ""}${x.pnl_usd.toFixed(2)})
+                        {x.timestamp ? ` — ${x.timestamp}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

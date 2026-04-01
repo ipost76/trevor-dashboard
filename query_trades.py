@@ -19,7 +19,10 @@ def main():
                        leverage, confidence, track, opened_at, status,
                        dynamic_target, target_pct, atr_at_entry, regime_at_entry,
                        peak_pnl_lev, last_exit_condition, last_exit_severity,
-                       profit_target_price, entry_groups, margin_usd
+                       profit_target_price, entry_groups, margin_usd,
+                       original_entry_price, avg_entry_price, original_margin,
+                       remaining_margin, total_margin, total_realized_pnl,
+                       partials_count, additions_count
                 FROM active_trades
                 WHERE status = 'open'
                 ORDER BY opened_at DESC
