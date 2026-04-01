@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache (60s TTL)
+let _statusCache: { data: unknown; ts: number } | null = null;
+const STATUS_CACHE_TTL = 60_000;
+
 export async function GET() {
   const start = Date.now();
+
+  if (_statusCache && (Date.now() - _statusCache.ts) < STATUS_CACHE_TTL) {
+    return NextResponse.json({
+      ...(_statusCache.data as Record<string, unknown>),
+      cached: true,
+      latencyMs: Date.now() - start,
+    });
+  }
   const trevorService = process.env.TREVOR_SERVICE_NAME || "trevor.service";
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
 
@@ -71,7 +83,7 @@ print(json.dumps(result))
     else if (xp >= 150) rank = "Analyst";
     else if (xp >= 50) rank = "Trader";
 
-    return NextResponse.json({
+    const responseData = {
       ok: true,
       trevor: { running: trevorRunning, pid: trevorPid },
       signals: signalStats,
@@ -80,7 +92,9 @@ print(json.dumps(result))
       rank,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
-    });
+    };
+    _statusCache = { data: responseData, ts: Date.now() };
+    return NextResponse.json(responseData);
   } catch (err) {
     return NextResponse.json({
       ok: false,

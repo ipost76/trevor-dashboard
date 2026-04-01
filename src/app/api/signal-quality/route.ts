@@ -3,7 +3,21 @@ import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache (60s TTL)
+let _sqCache: { data: unknown; ts: number } | null = null;
+const SQ_CACHE_TTL = 60_000;
+
 export async function GET() {
+  const start = Date.now();
+
+  if (_sqCache && (Date.now() - _sqCache.ts) < SQ_CACHE_TTL) {
+    return NextResponse.json({
+      ...(_sqCache.data as Record<string, unknown>),
+      cached: true,
+      latencyMs: Date.now() - start,
+    });
+  }
+
   const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
   const pythonPath = join(trevorDir, "venv", "bin", "python3");
   const dashboardDir = process.cwd();
@@ -23,9 +37,8 @@ export async function GET() {
     ).trim();
 
     const data = JSON.parse(raw);
-    return NextResponse.json(data, {
-      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
-    });
+    _sqCache = { data: { ...data, latencyMs: Date.now() - start }, ts: Date.now() };
+    return NextResponse.json({ ...data, latencyMs: Date.now() - start });
   } catch (err) {
     return NextResponse.json(
       { error: String(err), overall: { totalTrades: 0 }, calibration: {}, tickerPerformance: [] },

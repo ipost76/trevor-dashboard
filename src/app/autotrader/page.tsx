@@ -242,7 +242,7 @@ export default function AutoTraderPage() {
             <table className="w-full min-w-[420px] text-[10px]">
               <thead>
                 <tr>
-                  <th className="text-left text-muted-foreground font-normal pb-1 pr-2">UTC</th>
+                  <th className="text-left text-muted-foreground font-normal pb-1 pr-2">ET</th>
                   {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => (
                     <th key={d} className="text-center text-muted-foreground font-normal pb-1 px-1">{d}</th>
                   ))}

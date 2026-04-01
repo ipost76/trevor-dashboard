@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache (30s TTL — shorter for main dashboard polling route)
+let _liveCache: { data: unknown; ts: number } | null = null;
+const LIVE_CACHE_TTL = 30_000;
+
 export async function GET() {
   const start = Date.now();
+
+  if (_liveCache && (Date.now() - _liveCache.ts) < LIVE_CACHE_TTL) {
+    return NextResponse.json({
+      ...(_liveCache.data as Record<string, unknown>),
+      cached: true,
+      latencyMs: Date.now() - start,
+    });
+  }
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
   const logPath = process.env.TREVOR_LOG_PATH || "/home/trevor/trevor/logs/trevor.log";
 
@@ -127,7 +139,6 @@ print(json.dumps(result))
   } catch { /* graceful */ }
 
   data.latencyMs = Date.now() - start;
-  return NextResponse.json(data, {
-    headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
-  });
+  _liveCache = { data: { ...data }, ts: Date.now() };
+  return NextResponse.json(data);
 }
