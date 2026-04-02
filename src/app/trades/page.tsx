@@ -15,7 +15,6 @@ import {
   Plus,
   X,
   ArrowRightLeft,
-  Shield,
   Target,
   Pencil,
   Check,
@@ -693,17 +692,6 @@ function ActiveTradesTab({
     } catch (err) { setCloseStatus("error"); setCloseError(String(err)); }
   };
 
-  const handleHold = async (tradeId: string) => {
-    try {
-      await fetch("/api/trades/hold", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trade_id: tradeId }),
-      });
-      onRefresh();
-    } catch { /* silent */ }
-  };
-
   const handleFlip = async (tradeId: string) => {
     const exit = parseFloat(exitPriceStr);
     const entry = parseFloat(newEntryStr);
@@ -883,10 +871,6 @@ function ActiveTradesTab({
                 <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("close"); }}
                   className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,51,102,0.1)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] rounded hover:bg-[rgba(255,51,102,0.2)] transition-colors">
                   <X className="h-3 w-3" /> Close
-                </button>
-                <button onClick={() => handleHold(tradeId)}
-                  className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(0,240,255,0.1)] text-[var(--neon-cyan)] border border-[rgba(0,240,255,0.3)] rounded hover:bg-[rgba(0,240,255,0.2)] transition-colors">
-                  <Shield className="h-3 w-3" /> Hold
                 </button>
                 <button onClick={() => { resetAction(); setActionId(tradeId); setActionType("flip"); }}
                   className="flex items-center gap-1 text-[9px] px-2 py-1 font-bold uppercase tracking-wider bg-[rgba(255,165,2,0.1)] text-[var(--neon-amber)] border border-[rgba(255,165,2,0.3)] rounded hover:bg-[rgba(255,165,2,0.2)] transition-colors">
