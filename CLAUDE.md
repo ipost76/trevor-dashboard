@@ -57,7 +57,7 @@
 | Component | Purpose |
 |-----------|---------|
 | `app-shell.tsx` | Layout wrapper (sidebar + header + main + status bar) |
-| `sidebar.tsx` | Desktop sidebar + mobile bottom tab bar (<768px) |
+| `sidebar.tsx` | 5-zone nav: desktop collapsible sidebar + mobile 64px bottom bar + quick-jump |
 | `header.tsx` | Top bar with status, XP badge, clock, auth buttons |
 | `status-bar.tsx` | Footer with version, stats (hidden on mobile) |
 | `dashboard-view.tsx` | Main dashboard grid (stats, signals, watchlist, logs) |
@@ -98,11 +98,12 @@
 - Text: `#e8e8f0` primary, `#8888a0` muted
 
 ### Mobile (<768px)
-- Sidebar becomes bottom tab bar (4 items + More overflow)
-- 44px minimum touch targets
-- `env(safe-area-inset-bottom)` padding
+- 5-zone bottom tab bar: Dashboard, Trading, Intel, Command, Chat (64px height)
+- Green active state (#00ff88) with 2px top indicator bar
+- Long-press on Trading/Intel/Command shows quick-jump popup with sub-items
+- 48px minimum touch targets, `env(safe-area-inset-bottom)` padding
 - StatusBar hidden
-- Main content has `pb-14` for bottom bar clearance
+- Main content has `pb-20` for bottom bar clearance
 
 ### Testing
 ```bash
@@ -255,3 +256,23 @@ sudo systemctl restart trevor-dashboard
 | ghost_notes | 2 | Active |
 | ghost_training | — | DROPPED |
 | ghost_tasks | — | DROPPED |
+
+## Navigation Restructure — Prompt 1 of 3 (2026-04-02)
+
+### Phase 1: Terminal Removed
+- Deleted `/terminal` page (was Chat UI), moved to `/chat`
+- Deleted `TerminalView.tsx` (xterm.js component, unused)
+- Removed WebSocket handler from `server.js` (was at `/ws/terminal`)
+- Uninstalled: @xterm/xterm, @xterm/addon-fit, @xterm/addon-search, @xterm/addon-web-links, node-pty, ws
+- Removed `serverExternalPackages: ['node-pty']` from next.config.ts
+- Updated `app-shell.tsx`: `isTerminal` → `isChat` for /chat path
+
+### Phase 2-4: 5-Zone Navigation
+- **sidebar.tsx** fully rewritten with NAV_ZONES data structure
+- **Desktop**: 5 collapsible zone groups (Dashboard, Trading, Intelligence, Command, Chat). Zone headers navigate, chevrons toggle children. Auto-expands active zone. Sub-items use `?tab=` query params.
+- **Mobile**: 64px bottom nav with 5 icon+label pairs. Green active state (#00ff88). Long-press popup on zones with children (400ms, haptic feedback).
+- **Placeholder pages created**: /trading, /intelligence, /command (pending Prompt 2 tab containers)
+- Old page routes preserved: /trades, /signals, /holdings, /autotrader, /research, /training, /control, /ghost, /reminders, /dev-tasks
+- Legacy route detection: sidebar highlights correct zone even on old routes
+- quickJumpIn animation added to globals.css
+- Bottom padding: pb-14 → pb-20 (80px clearance for 64px nav)
