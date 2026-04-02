@@ -29,13 +29,41 @@ def get_conn(readonly=False):
 def read_board():
     conn = get_conn(readonly=True)
     rows = conn.execute(
-        "SELECT ticker, direction, confidence, regime, current_price, "
-        "momentum_score, trend_score, volume_score, volatility_score, "
-        "microstructure_score, insight_line, updated_at "
-        "FROM scalp_live_board ORDER BY ticker"
+        "SELECT lb.ticker, lb.direction, lb.confidence, lb.regime, lb.current_price, "
+        "lb.momentum_score, lb.trend_score, lb.volume_score, lb.volatility_score, "
+        "lb.microstructure_score, lb.insight_line, lb.updated_at, "
+        "at.live_confidence, at.live_confidence_updated_at, at.live_groups_passing, "
+        "at.live_regime, at.live_mom_score, at.live_trd_score, at.live_vol_score, "
+        "at.live_vlt_score, at.live_mic_score, at.direction AS trade_direction "
+        "FROM scalp_live_board lb "
+        "LEFT JOIN active_trades at ON UPPER(REPLACE(lb.ticker, '-PERP', '')) = "
+        "UPPER(REPLACE(at.ticker, '-PERP', '')) AND at.status = 'open' "
+        "ORDER BY lb.ticker"
     ).fetchall()
     conn.close()
-    tickers = [dict(r) for r in rows]
+    tickers = []
+    for r in rows:
+        d = dict(r)
+        has_open_trade = d.get("live_confidence") is not None
+        if has_open_trade:
+            # Override with unified live confidence from sentinel
+            d["confidence"] = d["live_confidence"]
+            d["confidence_updated_at"] = d["live_confidence_updated_at"]
+            d["groups_passing"] = d["live_groups_passing"]
+            d["regime"] = d["live_regime"] or d["regime"]
+            d["momentum_score"] = d["live_mom_score"] if d["live_mom_score"] is not None else d["momentum_score"]
+            d["trend_score"] = d["live_trd_score"] if d["live_trd_score"] is not None else d["trend_score"]
+            d["volume_score"] = d["live_vol_score"] if d["live_vol_score"] is not None else d["volume_score"]
+            d["volatility_score"] = d["live_vlt_score"] if d["live_vlt_score"] is not None else d["volatility_score"]
+            d["microstructure_score"] = d["live_mic_score"] if d["live_mic_score"] is not None else d["microstructure_score"]
+            d["direction"] = d["trade_direction"] or d["direction"]
+        d["has_open_trade"] = has_open_trade
+        # Clean up internal fields
+        for k in ("live_confidence", "live_confidence_updated_at", "live_groups_passing",
+                   "live_regime", "live_mom_score", "live_trd_score", "live_vol_score",
+                   "live_vlt_score", "live_mic_score", "trade_direction"):
+            d.pop(k, None)
+        tickers.append(d)
     last_scan = tickers[0]["updated_at"] if tickers else None
     print(json.dumps({"tickers": tickers, "last_scan": last_scan}))
 
