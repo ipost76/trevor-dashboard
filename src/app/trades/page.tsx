@@ -21,6 +21,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight as ChevronRightIcon,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
@@ -32,6 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HistoryTable } from "@/components/trades/history-table";
 import { TradeForm } from "@/components/trades/trade-form";
 import { JournalTab } from "@/components/trades/journal-tab";
+import { LiveBoard } from "@/components/trades/live-board";
 
 /* ── Types ── */
 
@@ -88,11 +90,12 @@ type Signal = {
   stop_price?: number;
 };
 
-type TabKey = "active" | "scalp" | "lt" | "history" | "journal";
+type TabKey = "live" | "active" | "scalp" | "lt" | "history" | "journal";
 
 /* ── Tab Definitions ── */
 
 const TABS: TabDef<TabKey>[] = [
+  { key: "live", label: "LIVE BOARD", icon: Radio },
   { key: "active", label: "ACTIVE", icon: Activity },
   { key: "scalp", label: "SCALP SIGNALS", icon: TrendingUp },
   { key: "lt", label: "LT SIGNALS", icon: TrendingDown },
@@ -1024,7 +1027,7 @@ function ActiveTradesTab({
 /* ── Main Page ── */
 
 export default function TradesPage() {
-  const [tab, setTab] = useState<TabKey>("active");
+  const [tab, setTab] = useState<TabKey>("live");
   const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([]);
   const [allSignals, setAllSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1130,7 +1133,7 @@ export default function TradesPage() {
               </button>
             </div>
           )}
-          {(tab === "active" || tab === "scalp" || tab === "lt") && (
+          {(tab === "active" || tab === "scalp" || tab === "lt" || tab === "live") && (
             <div className="px-2">
               <button
                 onClick={handleRefresh}
@@ -1145,6 +1148,8 @@ export default function TradesPage() {
 
         {/* Tab Content */}
         <div className="flex-1 overflow-auto">
+          {tab === "live" && <LiveBoard />}
+
           {tab === "active" && (
             <ActiveTradesTab trades={activeTrades} loading={loading} onRefresh={handleRefresh} />
           )}
