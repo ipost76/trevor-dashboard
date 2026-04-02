@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Position } from "@/app/holdings/page";
+import type { Position } from "@/app/trading/panels/HoldingsPanel";
 
 type PositionFormProps = {
   open: boolean;

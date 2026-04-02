@@ -8,7 +8,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import type { Position } from "@/app/holdings/page";
+import type { Position } from "@/app/trading/panels/HoldingsPanel";
 
 type AllocationChartProps = {
   positions: Position[];

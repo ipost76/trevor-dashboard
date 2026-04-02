@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Shield } from "lucide-react";
-import type { Position } from "@/app/holdings/page";
+import type { Position } from "@/app/trading/panels/HoldingsPanel";
 
 type LeverageWidgetProps = {
   positions: Position[];

@@ -33,8 +33,7 @@ const NAV_ZONES: NavZone[] = [
     icon: TrendingUp,
     href: "/trading",
     children: [
-      { label: "Active Trades", href: "/trading?tab=active", tabKey: "active" },
-      { label: "History", href: "/trading?tab=history", tabKey: "history" },
+      { label: "Trades", href: "/trading?tab=trades", tabKey: "trades" },
       { label: "Holdings", href: "/trading?tab=holdings", tabKey: "holdings" },
       { label: "AutoTrader", href: "/trading?tab=autotrader", tabKey: "autotrader" },
     ],

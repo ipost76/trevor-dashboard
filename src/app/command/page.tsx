@@ -1,10 +1,22 @@
+"use client";
+
+import TabContainer from "@/components/TabContainer";
+import ControlPanelPanel from "./panels/ControlPanelPanel";
+import GhostHQPanel from "./panels/GhostHQPanel";
+import RemindersPanel from "./panels/RemindersPanel";
+import DevTasksPanel from "./panels/DevTasksPanel";
+
 export default function CommandPage() {
   return (
-    <div style={{ padding: '24px', color: '#7ab88a', fontFamily: "'JetBrains Mono', monospace" }}>
-      <h1 style={{ fontFamily: "'JetBrains Mono', monospace", color: '#00ff88', fontSize: '18px', fontWeight: 700, marginBottom: '16px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-        COMMAND
-      </h1>
-      <p style={{ fontSize: 13 }}>Tab container will be built in Prompt 2. Tabs: Control Panel | Ghost HQ | Reminders | Dev Tasks</p>
-    </div>
+    <TabContainer
+      pageTitle="COMMAND"
+      defaultTab="control"
+      tabs={[
+        { id: "control", label: "Control Panel", content: <ControlPanelPanel /> },
+        { id: "ghosthq", label: "Ghost HQ", content: <GhostHQPanel /> },
+        { id: "reminders", label: "Reminders", content: <RemindersPanel /> },
+        { id: "devtasks", label: "Dev Tasks", content: <DevTasksPanel /> },
+      ]}
+    />
   );
 }

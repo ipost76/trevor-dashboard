@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fmtDollarPrice, fmtDollar, fmtPctSigned } from "@/lib/format";
 import { DirectionBadge } from "@/components/ui/direction-badge";
-import type { Position } from "@/app/holdings/page";
+import type { Position } from "@/app/trading/panels/HoldingsPanel";
 
 type CloseDialogProps = {
   open: boolean;

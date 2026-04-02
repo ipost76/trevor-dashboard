@@ -271,8 +271,50 @@ sudo systemctl restart trevor-dashboard
 - **sidebar.tsx** fully rewritten with NAV_ZONES data structure
 - **Desktop**: 5 collapsible zone groups (Dashboard, Trading, Intelligence, Command, Chat). Zone headers navigate, chevrons toggle children. Auto-expands active zone. Sub-items use `?tab=` query params.
 - **Mobile**: 64px bottom nav with 5 icon+label pairs. Green active state (#00ff88). Long-press popup on zones with children (400ms, haptic feedback).
-- **Placeholder pages created**: /trading, /intelligence, /command (pending Prompt 2 tab containers)
-- Old page routes preserved: /trades, /signals, /holdings, /autotrader, /research, /training, /control, /ghost, /reminders, /dev-tasks
-- Legacy route detection: sidebar highlights correct zone even on old routes
 - quickJumpIn animation added to globals.css
 - Bottom padding: pb-14 → pb-20 (80px clearance for 64px nav)
+
+## Tab Architecture — Prompt 2 of 3 (2026-04-02)
+
+### TabContainer Component
+- `src/components/TabContainer.tsx` — shared reusable tab container
+- URL-synced via `?tab=<id>` (useSearchParams + router.replace)
+- Wrapped in Suspense for useSearchParams
+- Active tab: green bottom border + text (#00ff88). Inactive: #3d6b4a
+- Sticky tab strip with horizontal scroll, hidden scrollbar
+- Only active tab panel rendered (inactive unmounted)
+- Optional `pageTitle` prop above tab strip
+
+### Trading (/trading) — 3 tabs
+- `trades` → TradesPanel (from /trades, 1320 lines, has 6 internal tabs: Live Board, Active, Scalp, LT, History, Journal)
+- `holdings` → HoldingsPanel (from /holdings, 531 lines, has 6 filter tabs)
+- `autotrader` → AutoTraderPanel (from /autotrader, 454 lines, single scrollable)
+- Sidebar updated: Trading children 4→3 (merged Active Trades + History since both in Trades page)
+
+### Intelligence (/intelligence) — 3 tabs
+- `signals` → SignalsPanel (from /signals, 608 lines, unified view)
+- `research` → ResearchPanel (from /research, 247 lines, has 4 internal tabs)
+- `training` → TrainingPanel (from /training, 487 lines, single scrollable)
+
+### Command (/command) — 4 tabs
+- `control` → ControlPanelPanel (from /control, 304 lines, has 7 internal tabs)
+- `ghosthq` → GhostHQPanel (from /ghost, 47 lines, has 4 internal tabs)
+- `reminders` → RemindersPanel (from /reminders, 318 lines, has 4 filter tabs)
+- `devtasks` → DevTasksPanel (from /dev-tasks, 245 lines)
+
+### Old Route Redirects (next.config.ts)
+- /trades → /trading?tab=trades (308)
+- /holdings → /trading?tab=holdings (308)
+- /autotrader → /trading?tab=autotrader (308)
+- /signals → /intelligence?tab=signals (308)
+- /research → /intelligence?tab=research (308)
+- /training → /intelligence?tab=training (308)
+- /control → /command?tab=control (308)
+- /ghost → /command?tab=ghosthq (308)
+- /reminders → /command?tab=reminders (308)
+- /dev-tasks → /command?tab=devtasks (308)
+- Old page files also have file-level redirects as backup
+
+### Type Export Fix
+- `Position` type moved from `/holdings/page` → `/trading/panels/HoldingsPanel`
+- Updated imports in: allocation-chart.tsx, close-dialog.tsx, leverage-widget.tsx, position-form.tsx

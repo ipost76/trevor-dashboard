@@ -4,6 +4,23 @@ const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
+  async redirects() {
+    return [
+      // TRADING zone
+      { source: '/trades', destination: '/trading?tab=trades', permanent: true },
+      { source: '/holdings', destination: '/trading?tab=holdings', permanent: true },
+      { source: '/autotrader', destination: '/trading?tab=autotrader', permanent: true },
+      // INTELLIGENCE zone
+      { source: '/signals', destination: '/intelligence?tab=signals', permanent: true },
+      { source: '/research', destination: '/intelligence?tab=research', permanent: true },
+      { source: '/training', destination: '/intelligence?tab=training', permanent: true },
+      // COMMAND zone
+      { source: '/control', destination: '/command?tab=control', permanent: true },
+      { source: '/ghost', destination: '/command?tab=ghosthq', permanent: true },
+      { source: '/reminders', destination: '/command?tab=reminders', permanent: true },
+      { source: '/dev-tasks', destination: '/command?tab=devtasks', permanent: true },
+    ];
+  },
   async headers() {
     return [
       {
