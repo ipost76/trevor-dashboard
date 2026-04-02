@@ -3,7 +3,16 @@ import { runPython, safeJsonParse } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache (30s TTL)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _lbCache: { data: any; ts: number } | null = null;
+const LB_CACHE_TTL = 30_000;
+
 export async function GET() {
+  if (_lbCache && (Date.now() - _lbCache.ts) < LB_CACHE_TTL) {
+    return NextResponse.json({ ..._lbCache.data, cached: true });
+  }
+
   try {
     const raw = runPython("query_live_board.py", ["read"]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,6 +39,7 @@ export async function GET() {
       // Hyperliquid fetch failed — use DB prices (stale but acceptable)
     }
 
+    _lbCache = { data, ts: Date.now() };
     return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(

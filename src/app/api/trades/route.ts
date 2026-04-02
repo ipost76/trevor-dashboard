@@ -3,6 +3,11 @@ import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
+// In-memory cache for active trades (15s TTL)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _activeTradesCache: { data: any; ts: number } | null = null;
+const ACTIVE_CACHE_TTL = 15_000;
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const scope = searchParams.get("scope") || "active";
@@ -18,11 +23,16 @@ export async function GET(request: NextRequest) {
     const { execSync } = await import("child_process");
 
     if (scope === "active") {
+      if (_activeTradesCache && (Date.now() - _activeTradesCache.ts) < ACTIVE_CACHE_TTL) {
+        return NextResponse.json({ ..._activeTradesCache.data, cached: true });
+      }
       const raw = execSync(
         `${pythonPath} ${scriptPath} active`,
         { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
       ).trim();
-      return NextResponse.json(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      _activeTradesCache = { data: parsed, ts: Date.now() };
+      return NextResponse.json(parsed);
     }
 
     if (scope === "history") {

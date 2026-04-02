@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-// In-memory cache (60s TTL) — avoids 1.5-8s Alpaca API call on every poll
+// In-memory cache (120s TTL) — avoids 1.5-8s Alpaca API call on every poll
 let _atCache: { data: unknown; ts: number } | null = null;
-const AT_CACHE_TTL = 60_000; // 60 seconds
+const AT_CACHE_TTL = 120_000; // 120 seconds
 
 export async function GET() {
   const start = Date.now();
