@@ -3,6 +3,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { Header } from "@/components/header";
 import { StatusBar } from "@/components/status-bar";
+import PriceStrip from "@/components/PriceStrip";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -23,6 +24,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         style={isChat ? { backgroundColor: "#0d1117" } : undefined}
       >
         <Header />
+        <PriceStrip />
         <main
           className="flex flex-1 overflow-hidden pb-20 md:pb-0 w-full max-w-full"
           style={isChat ? { backgroundColor: "#0d1117" } : undefined}

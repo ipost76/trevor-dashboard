@@ -535,3 +535,16 @@ sudo systemctl restart trevor-dashboard
 - Shows: "IF FILTERED TO 45-54 CONFIDENCE: Projected WR 61.9%, Trades: 21 of 65"
 - Highlights that filtering to optimal confidence band would likely turn negative edge positive
 - File: `src/app/intelligence/panels/SignalsPanel.tsx`
+
+### Persistent Live Price Strip
+- `PriceStrip` component shows BTC, ETH, SOL, HYPE, FARTCOIN prices in 24px strip below header
+- Fetches from existing `/api/prices` route every 30s (reuses Hyperliquid+CoinGecko, no extra API calls)
+- Inserted in app-shell.tsx between Header and main content (flex layout, no padding adjustment needed)
+- Files: `src/components/PriceStrip.tsx` (new), `src/components/app-shell.tsx`
+
+### Trade Entry Confirmation Modal
+- Live Board ENTER button now opens pre-flight confirmation modal instead of entering directly
+- New API: `/api/entry-preflight?ticker=X&direction=Y` returns exposure (capital, margin, % used), track record (W/L/WR), block status
+- Modal shows: ticker+direction+price, confidence band + historical WR, exposure level with warnings, track record, filter block status
+- CONFIRM triggers existing `handleEnter` flow (POST /api/live-board/enter). CANCEL dismisses. Blocked entries disabled.
+- Files: `src/app/api/entry-preflight/route.ts` (new), `src/components/trades/live-board.tsx`

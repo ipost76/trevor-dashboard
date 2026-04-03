@@ -69,6 +69,9 @@ export function LiveBoard() {
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [tradeStats, setTradeStats] = useState<Record<string, { wins: number; losses: number; trades: number; wr: number }>>({});
   const [blockedCombos, setBlockedCombos] = useState<string[]>([]);
+  const [confirmTrade, setConfirmTrade] = useState<LiveTicker | null>(null);
+  const [preflight, setPreflight] = useState<{ capital: number; currentMargin: number; percentUsed: number; record: { total: number; wins: number; losses: number; wr: number }; blocked: boolean; blockReason: string | null } | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -359,7 +362,18 @@ export function LiveBoard() {
                 </div>
               ) : (
                 <button
-                  onClick={() => handleEnter(t)}
+                  onClick={() => {
+                    if (enterState) return;
+                    setConfirmTrade(t);
+                    setPreflightLoading(true);
+                    setPreflight(null);
+                    const dir = t.direction === "NEUTRAL" ? "LONG" : t.direction;
+                    fetch(`/api/entry-preflight?ticker=${t.ticker}&direction=${dir}`)
+                      .then(r => r.json())
+                      .then(d => setPreflight(d))
+                      .catch(() => setPreflight({ capital: 50, currentMargin: 0, percentUsed: 0, record: { total: 0, wins: 0, losses: 0, wr: 0 }, blocked: false, blockReason: null }))
+                      .finally(() => setPreflightLoading(false));
+                  }}
                   disabled={isEntering || !!enterState}
                   className={cn(
                     "w-full py-2.5 min-h-[44px] font-mono font-bold text-sm tracking-wider rounded border transition-all duration-200",
@@ -384,6 +398,127 @@ export function LiveBoard() {
             </div>
           );
         })
+      )}
+
+      {/* Entry Confirmation Modal */}
+      {confirmTrade && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmTrade(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div className="panel w-full max-w-sm pointer-events-auto rounded-xl p-5 space-y-4" onClick={e => e.stopPropagation()}>
+              <h3 className="text-center text-sm font-bold tracking-wider uppercase neon-text" style={{ fontFamily: "Orbitron, sans-serif" }}>
+                Confirm Entry
+              </h3>
+
+              {/* Trade summary */}
+              <div className="text-center space-y-1">
+                <div className="text-lg font-bold" style={{ fontFamily: "Orbitron, sans-serif" }}>
+                  {confirmTrade.ticker} <span style={{ color: confirmTrade.direction === "SHORT" ? "var(--neon-red)" : "var(--neon-green)" }}>
+                    {confirmTrade.direction === "NEUTRAL" ? "LONG" : confirmTrade.direction}
+                  </span>
+                </div>
+                <div className="text-[11px] text-muted-foreground font-mono">
+                  @ {fmtDollarPrice(confirmTrade.current_price)} · Conf: {confirmTrade.confidence.toFixed(1)}% · {confirmTrade.regime}
+                </div>
+              </div>
+
+              <div className="border-t border-[var(--border)]" />
+
+              {/* Pre-flight checklist */}
+              {preflightLoading ? (
+                <div className="text-center py-4 text-[11px] text-muted-foreground font-mono">Loading pre-flight data...</div>
+              ) : preflight ? (
+                <div className="space-y-3 text-[11px] font-mono">
+                  {/* Confidence band */}
+                  {(() => {
+                    const conf = confirmTrade.confidence;
+                    const bands = [
+                      { min: 0, max: 44, label: "Low", wr: 40.0 },
+                      { min: 45, max: 54, label: "Medium", wr: 61.9 },
+                      { min: 55, max: 64, label: "High", wr: 40.0 },
+                      { min: 65, max: 100, label: "Very High", wr: 50.0 },
+                    ];
+                    const band = bands.find(b => conf >= b.min && conf <= b.max);
+                    if (!band) return null;
+                    return (
+                      <div className="py-2 border-b border-[rgba(0,255,136,0.06)]">
+                        <div className="text-muted-foreground mb-1">📊 Confidence Band</div>
+                        <div style={{ color: band.wr >= 50 ? "#00ff88" : band.wr >= 40 ? "#ffaa00" : "#ff3355" }}>
+                          {band.min}–{band.max} ({band.label}) — {band.wr}% WR historically
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Exposure */}
+                  <div className="py-2 border-b border-[rgba(0,255,136,0.06)]">
+                    <div className="text-muted-foreground mb-1">💰 Exposure</div>
+                    <div className="text-foreground">
+                      ${preflight.currentMargin} / ${preflight.capital} ({preflight.percentUsed}% used)
+                    </div>
+                    {preflight.percentUsed >= 60 && (
+                      <div className="mt-1 text-[10px] font-bold" style={{ color: "#ff3355" }}>⚠ HEAVY EXPOSURE</div>
+                    )}
+                    {preflight.percentUsed >= 40 && preflight.percentUsed < 60 && (
+                      <div className="mt-1 text-[10px] font-bold" style={{ color: "#ffaa00" }}>⚠ CAUTION</div>
+                    )}
+                  </div>
+
+                  {/* Track record */}
+                  <div className="py-2 border-b border-[rgba(0,255,136,0.06)]">
+                    <div className="text-muted-foreground mb-1">📈 Track Record: {confirmTrade.ticker} {confirmTrade.direction === "NEUTRAL" ? "LONG" : confirmTrade.direction}</div>
+                    {preflight.record.total > 0 ? (
+                      <div style={{ color: preflight.record.wr >= 50 ? "#00ff88" : preflight.record.wr >= 40 ? "#ffaa00" : "#ff3355" }}>
+                        {preflight.record.wins}W / {preflight.record.losses}L ({preflight.record.wr}% WR)
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground">No trade history</div>
+                    )}
+                  </div>
+
+                  {/* Block status */}
+                  {preflight.blocked && (
+                    <div className="py-2 text-[var(--neon-red)] font-bold">
+                      🚫 BLOCKED: {preflight.blockReason || "Filter rule active"}
+                    </div>
+                  )}
+                  {!preflight.blocked && (
+                    <div className="py-2 text-[#3d6b4a]">
+                      🛡 No filter blocks for this entry
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setConfirmTrade(null)}
+                  className="flex-1 py-3 min-h-[44px] rounded border border-[var(--border)] text-muted-foreground font-mono text-xs hover:bg-[rgba(0,240,255,0.04)] transition-colors"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={() => {
+                    if (preflight?.blocked) return;
+                    const trade = confirmTrade;
+                    setConfirmTrade(null);
+                    handleEnter(trade);
+                  }}
+                  disabled={preflight?.blocked}
+                  className={cn(
+                    "flex-1 py-3 min-h-[44px] rounded border font-mono text-xs font-bold transition-colors",
+                    preflight?.blocked
+                      ? "border-[rgba(255,51,85,0.3)] text-[var(--neon-red)] bg-[rgba(255,51,85,0.06)] opacity-50 cursor-not-allowed"
+                      : "border-[var(--neon-green)] text-[var(--neon-green)] bg-[rgba(0,255,136,0.1)] hover:bg-[rgba(0,255,136,0.2)]"
+                  )}
+                >
+                  {preflight?.blocked ? "BLOCKED" : "CONFIRM ENTRY"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
