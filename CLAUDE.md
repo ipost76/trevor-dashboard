@@ -431,3 +431,34 @@ sudo systemctl restart trevor-dashboard
 - Summary Stats grid always visible (no collapse)
 - Each section header shows summary text and clickable chevron
 - File: `src/app/intelligence/panels/SignalsPanel.tsx`
+
+### Journal Win/Loss Visual Differentiation
+- Journal entry cards now have color-coded left borders: green (profit), red (loss), muted (neutral)
+- P&L parsed from content via regex matching `P&L: +X%` patterns
+- Badge next to date: "▲ profit" / "▼ loss"
+- File: `src/components/trades/journal-tab.tsx`
+
+### Research Empty States Enhanced
+- Analyses empty state: added guidance to use Quick Analysis tab or `!research` command
+- Knowledge empty state: updated text for `!kb add <url>` command
+- File: `src/app/intelligence/panels/ResearchPanel.tsx`
+
+### Active Trade Elapsed Timer
+- Shows `⏱ Xh Ym` on each active trade card with 60s auto-refresh
+- Color-coded: green (within hold time), amber + "EXTENDED" (1-2x), red + "OVERDUE" (>2x)
+- Uses `max_hold_minutes` from DB (defaults to 120 if unavailable)
+- File: `src/app/trading/panels/TradesPanel.tsx`
+
+### Dashboard Quick CLOSE Button
+- Close button on each Dashboard active trade card (red outline `✕`)
+- Two-tap confirmation: first tap shows "Confirm?", auto-dismisses in 3s, second tap executes
+- Uses live price as exit price, calls same `POST /api/trades/close` endpoint
+- Prevents Link navigation via `e.preventDefault()` + `e.stopPropagation()`
+- File: `src/components/dashboard-view.tsx`
+
+### Confidence Band Indicator
+- Shows historical WR% context line below confidence on active trade cards
+- Hardcoded bands from trade_insights data: <45 (40% WR), 45-54 (61.9%), 55-64 (40%), 65+ (50%)
+- Color-coded: green ≥50% WR, amber 40-49%, red <40%
+- Displays on BOTH Dashboard active trades and Trading → Active trade cards
+- Files: `src/app/trading/panels/TradesPanel.tsx`, `src/components/dashboard-view.tsx`

@@ -27,6 +27,19 @@ type JournalEntry = {
 
 /* ── Helpers ── */
 
+function getJournalPnlStatus(content: string): "winning" | "losing" | "neutral" {
+  const match = content.match(/P&L[:\s*]*([+-]?\d+\.?\d*)%/i);
+  if (!match) return "neutral";
+  const pnl = parseFloat(match[1]);
+  return pnl > 0 ? "winning" : pnl < 0 ? "losing" : "neutral";
+}
+
+const PNL_BORDER: Record<string, string> = {
+  winning: "border-l-[3px] border-l-[#00ff88]",
+  losing: "border-l-[3px] border-l-[#ff3355]",
+  neutral: "border-l-[3px] border-l-[#3d6b4a]",
+};
+
 function extractTitle(content: string): string {
   const firstLine = content.split("\n").find((l) => l.trim().length > 0) || "";
   return firstLine.replace(/^#+\s*/, "").trim() || "Untitled";
@@ -301,12 +314,14 @@ export function JournalTab() {
             const preview = extractPreview(entry.content);
             const words = wordCount(entry.content);
             const isExpanded = expandedFile === entry.filename;
+            const pnlStatus = getJournalPnlStatus(entry.content);
 
             return (
               <div
                 key={entry.filename}
                 className={cn(
                   "panel p-3 transition-colors cursor-pointer hover:border-[rgba(0,240,255,0.2)]",
+                  PNL_BORDER[pnlStatus],
                   isExpanded && "border-[rgba(0,240,255,0.15)]"
                 )}
                 onClick={() =>
@@ -322,6 +337,8 @@ export function JournalTab() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 ml-2">
+                    {pnlStatus === "winning" && <span className="text-[10px] font-bold neon-green">▲ profit</span>}
+                    {pnlStatus === "losing" && <span className="text-[10px] font-bold neon-red">▼ loss</span>}
                     <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
                       <Calendar className="h-2.5 w-2.5" />
                       {formatDate(entry.date)}

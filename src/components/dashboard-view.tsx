@@ -16,7 +16,7 @@ type Signal = {
 type ActiveTrade = {
   ticker: string; direction: string; entry_price: number;
   current_price?: number; pnl_pct?: number; leverage?: number;
-  leveraged_pnl_pct?: number;
+  leveraged_pnl_pct?: number; confidence?: number; trade_id?: string;
 };
 type AutoData = {
   status: string;
@@ -95,6 +95,8 @@ export function DashboardView() {
   const [ksConfirm, setKsConfirm] = useState<"activate" | "deactivate" | null>(null);
   const [ksLoading, setKsLoading] = useState(false);
   const [clock, setClock] = useState("");
+  const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
+  const [closeStatus, setCloseStatus] = useState<"idle" | "submitting" | "done">("idle");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
@@ -202,6 +204,28 @@ export function DashboardView() {
   const apiOk = health.api?.hyperliquid?.healthy ?? false;
   const hasActive = data.activeTrades.length > 0;
 
+  const CONFIDENCE_BANDS = [
+    { min: 0, max: 44, label: "Low", wr: 40.0 },
+    { min: 45, max: 54, label: "Medium", wr: 61.9 },
+    { min: 55, max: 64, label: "High", wr: 40.0 },
+    { min: 65, max: 100, label: "Very High", wr: 50.0 },
+  ];
+
+  const handleQuickClose = async (tradeId: string, exitPrice: number) => {
+    if (!exitPrice || exitPrice <= 0) return;
+    setCloseStatus("submitting");
+    try {
+      await fetch("/api/trades/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_id: tradeId, exit_price: exitPrice }),
+      });
+      setCloseStatus("done");
+      setCloseConfirm(null);
+      setTimeout(() => { setCloseStatus("idle"); fetchDashboard(); }, 2000);
+    } catch { setCloseStatus("idle"); }
+  };
+
   const edgeFix = data.expectancy < 0 && data.rrRatio < 1
     ? "WR and R:R both underwater"
     : data.expectancy < 0 && data.rrRatio > 0
@@ -292,24 +316,56 @@ export function DashboardView() {
                       : ((lp - t.entry_price) / t.entry_price) * 100;
                     pnl = raw * (t.leverage || 1);
                   }
+                  const conf = Number(t.confidence || 0);
+                  const band = CONFIDENCE_BANDS.find(b => conf >= b.min && conf <= b.max);
                   return (
                     <div key={i} style={{
                       background: C.surfaceRaised, border: `1px solid ${C.borderSolid}`, borderRadius: 8,
-                      padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 12px",
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                        <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 15, fontWeight: 700, color: C.textPrimary, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tk}</span>
-                        <DirectionBadge dir={t.direction} />
-                        {t.leverage && t.leverage > 1 && (
-                          <span style={{ fontSize: 10, color: C.textTertiary, fontWeight: 600 }}>{t.leverage}x</span>
-                        )}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                          <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 15, fontWeight: 700, color: C.textPrimary, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tk}</span>
+                          <DirectionBadge dir={t.direction} />
+                          {t.leverage && t.leverage > 1 && (
+                            <span style={{ fontSize: 10, color: C.textTertiary, fontWeight: 600 }}>{t.leverage}x</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {lp && <span style={{ fontSize: 11, color: C.textSecondary, fontFamily: "var(--font-mono)" }}>{fmtDollarPrice(lp)}</span>}
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: pnl >= 0 ? C.accent : C.red }}>
+                            {fmtPctSigned(pnl)}%
+                          </span>
+                          {t.trade_id && (
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault(); e.stopPropagation();
+                                if (closeConfirm === t.trade_id) {
+                                  handleQuickClose(t.trade_id, lp || t.current_price || 0);
+                                } else {
+                                  setCloseConfirm(t.trade_id ?? null);
+                                  setTimeout(() => setCloseConfirm(c => c === t.trade_id ? null : c), 3000);
+                                }
+                              }}
+                              disabled={closeStatus === "submitting"}
+                              style={{
+                                background: "transparent",
+                                border: closeConfirm === t.trade_id ? "1px solid #ff3355" : "1px solid rgba(255,51,85,0.3)",
+                                borderRadius: 4, padding: "2px 6px", fontSize: 9, fontWeight: 700,
+                                color: closeConfirm === t.trade_id ? "#ff3355" : "rgba(255,51,85,0.6)",
+                                fontFamily: "var(--font-mono)", cursor: "pointer", whiteSpace: "nowrap",
+                              }}
+                            >
+                              {closeStatus === "submitting" ? "..." : closeStatus === "done" ? "Done" : closeConfirm === t.trade_id ? "Confirm?" : "✕"}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {lp && <span style={{ fontSize: 11, color: C.textSecondary, fontFamily: "var(--font-mono)" }}>{fmtDollarPrice(lp)}</span>}
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: pnl >= 0 ? C.accent : C.red }}>
-                          {fmtPctSigned(pnl)}%
-                        </span>
-                      </div>
+                      {band && conf > 0 && (
+                        <div style={{ marginTop: 4, fontSize: 9, fontFamily: "var(--font-mono)", color: band.wr >= 50 ? "#00ff88" : band.wr >= 40 ? "#ffaa00" : "#ff3355" }}>
+                          Conf: {conf} — Band {band.min}–{band.max} ({band.label}) — {band.wr}% WR
+                        </div>
+                      )}
                     </div>
                   );
                 }) : (

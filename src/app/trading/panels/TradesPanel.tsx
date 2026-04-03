@@ -540,6 +540,30 @@ function MarginEditor({ trade: t, onSaved }: { trade: ActiveTrade; onSaved: () =
   );
 }
 
+/* ── Elapsed Time Helpers ── */
+function getElapsedTime(openedAt: string) {
+  const ms = Date.now() - new Date(openedAt).getTime();
+  const hours = Math.floor(ms / 3600000);
+  const minutes = Math.floor((ms % 3600000) / 60000);
+  return { hours, minutes };
+}
+
+function getElapsedColor(openedAt: string, maxHoldMin: number) {
+  const elapsed = (Date.now() - new Date(openedAt).getTime()) / 60000;
+  const ratio = elapsed / maxHoldMin;
+  if (ratio < 1.0) return { color: "#00ff88", label: "" };
+  if (ratio < 2.0) return { color: "#ffaa00", label: "EXTENDED" };
+  return { color: "#ff3355", label: "OVERDUE" };
+}
+
+/* ── Confidence Bands ── */
+const CONFIDENCE_BANDS = [
+  { min: 0, max: 44, label: "Low", wr: 40.0 },
+  { min: 45, max: 54, label: "Medium", wr: 61.9 },
+  { min: 55, max: 64, label: "High", wr: 40.0 },
+  { min: 65, max: 100, label: "Very High", wr: 50.0 },
+];
+
 function ActiveTradesTab({
   trades,
   loading,
@@ -550,6 +574,7 @@ function ActiveTradesTab({
   onRefresh: () => void;
 }) {
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+  const [, setTick] = useState(0);
   const [actionId, setActionId] = useState<string | null>(null);
   const [actionType, setActionType] = useState<"close" | "flip" | "partial" | "add" | null>(null);
   const [partialAmtStr, setPartialAmtStr] = useState("");
@@ -580,6 +605,13 @@ function ActiveTradesTab({
     const iv = setInterval(fetchPrices, 30_000);
     return () => clearInterval(iv);
   }, [trades]);
+
+  // Tick every 60s for elapsed timer
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
   const [exitPriceStr, setExitPriceStr] = useState("");
   const [newEntryStr, setNewEntryStr] = useState("");
   const [newLevStr, setNewLevStr] = useState("");
@@ -805,6 +837,18 @@ function ActiveTradesTab({
               </span>
             </div>
 
+            {/* Confidence Band Context */}
+            {t.confidence && (() => {
+              const conf = Number(t.confidence);
+              const band = CONFIDENCE_BANDS.find(b => conf >= b.min && conf <= b.max);
+              if (!band) return null;
+              return (
+                <div className="text-[9px] font-mono mb-1" style={{ color: band.wr >= 50 ? "#00ff88" : band.wr >= 40 ? "#ffaa00" : "#ff3355" }}>
+                  Conf: {conf} — Band {band.min}–{band.max} ({band.label}) — {band.wr}% WR historically
+                </div>
+              );
+            })()}
+
             {/* Price Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
               <EditableEntry trade={t} onSaved={onRefresh} />
@@ -855,12 +899,26 @@ function ActiveTradesTab({
               </div>
             )}
 
-            {/* Timestamp */}
-            {openedAt && (
-              <div className="mt-1.5 text-[9px] text-muted-foreground">
-                Opened {new Date(openedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
-              </div>
-            )}
+            {/* Timestamp + Elapsed Timer */}
+            {openedAt && (() => {
+              const elapsed = getElapsedTime(openedAt);
+              const holdStyle = getElapsedColor(openedAt, (t as Record<string, unknown>).max_hold_minutes as number || 120);
+              return (
+                <div className="mt-1.5 flex items-center gap-2 text-[9px] flex-wrap">
+                  <span className="text-muted-foreground">
+                    Opened {new Date(openedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                  </span>
+                  <span style={{ color: holdStyle.color }} className="font-bold font-mono">
+                    ⏱ {elapsed.hours}h {elapsed.minutes}m
+                  </span>
+                  {holdStyle.label && (
+                    <span className={cn("text-[8px] font-bold px-1 py-0.5 rounded",
+                      holdStyle.label === "EXTENDED" ? "bg-[rgba(255,170,0,0.15)] text-[#ffaa00]" : "bg-[rgba(255,51,85,0.15)] text-[#ff3355]"
+                    )}>{holdStyle.label}</span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Margin Display + Edit */}
             <MarginEditor trade={t} onSaved={onRefresh} />

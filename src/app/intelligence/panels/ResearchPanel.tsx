@@ -127,7 +127,7 @@ export default function ResearchPanel() {
                       )}
                     </div>
                   ))}
-                  {analyses.length === 0 && <EmptyState icon={BarChart3} message="No analyses yet" className="py-12" />}
+                  {analyses.length === 0 && <EmptyState icon={BarChart3} message="No analyses yet" sub="Run your first analysis via Quick Analysis tab or !research in Discord" className="py-12" />}
                   {total > 20 && (
                     <div className="flex items-center justify-center gap-3 py-2 border-t border-[var(--border)]">
                       <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="btn-primary disabled:opacity-30"><ChevronLeft className="h-3 w-3" /></button>
@@ -205,7 +205,7 @@ export default function ResearchPanel() {
               </div>
 
               {kbStats.total_entries === 0 && !kbSearched && (
-                <EmptyState icon={Database} message="Knowledge base is empty" sub="Use !kb add <url> in Discord to ingest articles" />
+                <EmptyState icon={Database} message="Knowledge base is empty" sub="Add articles and research via Discord: !kb add <url>" />
               )}
 
               {kbSearched && (
