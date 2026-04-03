@@ -76,6 +76,7 @@ export default function TrainingPanel() {
   const [data, setData] = useState<TrainingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false);
+  const [storageExpanded, setStorageExpanded] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -156,6 +157,40 @@ export default function TrainingPanel() {
           </div>
         ))}
       </div>
+
+      {/* ── Key Insights Card ── */}
+      {data.totalRecords > 0 && (() => {
+        const insights: string[] = [];
+        const longDir = data.byDirection?.find((d: { direction: string; winRate: number }) => d.direction === "LONG");
+        const shortDir = data.byDirection?.find((d: { direction: string; winRate: number }) => d.direction === "SHORT");
+        if (longDir && shortDir) {
+          if (shortDir.winRate > longDir.winRate) insights.push(`SHORT > LONG: ${shortDir.winRate}% vs ${longDir.winRate}% WR`);
+          else insights.push(`LONG > SHORT: ${longDir.winRate}% vs ${shortDir.winRate}% WR`);
+        }
+        if (data.topTickers?.[0]) {
+          const t = data.topTickers[0];
+          const pct = data.totalRecords > 0 ? Math.round(t.count / data.totalRecords * 100) : 0;
+          insights.push(`Top ticker: ${t.ticker} (${t.winRate}% WR, ${pct}% coverage)`);
+        }
+        const severe = data.v3_pipeline?.regime_transitions?.by_severity?.find((s: { severity: string; avg_survival_rate: number }) => s.severity === "SEVERE");
+        if (severe) insights.push(`SEVERE regime shifts: ${severe.avg_survival_rate}% survival`);
+        if (data.v3_pipeline?.exit_patterns?.total && data.v3_pipeline.exit_patterns.total > 0) insights.push(`${data.v3_pipeline.exit_patterns.total.toLocaleString()} exit pattern scenarios`);
+        insights.push(`${fmtK(data.totalRecords)} training records analyzed`);
+        if (insights.length === 0) return null;
+        return (
+          <div className="panel p-4" style={{ borderLeft: "3px solid #00ff88", borderColor: "rgba(0,255,136,0.25)" }}>
+            <div className="text-[12px] font-bold font-mono neon-green tracking-wider mb-2.5">💡 KEY INSIGHTS</div>
+            <div className="space-y-1">
+              {insights.map((ins, i) => (
+                <div key={i} className="flex items-baseline gap-2 text-[12px] font-mono text-foreground">
+                  <span className="neon-green shrink-0">▸</span>
+                  <span>{ins}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── V3 Pipeline Status ── */}
       {data.v3_pipeline && (
@@ -422,64 +457,72 @@ export default function TrainingPanel() {
         </div>
       )}
 
-      {/* ── Storage Breakdown ── */}
+      {/* ── Storage Breakdown (collapsible) ── */}
       <div className="panel">
-        <div className="panel-header">STORAGE BREAKDOWN</div>
-        <div className="p-3 space-y-3">
-          {/* SQLite Tables */}
-          <div>
-            <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">SQLite Tables</div>
-            <div className="space-y-1">
-              {data.byTable.map(t => (
-                <div key={t.table} className="flex items-center justify-between text-[10px] px-1">
-                  <span className="text-foreground font-mono">{t.table}</span>
-                  <span className="text-muted-foreground font-mono">{t.count.toLocaleString()} rows</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ChromaDB Collections */}
-          {data.chromaStats?.collections?.length > 0 && (
+        <button
+          onClick={() => setStorageExpanded(!storageExpanded)}
+          className="w-full panel-header flex items-center gap-1.5 cursor-pointer hover:bg-[rgba(0,240,255,0.03)] transition-colors"
+        >
+          <span>📦 STORAGE: {fmtK(data.byTable.reduce((a, t) => a + t.count, 0))} SQLite rows · {fmtK(data.chromaStats?.totalDocuments || 0)} vectors</span>
+          <span className={cn("ml-auto text-muted-foreground transition-transform duration-200 text-[10px]", storageExpanded && "rotate-90")}>▸</span>
+        </button>
+        {storageExpanded && (
+          <div className="p-3 space-y-3">
+            {/* SQLite Tables */}
             <div>
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">ChromaDB Collections</div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">SQLite Tables</div>
               <div className="space-y-1">
-                {data.chromaStats.collections.map(c => (
-                  <div key={c.name} className="flex items-center justify-between text-[10px] px-1">
-                    <span className="text-foreground font-mono">{c.name}</span>
-                    <span className="text-muted-foreground font-mono">{c.trainingDocs.toLocaleString()} vectors</span>
+                {data.byTable.map(t => (
+                  <div key={t.table} className="flex items-center justify-between text-[10px] px-1">
+                    <span className="text-foreground font-mono">{t.table}</span>
+                    <span className="text-muted-foreground font-mono">{t.count.toLocaleString()} rows</span>
                   </div>
                 ))}
               </div>
             </div>
-          )}
 
-          <div className="text-[9px] text-muted-foreground px-1">
-            All tagged: <span className="font-mono text-foreground">source=&apos;synthetic_training&apos;</span> — isolated from live trade data.
-          </div>
+            {/* ChromaDB Collections */}
+            {data.chromaStats?.collections?.length > 0 && (
+              <div>
+                <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">ChromaDB Collections</div>
+                <div className="space-y-1">
+                  {data.chromaStats.collections.map(c => (
+                    <div key={c.name} className="flex items-center justify-between text-[10px] px-1">
+                      <span className="text-foreground font-mono">{c.name}</span>
+                      <span className="text-muted-foreground font-mono">{c.trainingDocs.toLocaleString()} vectors</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          {/* VM Health */}
-          {data.vm_health && data.vm_health.mem_total_gb > 0 && (
-            <div className="pt-2 border-t border-[var(--border)]">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">💻 VM Health</div>
-              {[
-                { label: "Memory", used: data.vm_health.mem_used_gb, total: data.vm_health.mem_total_gb, warnPct: 60, critPct: 80 },
-                { label: "Disk", used: data.vm_health.disk_used_gb, total: data.vm_health.disk_total_gb, warnPct: 70, critPct: 85 },
-              ].map(h => {
-                const pct = h.total > 0 ? Math.round((h.used / h.total) * 100) : 0;
-                const barColor = pct >= h.critPct ? "var(--neon-red)" : pct >= h.warnPct ? "var(--neon-amber)" : "var(--neon-green)";
-                return (
-                  <div key={h.label} className="flex items-center gap-2 text-[10px] mb-1">
-                    <span className="w-14 text-muted-foreground shrink-0">{h.label}</span>
-                    <span className="w-24 font-mono text-foreground shrink-0">{h.used}GB / {h.total}GB</span>
-                    <ProgressBar value={h.used} max={h.total} color={barColor} />
-                    <span className="w-10 font-mono text-muted-foreground text-right shrink-0">{pct}%</span>
-                  </div>
-                );
-              })}
+            <div className="text-[9px] text-muted-foreground px-1">
+              All tagged: <span className="font-mono text-foreground">source=&apos;synthetic_training&apos;</span> — isolated from live trade data.
             </div>
-          )}
-        </div>
+
+            {/* VM Health */}
+            {data.vm_health && data.vm_health.mem_total_gb > 0 && (
+              <div className="pt-2 border-t border-[var(--border)]">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">💻 VM Health</div>
+                {[
+                  { label: "Memory", used: data.vm_health.mem_used_gb, total: data.vm_health.mem_total_gb, warnPct: 60, critPct: 80 },
+                  { label: "Disk", used: data.vm_health.disk_used_gb, total: data.vm_health.disk_total_gb, warnPct: 70, critPct: 85 },
+                ].map(h => {
+                  const pct = h.total > 0 ? Math.round((h.used / h.total) * 100) : 0;
+                  const barColor = pct >= h.critPct ? "var(--neon-red)" : pct >= h.warnPct ? "var(--neon-amber)" : "var(--neon-green)";
+                  return (
+                    <div key={h.label} className="flex items-center gap-2 text-[10px] mb-1">
+                      <span className="w-14 text-muted-foreground shrink-0">{h.label}</span>
+                      <span className="w-24 font-mono text-foreground shrink-0">{h.used}GB / {h.total}GB</span>
+                      <ProgressBar value={h.used} max={h.total} color={barColor} />
+                      <span className="w-10 font-mono text-muted-foreground text-right shrink-0">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

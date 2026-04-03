@@ -608,6 +608,12 @@ function ActiveTradesTab({
   }, [trades]);
 
   const [lastPriceUpdate, setLastPriceUpdate] = useState(0);
+  const [timeSlots, setTimeSlots] = useState<Record<string, { trades: number; wins: number; wr: number }>>({});
+
+  // Fetch time slot data
+  useEffect(() => {
+    fetch("/api/time-slots").then(r => r.json()).then(d => setTimeSlots(d.slots || {})).catch(() => {});
+  }, []);
 
   // Tick every 60s for elapsed timer
   useEffect(() => {
@@ -924,6 +930,25 @@ function ActiveTradesTab({
                       holdStyle.label === "EXTENDED" ? "bg-[rgba(255,170,0,0.15)] text-[#ffaa00]" : "bg-[rgba(255,51,85,0.15)] text-[#ff3355]"
                     )}>{holdStyle.label}</span>
                   )}
+                </div>
+              );
+            })()}
+
+            {/* Time-of-Day Context */}
+            {openedAt && (() => {
+              const d = new Date(openedAt);
+              const h = d.getUTCHours();
+              const hb = h < 4 ? "00-03" : h < 8 ? "04-07" : h < 12 ? "08-11" : h < 16 ? "12-15" : h < 20 ? "16-19" : "20-23";
+              const dow = String(d.getUTCDay());
+              const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+              const slot = timeSlots[`${hb}_${dow}`];
+              if (!slot) return (
+                <div className="text-[9px] font-mono text-muted-foreground mt-0.5">📊 No data for {hb} {dayNames[Number(dow)]} slot</div>
+              );
+              const wrColor = slot.wr >= 50 ? "#00ff88" : slot.wr >= 30 ? "#ffaa00" : "#ff3355";
+              return (
+                <div className="text-[9px] font-mono mt-0.5" style={{ color: wrColor }}>
+                  📊 {slot.wins}/{slot.trades} ({slot.wr}% WR) in {hb} {dayNames[Number(dow)]} {slot.wr >= 50 ? "✓" : ""}
                 </div>
               );
             })()}

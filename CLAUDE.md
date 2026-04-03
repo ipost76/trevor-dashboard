@@ -548,3 +548,21 @@ sudo systemctl restart trevor-dashboard
 - Modal shows: ticker+direction+price, confidence band + historical WR, exposure level with warnings, track record, filter block status
 - CONFIRM triggers existing `handleEnter` flow (POST /api/live-board/enter). CANCEL dismisses. Blocked entries disabled.
 - Files: `src/app/api/entry-preflight/route.ts` (new), `src/components/trades/live-board.tsx`
+
+### Training Key Insights Card
+- Computed insights card at top of Training page: direction split (SHORT vs LONG WR), top ticker, regime survival, exit patterns count, total records
+- Values computed from existing Training API data (not hardcoded)
+- File: `src/app/intelligence/panels/TrainingPanel.tsx`
+
+### Collapsed Storage Breakdown
+- Storage Breakdown section collapsed by default showing one-line summary: "📦 STORAGE: 1.9M SQLite rows · 294K vectors"
+- Click to expand full table/collection listing + VM Health
+- Saves ~2 screens of scroll
+- File: `src/app/intelligence/panels/TrainingPanel.tsx`
+
+### Time-of-Day Overlay on Active Trades
+- New API: `/api/time-slots` — win rates by 4-hour bucket + day-of-week from trade_outcomes (60s cache)
+- Active trade card shows "📊 2/4 (50% WR) in 16-19 Thu ✓" below elapsed timer
+- Color coded: green ≥50%, amber 30-49%, red <30%
+- 24 time slots covering all hour+day combinations with trade history
+- Files: `src/app/api/time-slots/route.ts` (new), `src/app/trading/panels/TradesPanel.tsx`
