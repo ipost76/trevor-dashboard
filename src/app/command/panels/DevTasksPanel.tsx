@@ -152,15 +152,17 @@ export default function DevTasksPanel() {
       </div>
 
       {/* Task List */}
-      {loading ? (
+      {(() => {
+        const realTasks = tasks.filter(t => !t.title.includes("<#"));
+        return loading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading...
         </div>
-      ) : tasks.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">No tasks found.</div>
+      ) : realTasks.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">No tasks match filters. Add tasks via Discord.</div>
       ) : (
         <div className="space-y-1">
-          {tasks.map((task) => {
+          {realTasks.map((task) => {
             const isDone = task.status === "done";
             const isExpanded = expanded === task.id;
             return (
@@ -238,7 +240,53 @@ export default function DevTasksPanel() {
             );
           })}
         </div>
-      )}
+      );
+      })()}
+
+      {/* How to Add Tasks — collapsible reference */}
+      <details className="panel mt-4">
+        <summary className="px-3 py-2 cursor-pointer text-[11px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
+          How to Add Tasks
+        </summary>
+        <div className="px-3 pb-3 text-[11px] text-muted-foreground space-y-3">
+          <div>
+            <div className="font-bold text-foreground mb-1">Adding</div>
+            <div className="space-y-0.5 font-mono text-[10px]">
+              <div><code className="text-[var(--neon-cyan)]">ADD fix high</code> Signal deletion broken</div>
+              <div><code className="text-[var(--neon-cyan)]">ADD prompt med</code> Write integration prompt</div>
+              <div><code className="text-[var(--neon-cyan)]">ADD bug low</code> Hub portfolio page issue</div>
+              <div className="text-muted-foreground/70">Or just type anything — auto-becomes ADD note med</div>
+            </div>
+          </div>
+          <div>
+            <div className="font-bold text-foreground mb-1">Managing</div>
+            <div className="space-y-0.5 font-mono text-[10px]">
+              <div><code className="text-[var(--neon-cyan)]">DONE 7</code> — mark complete</div>
+              <div><code className="text-[var(--neon-cyan)]">WIP 3</code> — mark in-progress</div>
+              <div><code className="text-[var(--neon-cyan)]">REOPEN 5</code> — reopen task</div>
+            </div>
+          </div>
+          <div>
+            <div className="font-bold text-foreground mb-1">Editing</div>
+            <div className="space-y-0.5 font-mono text-[10px]">
+              <div><code className="text-[var(--neon-cyan)]">EDIT 5</code> New title text</div>
+              <div><code className="text-[var(--neon-cyan)]">NOTE 3</code> Append a note</div>
+              <div><code className="text-[var(--neon-cyan)]">PRIORITY 3 high</code> — change priority</div>
+            </div>
+          </div>
+          <div>
+            <div className="font-bold text-foreground mb-1">Viewing</div>
+            <div className="space-y-0.5 font-mono text-[10px]">
+              <div><code className="text-[var(--neon-cyan)]">LIST</code> — open tasks</div>
+              <div><code className="text-[var(--neon-cyan)]">LIST all</code> — everything</div>
+              <div><code className="text-[var(--neon-cyan)]">LIST fix</code> / <code className="text-[var(--neon-cyan)]">LIST high</code> — filtered</div>
+            </div>
+          </div>
+          <div className="text-[10px] text-muted-foreground/60">
+            Categories: fix, prompt, update, note, bug | Priorities: high, med, low
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

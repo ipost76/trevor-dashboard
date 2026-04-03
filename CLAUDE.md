@@ -383,3 +383,24 @@ sudo systemctl restart trevor-dashboard
 - Added `livePrices` state with `useEffect` fetching `/api/prices?tickers=...` every 30s (same pattern as TradesPanel)
 - P&L% calculated from live price, entry price, direction, and leverage
 - File: `src/app/trading/panels/HoldingsPanel.tsx`
+
+### Vector Memory Count Fix
+- Memory tab showed 0 for trade_patterns and knowledge_base — was trying dead sidecar at port 5100
+- Replaced sidecar fetch with `query_brain.py vectors` call (same proven path as ChromaDB browser tab)
+- 5-min cache preserved. Counts now match ChromaDB browser exactly
+- File: `src/app/api/memory/route.ts`
+
+### Dev Tasks Rendering Fix
+- Only DB entry (id=1) was a raw Discord cheat sheet with channel IDs like `<#1485100214934175966>`
+- Filtered cheat sheet entries (containing `<#`) from task list display
+- Added collapsible "How to Add Tasks" reference section with formatted commands
+- Updated empty state message
+- File: `src/app/command/panels/DevTasksPanel.tsx`
+
+### Sub-Tab Scroll Indicators
+- Tab strips had no visual cue that more tabs exist off-screen on mobile
+- Added gradient fade indicators to shared TabBar component with scroll position detection (useRef + ResizeObserver)
+- Right fade shows when tabs overflow right, left fade when scrolled right
+- Auto-applies to all 4 panels using TabBar (ControlPanel, Trades, Holdings, Research)
+- GhostHQPanel custom tab bar also updated with same scroll indicators
+- Files: `src/components/ui/tab-bar.tsx`, `src/app/command/panels/GhostHQPanel.tsx`

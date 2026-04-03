@@ -50,7 +50,7 @@ export async function GET() {
       }
     }
 
-    // ChromaDB collection counts via embedding sidecar (fast, model already loaded)
+    // ChromaDB collection counts via Python helper (same as /api/brain?scope=vectors)
     let patternCount = 0;
     let kbCount = 0;
     if (_chromaCache && Date.now() - _chromaCache.ts < CHROMA_CACHE_TTL) {
@@ -58,17 +58,20 @@ export async function GET() {
       kbCount = _chromaCache.kbCount;
     } else {
       try {
-        const sidecarRes = await fetch("http://127.0.0.1:5100/collections", {
-          signal: AbortSignal.timeout(10000),
-        });
-        if (sidecarRes.ok) {
-          const raw = await sidecarRes.json();
-          const counts = raw.collections || {};
-          patternCount = counts["trade_patterns"] || counts["trade-patterns"] || 0;
-          kbCount = counts["knowledge_base"] || counts["knowledge-base"] || 0;
-          _chromaCache = { patternCount, kbCount, ts: Date.now() };
+        const { execSync } = await import("child_process");
+        const pythonPath = join(trevorDir, "venv", "bin", "python3");
+        const scriptPath = join(process.cwd(), "query_brain.py");
+        const raw = execSync(
+          `${pythonPath} ${scriptPath} vectors`,
+          { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
+        ).trim();
+        const parsed = JSON.parse(raw);
+        for (const col of (parsed.collections || []) as { name: string; count: number }[]) {
+          if (col.name === "trade_patterns") patternCount = col.count;
+          if (col.name === "knowledge_base") kbCount = col.count;
         }
-      } catch { /* sidecar unavailable — return cached or 0s */ }
+        _chromaCache = { patternCount, kbCount, ts: Date.now() };
+      } catch { /* Python unavailable — return cached or 0s */ }
     }
 
     return NextResponse.json({
