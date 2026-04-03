@@ -106,14 +106,14 @@ export function TradesTab() {
             {active.map((t, i) => (
               <div key={i} className="p-2.5 rounded bg-[#141a24] border-l-[3px] border-l-amber-400">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-amber-400 text-[10px]">\u26a1</span>
+                  <span className="text-amber-400 text-[10px]">⚡</span>
                   <span className="text-xs font-bold">{t.ticker}</span>
                   {badge(t.direction, t.direction === "LONG" ? "text-green-400 border-green-400/30 bg-green-400/10" : "text-red-400 border-red-400/30 bg-red-400/10")}
                   {t.leverage > 1 && <span className="text-[9px] neon-amber">{t.leverage}x</span>}
                   {t.confidence ? <span className="text-[9px] text-muted-foreground">Conf: {t.confidence}%</span> : null}
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
-                  <span>Entry: {t.entry_price ? fmtDollarPrice(t.entry_price) : <span className="text-red-400 font-bold">\u26a0\ufe0f NO ENTRY</span>}</span>
+                  <span>Entry: {t.entry_price ? fmtDollarPrice(t.entry_price) : <span className="text-red-400 font-bold">⚠️ NO ENTRY</span>}</span>
                   {t.stop_price && <span>Stop: {fmtDollarPrice(t.stop_price)}</span>}
                   {t.target_price && <span>Target: {fmtDollarPrice(t.target_price)}</span>}
                   <span>Opened: {timeAgo(t.opened_at)}</span>
@@ -156,7 +156,7 @@ export function TradesTab() {
                     <span className="text-[10px] text-muted-foreground">{timeAgo(t.closed_at ?? null)}</span>
                   </div>
                   <div className="flex gap-3 text-[10px] text-muted-foreground mt-0.5 ml-7">
-                    {t.entry_price != null && t.exit_price != null && <span>{fmtDollarPrice(t.entry_price)} \u2192 {fmtDollarPrice(t.exit_price)}</span>}
+                    {t.entry_price != null && t.exit_price != null && <span>{fmtDollarPrice(t.entry_price)} → {fmtDollarPrice(t.exit_price)}</span>}
                     {t.leverage > 1 && <span>{t.leverage}x</span>}
                     {t.hold_duration && <span>{t.hold_duration}</span>}
                   </div>

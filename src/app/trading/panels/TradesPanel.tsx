@@ -1165,14 +1165,16 @@ export default function TradesPanel() {
             )
           )}
 
-          {tab === "history" && <HistoryTable onRefresh={handleRefresh} />}
+          {tab === "history" && (
+            <>
+              <HistoryTable onRefresh={handleRefresh} />
+              <TradeAnalytics />
+            </>
+          )}
 
           {tab === "journal" && <JournalTab />}
         </div>
       </div>
-
-      {/* ── Analytics Sections ── */}
-      <TradeAnalytics />
 
       {/* Manual Trade Form Modal */}
       <TradeForm

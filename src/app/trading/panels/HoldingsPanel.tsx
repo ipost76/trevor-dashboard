@@ -146,6 +146,28 @@ export default function HoldingsPanel() {
     return () => clearInterval(iv);
   }, [fetchAll]);
 
+  // Fetch live prices for open positions
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const openPositions = positions.filter((p) => p.status !== "closed");
+    if (!openPositions.length) return;
+    const tickers = [...new Set(openPositions.map((p) => p.ticker.replace("-PERP", "").replace("/USD", "")))].join(",");
+    const fetchPrices = async () => {
+      try {
+        const res = await fetch(`/api/prices?tickers=${tickers}`);
+        const data = await res.json();
+        const p: Record<string, number> = {};
+        for (const [k, v] of Object.entries(data.prices || {})) {
+          p[k] = (v as { price: number }).price;
+        }
+        setLivePrices(p);
+      } catch { /* ignore */ }
+    };
+    fetchPrices();
+    const iv = setInterval(fetchPrices, 30_000);
+    return () => clearInterval(iv);
+  }, [positions]);
+
   /* ── Mutations ── */
   const addPosition = async (body: Record<string, unknown>) => {
     await fetch("/api/portfolio", {
@@ -395,9 +417,12 @@ export default function HoldingsPanel() {
                 <span className="flex-1 text-right">Actions</span>
               </div>
               {filtered.map((p) => {
-                const pnl = calcPnlPct(p);
-                const displayPrice =
-                  tab === "closed" ? p.exit_price : undefined;
+                const normalizedTicker = p.ticker.replace("-PERP", "").replace("/USD", "");
+                const currentPrice = tab === "closed" ? p.exit_price : livePrices[normalizedTicker];
+                const dirMult = p.direction.toUpperCase() === "SHORT" ? -1 : 1;
+                const pnl = currentPrice && p.entry_price
+                  ? ((currentPrice - p.entry_price) / p.entry_price) * dirMult * (p.leverage || 1) * 100
+                  : (tab === "closed" ? calcPnlPct(p) : 0);
                 return (
                   <div
                     key={p.id}
@@ -416,8 +441,8 @@ export default function HoldingsPanel() {
                       {fmtDollarPrice(p.entry_price)}
                     </span>
                     <span className="w-20 text-right font-mono text-muted-foreground">
-                      {displayPrice !== undefined
-                        ? fmtDollarPrice(displayPrice)
+                      {currentPrice
+                        ? fmtDollarPrice(currentPrice)
                         : "--"}
                     </span>
                     <span

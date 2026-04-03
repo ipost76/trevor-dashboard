@@ -365,3 +365,21 @@ sudo systemctl restart trevor-dashboard
 
 ### Old Routes (all redirect 308)
 /trades → /trading?tab=trades, /holdings → /trading?tab=holdings, /autotrader → /trading?tab=autotrader, /signals → /intelligence?tab=signals, /research → /intelligence?tab=research, /training → /intelligence?tab=training, /control → /command?tab=control, /ghost → /command?tab=ghosthq, /reminders → /command?tab=reminders, /dev-tasks → /command?tab=devtasks
+
+## Bug Fixes — 2026-04-03
+
+### Hold Time / Regime Duplication Fix
+- `TradeAnalytics` (Hold Time Analysis + Regime Performance) was rendered outside the tab content wrapper in TradesPanel, making it visible under all 6 sub-tabs
+- Moved into `tab === "history"` conditional — now only appears on History sub-tab
+- File: `src/app/trading/panels/TradesPanel.tsx`
+
+### Unicode Escapes Fix (Ghost HQ Trades)
+- `\u26a1`, `\u26a0\ufe0f`, `\u2192` in JSX text content rendered as literal strings (JSX doesn't process unicode escapes in text nodes)
+- Replaced with actual unicode characters: ⚡, ⚠️, →
+- File: `src/components/ghost/trades-tab.tsx` (lines 109, 116, 159)
+
+### Holdings Live Prices Fix
+- Holdings table showed "--" for Current Price and P&L% on open positions — no price fetching existed
+- Added `livePrices` state with `useEffect` fetching `/api/prices?tickers=...` every 30s (same pattern as TradesPanel)
+- P&L% calculated from live price, entry price, direction, and leverage
+- File: `src/app/trading/panels/HoldingsPanel.tsx`
