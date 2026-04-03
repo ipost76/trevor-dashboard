@@ -7,12 +7,30 @@ import { TypingDots } from "@/components/typing-dots";
 
 type Message = { role: "user" | "assistant"; content: string; timestamp: number; tokens?: { input: number; output: number } };
 
+function getChatActions(ctx: { activeTradeDetails?: { ticker: string; direction: string }[]; streak?: number; recentSignals?: number }) {
+  const actions: { label: string; message: string }[] = [];
+  for (const t of (ctx.activeTradeDetails || []).slice(0, 2)) {
+    actions.push({ label: `Check ${t.ticker} position`, message: `How is my ${t.ticker} ${t.direction} position looking? Any exit signals or concerns?` });
+  }
+  if ((ctx.streak ?? 0) <= -3) {
+    actions.push({ label: "Review my losing streak", message: `I'm on a ${Math.abs(ctx.streak ?? 0)}-trade losing streak. What's going wrong and should I adjust?` });
+  }
+  if (actions.length < 3) actions.push({ label: "How am I doing?", message: "Give me an overview of my trading performance." });
+  if (actions.length < 3) actions.push({ label: "Market overview", message: "What's the current market regime and outlook for my watchlist?" });
+  return actions.slice(0, 3);
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [chatCtx, setChatCtx] = useState<{ activeTradeDetails?: { ticker: string; direction: string }[]; streak?: number; recentSignals?: number }>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch("/api/nav-badges").then(r => r.json()).then(d => setChatCtx(d)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -97,11 +115,11 @@ export default function ChatPage() {
               <MessageSquare className="h-10 w-10 opacity-20" />
               <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>Hey Ghost. What do you want to know?</span>
               <div className="flex flex-wrap gap-2 justify-center max-w-sm">
-                {["How am I doing?", "Analyze BTC", "AutoTrader status"].map(q => (
-                  <button key={q} onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                {getChatActions(chatCtx).map(a => (
+                  <button key={a.label} onClick={() => { setInput(a.message); inputRef.current?.focus(); }}
                     className="px-2.5 py-1 rounded text-xs transition-colors"
                     style={{ background: "#1a2332", border: "1px solid #30363d", color: "#58a6ff", fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
-                    {q}
+                    {a.label}
                   </button>
                 ))}
               </div>

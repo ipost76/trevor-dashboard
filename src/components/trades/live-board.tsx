@@ -184,6 +184,11 @@ export function LiveBoard() {
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground font-mono">
           Last scan: {relativeTime(lastScan)}
+          {lastScan && (() => {
+            const ms = Date.now() - new Date(lastScan).getTime();
+            if (ms > 180000) return <span style={{ color: "#ff3355", marginLeft: 6 }}>⚠ stale</span>;
+            return null;
+          })()}
         </span>
         {showAdd ? (
           <div className="flex items-center gap-1.5">

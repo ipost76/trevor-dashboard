@@ -599,12 +599,15 @@ function ActiveTradesTab({
           p[k] = (v as { price: number }).price;
         }
         setLivePrices(p);
+        setLastPriceUpdate(Date.now());
       } catch { /* ignore */ }
     };
     fetchPrices();
     const iv = setInterval(fetchPrices, 30_000);
     return () => clearInterval(iv);
   }, [trades]);
+
+  const [lastPriceUpdate, setLastPriceUpdate] = useState(0);
 
   // Tick every 60s for elapsed timer
   useEffect(() => {
@@ -855,6 +858,11 @@ function ActiveTradesTab({
               <div>
                 <span className="text-muted-foreground">Current</span><br />
                 <span className="font-mono">{livePrice ? `$${livePrice.toFixed(livePrice < 1 ? 4 : 2)}` : "-"}</span>
+                {lastPriceUpdate > 0 && (() => {
+                  const s = Math.floor((Date.now() - lastPriceUpdate) / 1000);
+                  const stale = s > 120;
+                  return <span className="text-[8px] ml-1" style={{ color: stale ? "#ff3355" : "#3d6b4a" }}>{stale ? "⚠" : "●"} {s < 10 ? "now" : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`}</span>;
+                })()}
               </div>
               <div>
                 <span className="text-muted-foreground">SL</span><br />

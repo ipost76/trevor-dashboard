@@ -483,3 +483,30 @@ sudo systemctl restart trevor-dashboard
 - Falls back to insight_line or "No trade history" for combos with no data
 - Blocked combos (ETH LONG, FARTCOIN LONG) show "🚫 BLOCKED" instead of ENTER button
 - Files: `src/app/api/trade-stats/route.ts` (new), `src/components/trades/live-board.tsx`
+
+### Context-Aware Chat Quick Actions
+- Chat page quick action buttons now dynamic based on system state
+- With active trade: "Check BTC position" button. On losing streak: "Review my losing streak"
+- Falls back to "How am I doing?" + "Market overview" when no context-specific actions
+- Uses `/api/nav-badges` for context (streak, activeTradeDetails)
+- File: `src/app/chat/page.tsx`
+
+### Reminders Quick-Add
+- "+" button in Dashboard reminders widget header, inline form with text input + time presets (1h, 3h, Tomorrow)
+- Uses existing `POST /api/reminders` endpoint. Auto-refreshes widget after creation
+- Prevents Link navigation via `e.preventDefault()` + `e.stopPropagation()`
+- File: `src/components/RemindersWidget.tsx`
+
+### Streak Awareness on Dashboard
+- Streak indicator in P&L hero section between W/L bar and stats grid
+- Streak >= 3: green "🔥 X streak". Streak <= -3: red "❄️ -X streak"
+- Otherwise: shows last trade result ("Last: +6.61% (W)")
+- Data from extended `/api/nav-badges` (streak, lastPnl fields added)
+- File: `src/components/dashboard-view.tsx`
+
+### Data Freshness Indicators
+- Dashboard status strip: "● Xs ago" / "⚠ Xm ago" next to signals count
+- Live Board: stale warning "⚠ stale" when last scan > 3 min old
+- Active trade cards: freshness dot next to current price showing price age
+- FreshnessDot component: 5s interval update, red warning when > 2 min stale
+- Files: `src/components/dashboard-view.tsx`, `src/components/trades/live-board.tsx`, `src/app/trading/panels/TradesPanel.tsx`

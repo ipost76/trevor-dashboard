@@ -100,6 +100,9 @@ export function DashboardView() {
   const [filterCount, setFilterCount] = useState(0);
   const [filters, setFilters] = useState<{ rule_type: string; ticker?: string; direction?: string; value?: string; reason?: string }[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [lastPnl, setLastPnl] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState(0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
@@ -136,6 +139,7 @@ export function DashboardView() {
       auto: null,
     });
     setLoading(false);
+    setLastUpdated(Date.now());
   }, []);
 
   useEffect(() => { fetchDashboard(); const i = setInterval(fetchDashboard, 30000); return () => clearInterval(i); }, [fetchDashboard]);
@@ -161,11 +165,13 @@ export function DashboardView() {
     return () => clearInterval(iv);
   }, []);
 
-  // Fetch filter rules
+  // Fetch filter rules + streak
   useEffect(() => {
     fetch("/api/nav-badges").then(r => r.json()).then(d => {
       setFilterCount(d.filterCount || 0);
       setFilters(d.filters || []);
+      setStreak(d.streak || 0);
+      setLastPnl(d.lastPnl || 0);
     }).catch(() => {});
   }, []);
 
@@ -293,6 +299,7 @@ export function DashboardView() {
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: C.textSecondary }}>
                 {health.signals?.today ?? 0} signals
               </span>
+              <FreshnessDot ts={lastUpdated} />
               {filterCount > 0 && (
                 <button onClick={() => setShowFilters(!showFilters)} style={{
                   display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 4,
@@ -434,6 +441,26 @@ export function DashboardView() {
               <div style={{ flex: 1, background: "rgba(255,59,92,0.6)", borderRadius: "0 3px 3px 0" }} />
             </div>
 
+            {/* Streak indicator */}
+            {(Math.abs(streak) >= 3 || lastPnl !== 0) && (
+              <div style={{ textAlign: "center", marginTop: 10 }}>
+                {Math.abs(streak) >= 3 ? (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 4,
+                    background: streak > 0 ? "rgba(0,255,136,0.08)" : "rgba(255,51,85,0.08)",
+                    border: `1px solid ${streak > 0 ? "rgba(0,255,136,0.2)" : "rgba(255,51,85,0.2)"}`,
+                    color: streak > 0 ? C.accent : C.red, fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600,
+                  }}>
+                    {streak > 0 ? "🔥" : "❄️"} {Math.abs(streak)} streak
+                  </span>
+                ) : lastPnl !== 0 ? (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: lastPnl > 0 ? C.accent : C.red }}>
+                    Last: {lastPnl > 0 ? "+" : ""}{lastPnl.toFixed(2)}% ({lastPnl > 0 ? "W" : "L"})
+                  </span>
+                ) : null}
+              </div>
+            )}
+
             <div style={{ height: 1, background: C.borderSolid, margin: "14px 0 12px" }} />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, textAlign: "center" }}>
@@ -551,6 +578,30 @@ export function DashboardView() {
 }
 
 /* ── Sub-Components ── */
+
+function FreshnessDot({ ts }: { ts: number }) {
+  const [ago, setAgo] = useState("");
+  useEffect(() => {
+    const update = () => {
+      if (!ts) return;
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 10) setAgo("just now");
+      else if (s < 60) setAgo(`${s}s ago`);
+      else if (s < 3600) setAgo(`${Math.floor(s / 60)}m ago`);
+      else setAgo(`${Math.floor(s / 3600)}h ago`);
+    };
+    update();
+    const iv = setInterval(update, 5000);
+    return () => clearInterval(iv);
+  }, [ts]);
+  const stale = ts && (Date.now() - ts > 120000);
+  if (!ts) return null;
+  return (
+    <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: stale ? "#ff3355" : "#3d6b4a", letterSpacing: 0.3 }}>
+      {stale ? "⚠ " : "● "}{ago}
+    </span>
+  );
+}
 
 function Badge({ color, bg, glow, small, children, onClick }: {
   color: string; bg: string; glow?: boolean; small?: boolean; children: React.ReactNode; onClick?: () => void;
