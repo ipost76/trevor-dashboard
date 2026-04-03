@@ -404,3 +404,30 @@ sudo systemctl restart trevor-dashboard
 - Auto-applies to all 4 panels using TabBar (ControlPanel, Trades, Holdings, Research)
 - GhostHQPanel custom tab bar also updated with same scroll indicators
 - Files: `src/components/ui/tab-bar.tsx`, `src/app/command/panels/GhostHQPanel.tsx`
+
+### Sticky Tab Strips
+- TabBar wrapper now has `sticky top-0 z-[19]` with solid background — tabs stay visible during scroll
+- GhostHQPanel custom tab bar also made sticky
+- TabContainer zone tabs already had sticky (verified)
+- Files: `src/components/ui/tab-bar.tsx`, `src/app/command/panels/GhostHQPanel.tsx`
+
+### Dashboard LIVE Deduplication
+- Removed duplicate sticky LIVE bar from dashboard (pulse dot + "LIVE" + clock + XP)
+- Header already shows LIVE/OFFLINE + time + XP — second bar was redundant
+- System status strip (Scanner OK, API ms, signals, STOP) kept and made sticky
+- Saves ~48px of viewport space
+- File: `src/components/dashboard-view.tsx`
+
+### Responsive Holdings Position Cards
+- Mobile (<768px): positions render as stacked cards with ticker, direction badge, leverage, entry/current prices, P&L%, type, action buttons
+- Desktop: table layout unchanged (hidden on mobile via `hidden md:flex`)
+- Action buttons have 44px+ min-height touch targets on mobile
+- File: `src/app/trading/panels/HoldingsPanel.tsx`
+
+### Collapsible Signals Sections
+- 10 sections wrapped in CollapsibleSection accordion component
+- Default open: Trade Performance, Signal Quality by Confidence
+- Default closed: Quality Metrics, Expectancy, Circuit Breakers, Ticker Breakdown, P&L By Ticker, Direction Trend, Confidence Distribution, Cumulative P&L
+- Summary Stats grid always visible (no collapse)
+- Each section header shows summary text and clickable chevron
+- File: `src/app/intelligence/panels/SignalsPanel.tsx`

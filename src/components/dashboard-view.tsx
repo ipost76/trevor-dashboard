@@ -238,30 +238,11 @@ export function DashboardView() {
 
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", paddingBottom: 90 }}>
 
-        {/* ─── 1. TOP BAR (sticky) ─── */}
-        <div style={{
-          position: "sticky", top: 0, zIndex: 100, padding: "12px 16px 8px",
-          background: `linear-gradient(to bottom, ${C.bg} 70%, transparent)`,
-          backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ position: "relative", width: 7, height: 7 }}>
-              <span style={{ position: "absolute", inset: -4, borderRadius: "50%", background: C.accent, opacity: 0.25, animation: "pulseRing 2s ease-out infinite" }} />
-              <span style={{ display: "block", width: 7, height: 7, borderRadius: "50%", background: C.accent, boxShadow: `0 0 6px ${C.accent}` }} />
-            </span>
-            <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: 11, fontWeight: 700, color: C.accent, letterSpacing: 1 }}>LIVE</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: C.textTertiary }}>{clock}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: C.cyan }}>⚡{data.xp}</span>
-          </div>
-        </div>
-
         <div style={{ padding: "0 12px", display: "flex", flexDirection: "column", gap: 10 }}>
 
-          {/* ─── 2. SYSTEM STATUS STRIP ─── */}
+          {/* ─── SYSTEM STATUS STRIP (sticky) ─── */}
           <div style={{
+            position: "sticky", top: 0, zIndex: 20,
             background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 8,
             padding: "8px 12px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 6,
           }}>

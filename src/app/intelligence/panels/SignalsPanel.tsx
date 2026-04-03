@@ -152,12 +152,7 @@ export default function SignalsPanel() {
       {/* ── P&L Trade Tracker ── */}
       {perf && perf.total_closed > 0 && (
         <>
-          <div className="panel">
-            <div className="panel-header flex items-center gap-1.5">
-              <BarChart3 className="h-3 w-3" />
-              <span>TRADE PERFORMANCE</span>
-              <span className="ml-auto text-muted-foreground font-normal text-[9px]">{perf.total_closed} closed</span>
-            </div>
+          <CollapsibleSection title="TRADE PERFORMANCE" icon={<BarChart3 className="h-3 w-3" />} summary={`${perf.total_closed} closed`} defaultOpen>
             <div className="p-3 space-y-3">
               {/* Row 1 — Performance Overview */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -233,7 +228,7 @@ export default function SignalsPanel() {
                 </div>
               )}
             </div>
-          </div>
+          </CollapsibleSection>
 
           {/* Divider */}
           <div className="border-t border-[#1a3a2a]" />
@@ -257,12 +252,7 @@ export default function SignalsPanel() {
 
       {/* ── Quality Metrics ── */}
       {overall && overall.totalTrades > 0 && (
-        <div className="panel">
-          <div className="panel-header flex items-center gap-1.5">
-            <Target className="h-3 w-3" />
-            <span>QUALITY METRICS</span>
-            <span className="ml-auto text-muted-foreground font-normal text-[9px]">{overall.totalTrades} closed trades</span>
-          </div>
+        <CollapsibleSection title="QUALITY METRICS" icon={<Target className="h-3 w-3" />} summary={`WR ${overall.winRate}%`}>
           <div className="p-3 space-y-3">
             {/* Stats row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -316,15 +306,12 @@ export default function SignalsPanel() {
               </div>
             )}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Expectancy Card ── */}
       {expectancy && overall && overall.totalTrades > 0 && (
-        <div className="panel">
-          <div className="panel-header flex items-center gap-1.5">
-            <span>EXPECTANCY</span>
-          </div>
+        <CollapsibleSection title="EXPECTANCY" summary={`${expectancy.per_trade_pct > 0 ? "+" : ""}${expectancy.per_trade_pct}% per trade`}>
           <div className="p-3 space-y-2">
             <div className="flex items-center gap-3">
               <span className={cn("text-2xl font-bold font-mono", expectancy.per_trade_pct > 0.5 ? "neon-green" : expectancy.per_trade_pct < -0.5 ? "neon-red" : "neon-amber")}>
@@ -348,15 +335,12 @@ export default function SignalsPanel() {
               )}
             </div>
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Circuit Breakers ── */}
       {circuitBreakers.length > 0 && (
-        <div className="panel">
-          <div className="panel-header flex items-center gap-1.5">
-            <span>CIRCUIT BREAKERS</span>
-          </div>
+        <CollapsibleSection title="CIRCUIT BREAKERS" summary={`${circuitBreakers.length} tickers`}>
           <div className="p-2">
             <div className="flex items-center gap-2 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground border-b border-[var(--border)]">
               <span className="w-16">Ticker</span>
@@ -385,16 +369,12 @@ export default function SignalsPanel() {
               </div>
             ))}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Ticker Breakdown ── */}
       {byTicker.length > 0 && (
-        <div className="panel">
-          <div className="panel-header flex items-center gap-1.5">
-            <TrendingUp className="h-3 w-3" />
-            <span>TICKER BREAKDOWN</span>
-          </div>
+        <CollapsibleSection title="TICKER BREAKDOWN" icon={<TrendingUp className="h-3 w-3" />} summary={`${byTicker.length} tickers`}>
           <div className="p-2">
             {/* Header */}
             <div className="flex items-center gap-2 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-muted-foreground border-b border-[var(--border)]">
@@ -427,13 +407,13 @@ export default function SignalsPanel() {
               );
             })}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Ticker Performance (P&L chart) ── */}
       {tickerPerf.length > 0 && (
-        <div className="panel p-3">
-          <div className="panel-header mb-2">P&L BY TICKER</div>
+        <CollapsibleSection title="P&L BY TICKER">
+          <div className="p-3">
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={tickerPerf.map(t => ({ name: t.symbol, pnl: t.totalPnl, trades: t.trades, winRate: t.winRate, wins: t.wins }))} margin={{ left: 0, right: 0, top: 5, bottom: 5 }}>
               <XAxis dataKey="name" tick={{ fill: CHART_COLORS.textMuted, fontSize: 10 }} />
@@ -458,16 +438,13 @@ export default function SignalsPanel() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Direction Trend (last 14 days) ── */}
       {dirTrend.length > 1 && (
-        <div className="panel p-3">
-          <div className="panel-header mb-2 flex items-center gap-1.5">
-            <TrendingDown className="h-3 w-3" />
-            <span>DIRECTION TREND</span>
-            <span className="ml-auto text-muted-foreground font-normal text-[9px]">Last 14 days</span>
-          </div>
+        <CollapsibleSection title="DIRECTION TREND" icon={<TrendingDown className="h-3 w-3" />} summary="Last 14 days">
+          <div className="p-3">
           <StyledBarChart
             data={dirTrend.map(d => ({ date: d.date?.slice(5) || "", long: d.long, short: -d.short }))}
             dataKey="long"
@@ -477,13 +454,14 @@ export default function SignalsPanel() {
             positiveColor="#00ff88"
             negativeColor="#ff4488"
           />
-        </div>
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Confidence Distribution ── */}
       {Object.keys(confDist).length > 0 && (
-        <div className="panel p-3">
-          <div className="panel-header mb-2">CONFIDENCE DISTRIBUTION</div>
+        <CollapsibleSection title="CONFIDENCE DISTRIBUTION">
+          <div className="p-3">
           <StyledBarChart
             data={Object.entries(confDist)
               .sort(([a], [b]) => a.localeCompare(b))
@@ -494,13 +472,14 @@ export default function SignalsPanel() {
             horizontal
             colors={CONF_DIST_COLORS}
           />
-        </div>
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Cumulative P&L ── */}
       {dailyPnl.length > 1 && (
-        <div className="panel p-3">
-          <div className="panel-header mb-2">CUMULATIVE P&L</div>
+        <CollapsibleSection title="CUMULATIVE P&L">
+          <div className="p-3">
           <StyledLineChart
             data={dailyPnl.map(d => ({ date: d.date?.slice(5) || "", cumulative: d.cumulative }))}
             lines={[{ dataKey: "cumulative", color: "#00ff88", name: "Cum P&L %" }]}
@@ -510,7 +489,8 @@ export default function SignalsPanel() {
             referenceLine={0}
             splitColorAtZero
           />
-        </div>
+          </div>
+        </CollapsibleSection>
       )}
 
       {/* ── Empty state ── */}
@@ -537,15 +517,11 @@ function ConfidenceTierSection() {
   if (!tiers?.available) {
     if (tiers && !tiers.available) {
       return (
-        <div className="panel p-3 mt-2">
-          <div className="panel-header flex items-center gap-1.5 mb-2">
-            <Target className="h-3 w-3" />
-            <span>SIGNAL QUALITY BY CONFIDENCE</span>
-          </div>
-          <div className="text-[11px] text-muted-foreground text-center py-4">
+        <CollapsibleSection title="SIGNAL QUALITY BY CONFIDENCE" icon={<Target className="h-3 w-3" />} defaultOpen>
+          <div className="p-3 text-[11px] text-muted-foreground text-center py-4">
             {String(tiers.reason ?? "Confidence tier data not available.")}
           </div>
-        </div>
+        </CollapsibleSection>
       );
     }
     return null;
@@ -559,12 +535,8 @@ function ConfidenceTierSection() {
   const taken = Number(tiers.signals_taken ?? 0);
 
   return (
-    <div className="panel p-3 mt-2 space-y-3">
-      <div className="panel-header flex items-center gap-1.5">
-        <Target className="h-3 w-3" />
-        <span>SIGNAL QUALITY BY CONFIDENCE</span>
-      </div>
-
+    <CollapsibleSection title="SIGNAL QUALITY BY CONFIDENCE" icon={<Target className="h-3 w-3" />} summary={`${takeRate}% take rate`} defaultOpen>
+      <div className="p-3 space-y-3">
       {/* Take rate */}
       <div className="text-[10px] text-muted-foreground">
         You take <span className="text-foreground font-bold">{takeRate}%</span> of generated signals ({taken} of {totalSignals}).
@@ -602,6 +574,32 @@ function ConfidenceTierSection() {
           <span className="font-bold text-amber-400">RECOMMENDATION:</span> {String(rec.impact ?? "")}
         </div>
       )}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+/* ── Collapsible Section ── */
+function CollapsibleSection({ title, icon, summary, defaultOpen = false, children }: {
+  title: string;
+  icon?: React.ReactNode;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="panel overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full panel-header flex items-center gap-1.5 cursor-pointer hover:bg-[rgba(0,240,255,0.03)] transition-colors"
+      >
+        {icon}
+        <span className="text-left">{title}</span>
+        {summary && <span className="ml-auto text-muted-foreground font-normal text-[9px] mr-2">{summary}</span>}
+        <span className={cn("text-muted-foreground transition-transform duration-200 text-[10px]", !summary && "ml-auto", open && "rotate-90")}>▸</span>
+      </button>
+      {open && <div>{children}</div>}
     </div>
   );
 }

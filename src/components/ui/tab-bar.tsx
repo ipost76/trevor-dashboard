@@ -37,7 +37,7 @@ export function TabBar<T extends string>({
   }, [tabs]);
 
   return (
-    <div className="relative">
+    <div className="relative sticky top-0 z-[19] bg-[var(--panel-header,#0e0e16)]">
       <div ref={scrollRef} role="tablist" className="flex items-center border-b border-[var(--border)] bg-[var(--panel-header)] overflow-x-auto scrollbar-hide">
         {tabs.map((t) => {
           const Icon = t.icon;

@@ -401,9 +401,9 @@ export default function HoldingsPanel() {
               sub="Click + Add Position to get started"
             />
           ) : (
-            /* ── Position table ── */
+            /* ── Position table (desktop) ── */
             <>
-              <div className="flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)] text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
+              <div className="hidden md:flex items-center gap-2 px-2 py-1.5 border-b border-[var(--border)] text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground bg-[var(--panel-header)]">
                 <span className="w-20">Ticker</span>
                 <span className="w-14">Dir</span>
                 <span className="w-12 text-right">Qty</span>
@@ -424,98 +424,155 @@ export default function HoldingsPanel() {
                   ? ((currentPrice - p.entry_price) / p.entry_price) * dirMult * (p.leverage || 1) * 100
                   : (tab === "closed" ? calcPnlPct(p) : 0);
                 return (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-2 data-cell hover:bg-[rgba(0,240,255,0.03)] transition-colors group"
-                  >
-                    <span className="w-20 font-bold text-foreground truncate">
-                      {p.ticker}
-                    </span>
-                    <span className="w-14">
-                      <DirectionBadge dir={p.direction} />
-                    </span>
-                    <span className="w-12 text-right font-mono text-muted-foreground">
-                      {p.quantity}
-                    </span>
-                    <span className="w-20 text-right font-mono text-muted-foreground">
-                      {fmtDollarPrice(p.entry_price)}
-                    </span>
-                    <span className="w-20 text-right font-mono text-muted-foreground">
-                      {currentPrice
-                        ? fmtDollarPrice(currentPrice)
-                        : "--"}
-                    </span>
-                    <span
-                      className={cn(
-                        "w-16 text-right font-bold font-mono",
-                        pnl > 0
-                          ? "neon-green"
-                          : pnl < 0
-                          ? "neon-red"
-                          : "text-muted-foreground"
-                      )}
+                  <div key={p.id}>
+                    {/* Desktop row */}
+                    <div
+                      className="hidden md:flex items-center gap-2 data-cell hover:bg-[rgba(0,240,255,0.03)] transition-colors group"
                     >
-                      {pnl !== 0
-                        ? `${fmtPctSigned(pnl)}%`
-                        : "--"}
-                    </span>
-                    <span className="w-10 text-right text-[10px] text-muted-foreground">
-                      {p.leverage > 1 ? (
-                        <span className="neon-amber">{p.leverage}x</span>
-                      ) : (
-                        `${p.leverage}x`
-                      )}
-                    </span>
-                    <span className="w-20 text-[10px] text-muted-foreground truncate">
-                      {assetTypeLabel(p.asset_type)}
-                    </span>
-                    <span className="flex-1 flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      {p.status !== "closed" && (
-                        <>
+                      <span className="w-20 font-bold text-foreground truncate">
+                        {p.ticker}
+                      </span>
+                      <span className="w-14">
+                        <DirectionBadge dir={p.direction} />
+                      </span>
+                      <span className="w-12 text-right font-mono text-muted-foreground">
+                        {p.quantity}
+                      </span>
+                      <span className="w-20 text-right font-mono text-muted-foreground">
+                        {fmtDollarPrice(p.entry_price)}
+                      </span>
+                      <span className="w-20 text-right font-mono text-muted-foreground">
+                        {currentPrice
+                          ? fmtDollarPrice(currentPrice)
+                          : "--"}
+                      </span>
+                      <span
+                        className={cn(
+                          "w-16 text-right font-bold font-mono",
+                          pnl > 0
+                            ? "neon-green"
+                            : pnl < 0
+                            ? "neon-red"
+                            : "text-muted-foreground"
+                        )}
+                      >
+                        {pnl !== 0
+                          ? `${fmtPctSigned(pnl)}%`
+                          : "--"}
+                      </span>
+                      <span className="w-10 text-right text-[10px] text-muted-foreground">
+                        {p.leverage > 1 ? (
+                          <span className="neon-amber">{p.leverage}x</span>
+                        ) : (
+                          `${p.leverage}x`
+                        )}
+                      </span>
+                      <span className="w-20 text-[10px] text-muted-foreground truncate">
+                        {assetTypeLabel(p.asset_type)}
+                      </span>
+                      <span className="flex-1 flex items-center justify-end gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        {p.status !== "closed" && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditTarget(p);
+                                setFormOpen(true);
+                              }}
+                              className="p-1 rounded hover:bg-[rgba(0,240,255,0.08)] text-muted-foreground hover:text-[var(--neon-cyan)] transition-colors"
+                              title="Edit"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              onClick={() => setCloseTarget(p)}
+                              className="p-1 rounded hover:bg-[rgba(0,255,136,0.08)] text-muted-foreground hover:text-[var(--neon-green)] transition-colors"
+                              title="Close"
+                            >
+                              <TrendingDown className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                        {removeConfirm === p.id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => removePosition(p.id)}
+                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(255,51,102,0.15)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] hover:bg-[rgba(255,51,102,0.25)] transition-colors"
+                            >
+                              CONFIRM
+                            </button>
+                            <button
+                              onClick={() => setRemoveConfirm(null)}
+                              className="p-0.5 text-muted-foreground hover:text-foreground"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => {
-                              setEditTarget(p);
-                              setFormOpen(true);
-                            }}
-                            className="p-1 rounded hover:bg-[rgba(0,240,255,0.08)] text-muted-foreground hover:text-[var(--neon-cyan)] transition-colors"
-                            title="Edit"
+                            onClick={() => setRemoveConfirm(p.id)}
+                            className="p-1 rounded hover:bg-[rgba(255,51,102,0.08)] text-muted-foreground hover:text-[var(--neon-red)] transition-colors"
+                            title="Remove"
                           >
-                            <Pencil className="h-3 w-3" />
+                            <Trash2 className="h-3 w-3" />
                           </button>
-                          <button
-                            onClick={() => setCloseTarget(p)}
-                            className="p-1 rounded hover:bg-[rgba(0,255,136,0.08)] text-muted-foreground hover:text-[var(--neon-green)] transition-colors"
-                            title="Close"
-                          >
-                            <TrendingDown className="h-3 w-3" />
-                          </button>
-                        </>
-                      )}
-                      {removeConfirm === p.id ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => removePosition(p.id)}
-                            className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[rgba(255,51,102,0.15)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] hover:bg-[rgba(255,51,102,0.25)] transition-colors"
-                          >
-                            CONFIRM
-                          </button>
-                          <button
-                            onClick={() => setRemoveConfirm(null)}
-                            className="p-0.5 text-muted-foreground hover:text-foreground"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
+                        )}
+                      </span>
+                    </div>
+                    {/* Mobile card */}
+                    <div className="md:hidden p-3 rounded-lg bg-[rgba(0,240,255,0.02)] border border-[var(--border)] mb-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-foreground">{p.ticker}</span>
+                          <DirectionBadge dir={p.direction} />
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => setRemoveConfirm(p.id)}
-                          className="p-1 rounded hover:bg-[rgba(255,51,102,0.08)] text-muted-foreground hover:text-[var(--neon-red)] transition-colors"
-                          title="Remove"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      )}
-                    </span>
+                        {p.leverage > 1 ? (
+                          <span className="text-xs font-bold neon-amber">{p.leverage}x</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{p.leverage}x</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+                        <span>Entry: <span className="font-mono text-foreground">{fmtDollarPrice(p.entry_price)}</span></span>
+                        <span>{tab === "closed" ? "Exit" : "Current"}: <span className="font-mono text-foreground">{currentPrice ? fmtDollarPrice(currentPrice) : "--"}</span></span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] mb-2">
+                        <span className={cn("font-bold font-mono", pnl > 0 ? "neon-green" : pnl < 0 ? "neon-red" : "text-muted-foreground")}>
+                          P&L: {pnl !== 0 ? `${fmtPctSigned(pnl)}%` : "--"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">{assetTypeLabel(p.asset_type)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-2 border-t border-[var(--border)]">
+                        {p.status !== "closed" && (
+                          <>
+                            <button
+                              onClick={() => { setEditTarget(p); setFormOpen(true); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-bold text-muted-foreground hover:text-[var(--neon-cyan)] hover:bg-[rgba(0,240,255,0.08)] transition-colors min-h-[44px]"
+                            >
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button
+                              onClick={() => setCloseTarget(p)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-bold text-muted-foreground hover:text-[var(--neon-green)] hover:bg-[rgba(0,255,136,0.08)] transition-colors min-h-[44px]"
+                            >
+                              <TrendingDown className="h-3.5 w-3.5" /> Close
+                            </button>
+                          </>
+                        )}
+                        {removeConfirm === p.id ? (
+                          <div className="flex items-center gap-1 ml-auto">
+                            <button onClick={() => removePosition(p.id)} className="text-[10px] font-bold px-2 py-1.5 rounded bg-[rgba(255,51,102,0.15)] text-[var(--neon-red)] border border-[rgba(255,51,102,0.3)] min-h-[44px]">CONFIRM</button>
+                            <button onClick={() => setRemoveConfirm(null)} className="p-1.5 text-muted-foreground min-h-[44px]"><X className="h-3.5 w-3.5" /></button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setRemoveConfirm(p.id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded text-[10px] font-bold text-muted-foreground hover:text-[var(--neon-red)] hover:bg-[rgba(255,51,102,0.08)] transition-colors ml-auto min-h-[44px]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}

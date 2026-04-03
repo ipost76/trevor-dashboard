@@ -34,7 +34,7 @@ export default function GhostHQPanel() {
       <h1 className="text-lg font-bold tracking-[0.2em] uppercase neon-text shrink-0">Ghost Command Center</h1>
 
       {/* Tab bar */}
-      <div className="relative shrink-0">
+      <div className="relative shrink-0 sticky top-0 z-[19] bg-[var(--bg-deep,#0a0a0f)]">
         <div ref={scrollRef} className="flex gap-1 overflow-x-auto pb-1 border-b border-[rgba(0,240,255,0.1)] scrollbar-hide">
           {TABS.map(t => (
             <button
