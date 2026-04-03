@@ -566,3 +566,26 @@ sudo systemctl restart trevor-dashboard
 - Color coded: green ≥50%, amber 30-49%, red <30%
 - 24 time slots covering all hour+day combinations with trade history
 - Files: `src/app/api/time-slots/route.ts` (new), `src/app/trading/panels/TradesPanel.tsx`
+
+## Upgrade Sprint QA — 2026-04-03 (Prompt 10/10)
+
+### Test Results: ALL PASS
+- 33 features verified across 9 upgrade prompts
+- 0 regressions, 0 missing features
+- All primary routes: 200 (/ redirects 307 to /dashboard)
+- All tab params: 200 (10/10)
+- All API routes: 200 (7/7 including new routes)
+- All old route redirects: 200 after redirect (8/8)
+- Z-index stack: clean (10→19→20→50→60)
+- Intervals: 24 setInterval with 26 clearInterval (no leaks)
+- Mobile bottom padding: 80px (pb-20) + 90px dashboard (sufficient)
+- Build: passes, 0 type errors
+- trevor.service: untouched (11:11 AM ET timestamp preserved)
+
+### New API Routes Added During Sprint
+| Route | Purpose | Cache |
+|-------|---------|-------|
+| `/api/nav-badges` | Active trades, signals, reminders, filters, streak | 30s |
+| `/api/trade-stats` | Win/loss by ticker+direction, blocked combos | 60s |
+| `/api/entry-preflight` | Exposure, track record, filter blocks for entry modal | none |
+| `/api/time-slots` | Win rates by 4h bucket + day-of-week | 60s |
