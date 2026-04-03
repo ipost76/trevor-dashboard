@@ -148,7 +148,7 @@ function SidebarInner() {
   const activeTab = searchParams.get("tab");
   const [collapsed, setCollapsed] = useState(false);
   const [expandedZone, setExpandedZone] = useState<string | null>(null);
-  const [signalBadge, setSignalBadge] = useState(0);
+  const [navBadges, setNavBadges] = useState<{ activeTrades: number; recentSignals: number; overdueReminders: number }>({ activeTrades: 0, recentSignals: 0, overdueReminders: 0 });
   const [quickJump, setQuickJump] = useState<{ zoneId: string; x: number } | null>(null);
 
   const activeZoneId = getActiveZoneId(pathname);
@@ -163,26 +163,19 @@ function SidebarInner() {
     }
   }, [activeZoneId]);
 
-  // Poll for unread signal count
+  // Poll for nav badge counts
   useEffect(() => {
-    const fetchBadge = async () => {
+    const fetchBadges = async () => {
       try {
-        const res = await fetch("/api/signals/unread-count");
+        const res = await fetch("/api/nav-badges");
         const d = await res.json();
-        setSignalBadge(d.count || 0);
+        setNavBadges({ activeTrades: d.activeTrades || 0, recentSignals: d.recentSignals || 0, overdueReminders: d.overdueReminders || 0 });
       } catch { /* ignore */ }
     };
-    fetchBadge();
-    const iv = setInterval(fetchBadge, 60000);
+    fetchBadges();
+    const iv = setInterval(fetchBadges, 60000);
     return () => clearInterval(iv);
   }, []);
-
-  // Clear badge on signal/trade pages
-  useEffect(() => {
-    if (pathname === "/signals" || pathname === "/trades" || pathname === "/intelligence") {
-      setSignalBadge(0);
-    }
-  }, [pathname]);
 
   // Close quick-jump on outside tap
   useEffect(() => {
@@ -242,10 +235,14 @@ function SidebarInner() {
                 >
                   <span className="relative">
                     <Icon className={cn("h-4 w-4 shrink-0", isActive && "drop-shadow-[0_0_6px_rgba(0,255,136,0.5)]")} />
-                    {signalBadge > 0 && zone.id === "intelligence" && (
-                      <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-[#ff4444] text-white text-[9px] font-bold leading-none border-2 border-[var(--sidebar)]">
-                        {signalBadge}
-                      </span>
+                    {zone.id === "trading" && navBadges.activeTrades > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ff88" }} />
+                    )}
+                    {zone.id === "intelligence" && navBadges.recentSignals > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ffee" }} />
+                    )}
+                    {zone.id === "command" && navBadges.overdueReminders > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#ff3355" }} />
                     )}
                   </span>
                   {!collapsed && <span className="flex-1 truncate">{zone.label}</span>}
@@ -464,10 +461,14 @@ function SidebarInner() {
                 )}
                 <span className="relative">
                   <Icon className={cn("h-5 w-5", isActive && "drop-shadow-[0_0_6px_rgba(0,255,136,0.6)]")} />
-                  {signalBadge > 0 && zone.id === "intelligence" && (
-                    <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-[#ff4444] text-white text-[9px] font-bold leading-none border-2 border-[var(--sidebar)]">
-                      {signalBadge}
-                    </span>
+                  {zone.id === "trading" && navBadges.activeTrades > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ff88" }} />
+                  )}
+                  {zone.id === "intelligence" && navBadges.recentSignals > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ffee" }} />
+                  )}
+                  {zone.id === "command" && navBadges.overdueReminders > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#ff3355" }} />
                   )}
                 </span>
                 <span style={{

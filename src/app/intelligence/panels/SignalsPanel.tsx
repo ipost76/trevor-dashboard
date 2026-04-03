@@ -89,6 +89,7 @@ export default function SignalsPanel() {
   const [data, setData] = useState<SignalData | null>(null);
   const [dailyPnl, setDailyPnl] = useState<DailyPnl[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterCount, setFilterCount] = useState(0);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -109,6 +110,10 @@ export default function SignalsPanel() {
     const iv = setInterval(fetchAll, 30000);
     return () => clearInterval(iv);
   }, [fetchAll]);
+
+  useEffect(() => {
+    fetch("/api/nav-badges").then(r => r.json()).then(d => setFilterCount(d.filterCount || 0)).catch(() => {});
+  }, []);
 
   const summary = data?.summary ?? EMPTY_SUMMARY;
   const overall = data?.quality?.overall;
@@ -143,6 +148,11 @@ export default function SignalsPanel() {
           <Activity className="h-4 w-4 text-[var(--neon-cyan)]" />
           <h1 className="text-sm font-bold tracking-wider uppercase neon-text">Signals</h1>
           <span className="text-[10px] text-muted-foreground">Signal intelligence overview</span>
+          {filterCount > 0 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-[rgba(0,170,255,0.3)] bg-[rgba(0,170,255,0.08)] text-[#00aaff]">
+              🛡 {filterCount} filter{filterCount !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
         <button onClick={fetchAll} className="text-muted-foreground hover:text-foreground transition-colors">
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />

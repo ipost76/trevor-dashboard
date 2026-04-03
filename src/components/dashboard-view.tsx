@@ -97,6 +97,9 @@ export function DashboardView() {
   const [clock, setClock] = useState("");
   const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
   const [closeStatus, setCloseStatus] = useState<"idle" | "submitting" | "done">("idle");
+  const [filterCount, setFilterCount] = useState(0);
+  const [filters, setFilters] = useState<{ rule_type: string; ticker?: string; direction?: string; value?: string; reason?: string }[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
@@ -156,6 +159,14 @@ export function DashboardView() {
     tick();
     const iv = setInterval(tick, 1000);
     return () => clearInterval(iv);
+  }, []);
+
+  // Fetch filter rules
+  useEffect(() => {
+    fetch("/api/nav-badges").then(r => r.json()).then(d => {
+      setFilterCount(d.filterCount || 0);
+      setFilters(d.filters || []);
+    }).catch(() => {});
   }, []);
 
   const toggleKillSwitch = async () => {
@@ -282,6 +293,15 @@ export function DashboardView() {
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: C.textSecondary }}>
                 {health.signals?.today ?? 0} signals
               </span>
+              {filterCount > 0 && (
+                <button onClick={() => setShowFilters(!showFilters)} style={{
+                  display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 4,
+                  border: "1px solid rgba(0,170,255,0.3)", background: "rgba(0,170,255,0.08)", color: "#00aaff",
+                  fontFamily: "var(--font-mono)", fontSize: 10, cursor: "pointer", fontWeight: 600,
+                }}>
+                  🛡 {filterCount}
+                </button>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {health.autotrader_paused?.active && (
@@ -296,6 +316,16 @@ export function DashboardView() {
               )}
             </div>
           </div>
+          {showFilters && filters.length > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 8, padding: "8px 12px", fontSize: 10, fontFamily: "var(--font-mono)", color: C.textSecondary }}>
+              {filters.map((f, i) => (
+                <div key={i} style={{ padding: "3px 0", borderBottom: i < filters.length - 1 ? "1px solid rgba(0,255,136,0.06)" : "none" }}>
+                  {f.rule_type === "BLOCK_DIRECTION" ? `🚫 ${f.ticker} ${f.direction} blocked` : f.rule_type === "CONFIDENCE_FLOOR" ? `📊 Confidence floor: ${f.value}` : f.rule_type === "DIRECTION_THRESHOLD_BOOST" ? `📈 ${f.direction} threshold +${f.value}` : `${f.rule_type}: ${f.value}`}
+                  {f.reason && <span style={{ color: C.textTertiary, marginLeft: 6 }}>— {f.reason}</span>}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ─── 3. ACTIVE TRADES ─── */}
           <Link href="/trading?tab=trades" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.4s ease" }}>

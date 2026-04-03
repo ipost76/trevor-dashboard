@@ -67,6 +67,8 @@ export function LiveBoard() {
   const [enteringTrade, setEnteringTrade] = useState<string | null>(null);
   const [enterResult, setEnterResult] = useState<Record<string, "ok" | "fail">>({});
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [tradeStats, setTradeStats] = useState<Record<string, { wins: number; losses: number; trades: number; wr: number }>>({});
+  const [blockedCombos, setBlockedCombos] = useState<string[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -86,6 +88,14 @@ export function LiveBoard() {
     const iv = setInterval(fetchData, 60_000);
     return () => clearInterval(iv);
   }, [fetchData]);
+
+  // Fetch historical trade stats
+  useEffect(() => {
+    fetch("/api/trade-stats").then(r => r.json()).then(d => {
+      setTradeStats(d.stats || {});
+      setBlockedCombos(d.blocked || []);
+    }).catch(() => {});
+  }, []);
 
   const handleAdd = async () => {
     const t = newTicker.trim().toUpperCase();
@@ -316,36 +326,56 @@ export function LiveBoard() {
 
               <div className="border-t border-[#1a2332]" />
 
-              {/* Row 4: Insight line */}
-              <div className="text-[12px] font-mono" style={{ color: t.insight_line ? "#a0b0c0" : "#3d4f5f" }}>
-                📊 {t.insight_line || "No trade history yet"}
-              </div>
+              {/* Row 4: Historical win rate */}
+              {(() => {
+                const key = `${t.ticker}_${t.direction}`;
+                const stat = tradeStats[key];
+                if (stat) {
+                  const wrColor = stat.wr >= 55 ? "#00ff88" : stat.wr >= 40 ? "#ffaa00" : "#ff3355";
+                  return (
+                    <div className="text-[12px] font-mono" style={{ color: wrColor }}>
+                      📊 {t.ticker} {t.direction}: {stat.wins}W/{stat.losses}L ({stat.wr}% WR)
+                    </div>
+                  );
+                }
+                return (
+                  <div className="text-[12px] font-mono" style={{ color: t.insight_line ? "#a0b0c0" : "#3d4f5f" }}>
+                    📊 {t.insight_line || "No trade history"}
+                  </div>
+                );
+              })()}
 
               <div className="border-t border-[#1a2332]" />
 
-              {/* Row 5: ENTER button */}
-              <button
-                onClick={() => handleEnter(t)}
-                disabled={isEntering || !!enterState}
-                className={cn(
-                  "w-full py-2.5 min-h-[44px] font-mono font-bold text-sm tracking-wider rounded border transition-all duration-200",
-                  enterState === "ok"
-                    ? "bg-[var(--neon-green)] text-[#0a0a0f] border-[var(--neon-green)]"
+              {/* Row 5: ENTER button or BLOCKED badge */}
+              {blockedCombos.includes(`${t.ticker}_${t.direction}`) ? (
+                <div className="w-full py-2.5 min-h-[44px] flex items-center justify-center font-mono font-bold text-sm tracking-wider rounded border border-[rgba(255,51,85,0.3)] bg-[rgba(255,51,85,0.06)] text-[var(--neon-red)]">
+                  🚫 BLOCKED
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleEnter(t)}
+                  disabled={isEntering || !!enterState}
+                  className={cn(
+                    "w-full py-2.5 min-h-[44px] font-mono font-bold text-sm tracking-wider rounded border transition-all duration-200",
+                    enterState === "ok"
+                      ? "bg-[var(--neon-green)] text-[#0a0a0f] border-[var(--neon-green)]"
+                      : enterState === "fail"
+                        ? "border-[var(--neon-red)] text-[var(--neon-red)] bg-transparent"
+                        : isEntering
+                          ? "border-[#3d6b4a] text-[#3d6b4a] bg-transparent cursor-wait"
+                          : "border-[var(--neon-green)] text-[var(--neon-green)] bg-transparent hover:bg-[var(--neon-green)] hover:text-[#0a0a0f]"
+                  )}
+                >
+                  {enterState === "ok"
+                    ? "✓ ENTERED"
                     : enterState === "fail"
-                      ? "border-[var(--neon-red)] text-[var(--neon-red)] bg-transparent"
+                      ? "✗ FAILED"
                       : isEntering
-                        ? "border-[#3d6b4a] text-[#3d6b4a] bg-transparent cursor-wait"
-                        : "border-[var(--neon-green)] text-[var(--neon-green)] bg-transparent hover:bg-[var(--neon-green)] hover:text-[#0a0a0f]"
-                )}
-              >
-                {enterState === "ok"
-                  ? "✓ ENTERED"
-                  : enterState === "fail"
-                    ? "✗ FAILED"
-                    : isEntering
-                      ? "ENTERING..."
-                      : "ENTER"}
-              </button>
+                        ? "ENTERING..."
+                        : "ENTER"}
+                </button>
+              )}
             </div>
           );
         })

@@ -462,3 +462,24 @@ sudo systemctl restart trevor-dashboard
 - Color-coded: green ≥50% WR, amber 40-49%, red <40%
 - Displays on BOTH Dashboard active trades and Trading → Active trade cards
 - Files: `src/app/trading/panels/TradesPanel.tsx`, `src/components/dashboard-view.tsx`
+
+### Signal Filter Status Indicator
+- New API route: `/api/nav-badges` — returns active trades, recent signals, overdue reminders, and filter rules (30s cache)
+- Dashboard: "🛡 4" filter badge in system status strip, expandable to show all filter rules with descriptions
+- Signals page: filter count badge in header next to title
+- Files: `src/app/api/nav-badges/route.ts` (new), `src/components/dashboard-view.tsx`, `src/app/intelligence/panels/SignalsPanel.tsx`
+
+### Navigation Notification Dots
+- Replaced broken `signalBadge` (was polling non-existent `/api/signals/unread-count`) with `navBadges` from `/api/nav-badges`
+- Green dot on Trading when active trades exist
+- Cyan dot on Intelligence when signal fired in last 30 min
+- Red dot on Command when reminder is overdue
+- 7px colored dots on both desktop sidebar and mobile bottom nav, polling every 60s
+- File: `src/components/sidebar.tsx`
+
+### Live Board Historical Win Rate
+- New API route: `/api/trade-stats` — returns win/loss by ticker+direction from trade_outcomes + blocked combos from signal_filter_rules (60s cache)
+- Each Live Board card shows "📊 BTC LONG: 3W/1L (75.0% WR)" with color coding (green ≥55%, amber 40-54%, red <40%)
+- Falls back to insight_line or "No trade history" for combos with no data
+- Blocked combos (ETH LONG, FARTCOIN LONG) show "🚫 BLOCKED" instead of ENTER button
+- Files: `src/app/api/trade-stats/route.ts` (new), `src/components/trades/live-board.tsx`
