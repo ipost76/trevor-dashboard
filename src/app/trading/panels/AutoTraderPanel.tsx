@@ -149,6 +149,33 @@ export default function AutoTraderPanel() {
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
+      {/* ── Stop Loss Critical Alert ── */}
+      {(() => {
+        const slExit = exits.find(e => e.reason === "stop_loss");
+        if (!slExit || slExit.win_rate > 0 || slExit.trades < 5) return null;
+        return (
+          <div className="rounded-lg p-4 mb-0" style={{ border: "2px solid #ff3355", background: "rgba(255,51,85,0.06)" }}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">🚨</span>
+              <span className="text-[13px] font-bold tracking-wider" style={{ color: "#ff3355", fontFamily: "var(--font-mono)" }}>STOP LOSS CRITICAL</span>
+            </div>
+            <div className="flex flex-wrap gap-4 mb-3">
+              <div>
+                <span className="text-lg font-bold font-mono" style={{ color: "#ff3355" }}>{slExit.win_rate}% WR</span>
+                <span className="text-[10px] text-muted-foreground ml-1">on {slExit.trades} stop exits</span>
+              </div>
+              <div>
+                <span className="text-lg font-bold font-mono" style={{ color: "#ff3355" }}>{fmtDollar(slExit.pnl)}</span>
+                <span className="text-[10px] text-muted-foreground ml-1">total losses</span>
+              </div>
+            </div>
+            <div className="text-[11px] text-muted-foreground leading-relaxed" style={{ borderLeft: "2px solid #ffaa00", paddingLeft: 10, fontFamily: "var(--font-mono)" }}>
+              Recommended: Widen stops or implement trailing stops. {Math.round(slExit.trades / (s.total_trades || 1) * 100)}% of trades hit stop loss — stops may be too tight or entries too late.
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Status Banner ── */}
       {retro?.status === "paused" ? (
         <div className="panel border-amber-500/50 bg-amber-500/5 p-4">

@@ -15,6 +15,7 @@ type Job = {
   description: string;
   handler: string;
   nextRun: string;
+  lastRun?: { timestamp: string; success: boolean } | null;
 };
 
 export function ScheduleManager() {
@@ -176,6 +177,11 @@ export function ScheduleManager() {
                     <Clock className="h-2.5 w-2.5" />
                     Next: <span className="text-[var(--neon-cyan)] font-bold">{j.nextRun}</span>
                   </span>
+                  {j.lastRun && (
+                    <span className={cn("flex items-center gap-1", j.lastRun.success ? "text-[#3d6b4a]" : "neon-red")}>
+                      Last: {j.lastRun.success ? "✓" : "✗"} <span className="text-foreground">{new Date(j.lastRun.timestamp).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

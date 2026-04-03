@@ -510,3 +510,28 @@ sudo systemctl restart trevor-dashboard
 - Active trade cards: freshness dot next to current price showing price age
 - FreshnessDot component: 5s interval update, red warning when > 2 min stale
 - Files: `src/components/dashboard-view.tsx`, `src/components/trades/live-board.tsx`, `src/app/trading/panels/TradesPanel.tsx`
+
+### Regime Data Backfill
+- Backfill script at `/home/trevor/trevor/scripts/backfill_regime.py` — matches trade_outcomes to trade_insights by ticker + timestamp
+- 7/54 trades backfilled (older trades predate regime tracking). TRENDING: 6 trades, 66.7% WR. VOLATILE: 1 trade.
+- `/api/analytics/regime-performance` route rewritten to query trade_outcomes.regime_at_entry (was querying active_trades, now correct)
+- New trades auto-populate regime_at_entry via trade entry flow
+- Files: `scripts/backfill_regime.py` (new), `src/app/api/analytics/regime-performance/route.ts`
+
+### Schedule Last Run Indicators
+- Each schedule card now shows "Last: ✓ Thu 09:25" or "Last: ✗ error" from journalctl
+- Parses last 500 lines of trevor.service logs from past 7 days, matches by handler keyword
+- Green for success, red for error/fail/traceback matches
+- Files: `src/app/api/schedule/route.ts`, `src/components/control/schedule-manager.tsx`
+
+### AutoTrader Stop Loss Critical Alert
+- Red-bordered alert card at TOP of AutoTrader page when stop_loss exits have 0% WR and >= 5 trades
+- Shows WR%, trade count, total losses, and recommendation text
+- Current data: 15 stop-loss exits, 0% WR, -$303.77 (58% of total trades)
+- File: `src/app/trading/panels/AutoTraderPanel.tsx`
+
+### Expectancy Improvement Projection
+- Green-bordered projection card below Expectancy calculation in Signals page
+- Shows: "IF FILTERED TO 45-54 CONFIDENCE: Projected WR 61.9%, Trades: 21 of 65"
+- Highlights that filtering to optimal confidence band would likely turn negative edge positive
+- File: `src/app/intelligence/panels/SignalsPanel.tsx`

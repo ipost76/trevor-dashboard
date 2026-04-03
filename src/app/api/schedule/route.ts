@@ -73,6 +73,29 @@ export async function GET() {
     const raw = fs.readFileSync(configPath, "utf-8");
     const config = JSON.parse(raw);
 
+    // Get last-run info from journalctl
+    const { execSync } = await import("child_process");
+    let logLines: string[] = [];
+    try {
+      const logRaw = execSync(
+        "journalctl -u trevor.service --since '7 days ago' --no-pager -o short-iso 2>/dev/null | tail -500",
+        { encoding: "utf-8", timeout: 5000 }
+      ).trim();
+      logLines = logRaw.split("\n").filter(Boolean);
+    } catch { /* ignore */ }
+
+    function getLastRun(handlerName: string): { timestamp: string; success: boolean } | null {
+      const keyword = handlerName.split(".").pop() || handlerName;
+      for (let i = logLines.length - 1; i >= 0; i--) {
+        if (logLines[i].toLowerCase().includes(keyword.toLowerCase())) {
+          const ts = logLines[i].slice(0, 19);
+          const isError = /error|fail|traceback|exception/i.test(logLines[i]);
+          return { timestamp: ts, success: !isError };
+        }
+      }
+      return null;
+    }
+
     const jobs = Object.entries(config.jobs as Record<string, CronJob>).map(([name, job]) => ({
       name,
       enabled: job.enabled,
@@ -80,6 +103,7 @@ export async function GET() {
       description: job.description,
       handler: job.handler,
       nextRun: job.schedule ? parseNextRun(job.schedule) : `~${job.interval_minutes}min`,
+      lastRun: getLastRun(job.handler),
     }));
 
     return NextResponse.json({ jobs });

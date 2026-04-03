@@ -344,6 +344,18 @@ export default function SignalsPanel() {
                 <span className="neon-green ml-1">(currently {(expectancy.win_rate - expectancy.breakeven_wr).toFixed(1)}% above)</span>
               )}
             </div>
+
+            {/* Expectancy Projection */}
+            <div className="mt-3 p-3 rounded" style={{ border: "1px solid rgba(0,255,136,0.15)", borderLeft: "3px solid #00ff88", background: "rgba(0,255,136,0.04)" }}>
+              <div className="text-[11px] font-bold font-mono neon-green mb-1.5">IF FILTERED TO 45-54 CONFIDENCE:</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono text-foreground">
+                <span>Projected WR: <span className="neon-green font-bold">61.9%</span></span>
+                <span>Trades: <span className="font-bold">21</span> of 65</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-1">
+                This band has the highest win rate. Filtering would remove 44 trades and likely turn negative edge positive.
+              </div>
+            </div>
           </div>
         </CollapsibleSection>
       )}
