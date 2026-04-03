@@ -84,7 +84,7 @@ function TabContainerInner({ tabs, defaultTab, paramName = "tab", pageTitle }: T
             data-active={tab.id === activeTab ? "true" : undefined}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "shrink-0 flex items-center px-5 text-[12px] font-medium uppercase tracking-[0.08em] transition-colors duration-150 whitespace-nowrap",
+              "shrink-0 flex items-center px-3.5 sm:px-5 text-[11px] sm:text-[12px] font-medium uppercase tracking-[0.08em] transition-colors duration-150 whitespace-nowrap",
               "border-b-2 min-h-[44px]",
               tab.id === activeTab
                 ? "text-[#00ff88] border-[#00ff88] font-semibold"

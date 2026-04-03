@@ -318,3 +318,50 @@ sudo systemctl restart trevor-dashboard
 ### Type Export Fix
 - `Position` type moved from `/holdings/page` → `/trading/panels/HoldingsPanel`
 - Updated imports in: allocation-chart.tsx, close-dialog.tsx, leverage-widget.tsx, position-form.tsx
+
+## Navigation Restructure — Prompt 3 of 3 (2026-04-03) — FINAL
+
+### Dashboard Reminders Widget
+- `src/components/RemindersWidget.tsx` — compact card showing next 3 upcoming reminders
+- Fetches `GET /api/reminders` (pending+active), auto-refresh every 60s
+- Time urgency: OVERDUE (red), < 1hr (amber), normal (muted)
+- "View All →" links to `/command?tab=reminders`
+- Added to dashboard-view.tsx after Signals & Quality section
+
+### Dead Code Cleanup
+- Dashboard links updated: `/trades` → `/trading?tab=trades`, `/signals` → `/intelligence?tab=signals`
+- All 10 old page dirs contain redirect files (intentional backwards compatibility)
+- Terminal code fully removed (confirmed clean)
+
+### Responsive Polish
+- TabContainer tab buttons: smaller padding on narrow screens (`px-3.5 sm:px-5`, `text-[11px] sm:text-[12px]`)
+
+## Navigation Restructure — Complete Summary
+
+### What Changed (3 prompts, 2026-04-02 to 2026-04-03)
+- 13 separate pages consolidated into 5 zones
+- Terminal page removed entirely (xterm.js, node-pty, ws uninstalled)
+- Mobile: 5-icon bottom nav (64px) + quick-jump long-press gesture (no More menu)
+- Desktop: 5 collapsible sidebar groups with sub-items
+- 3 mega-pages (Trading, Intelligence, Command) use TabContainer with URL-synced ?tab= params
+- Dashboard has Reminders widget
+- All old routes redirect (308 permanent)
+
+### New Routes
+| Route | Content |
+|-------|---------|
+| `/dashboard` | Dashboard with live stats + reminders widget |
+| `/trading` | Tabs: Trades (6 internal), Holdings (6 internal), AutoTrader |
+| `/intelligence` | Tabs: Signals, Research (4 internal), Training |
+| `/command` | Tabs: Control Panel (7 internal), Ghost HQ (4 internal), Reminders, Dev Tasks |
+| `/chat` | Chat with TREVOR AI |
+
+### Components Added
+| Component | Purpose |
+|-----------|---------|
+| `TabContainer.tsx` | Reusable URL-synced tab strip + panel renderer |
+| `RemindersWidget.tsx` | Dashboard widget for upcoming reminders |
+| `sidebar.tsx` (rewritten) | 5-zone collapsible nav + mobile bottom bar + quick-jump |
+
+### Old Routes (all redirect 308)
+/trades → /trading?tab=trades, /holdings → /trading?tab=holdings, /autotrader → /trading?tab=autotrader, /signals → /intelligence?tab=signals, /research → /intelligence?tab=research, /training → /intelligence?tab=training, /control → /command?tab=control, /ghost → /command?tab=ghosthq, /reminders → /command?tab=reminders, /dev-tasks → /command?tab=devtasks

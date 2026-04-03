@@ -6,6 +6,7 @@ import { safeFetch } from "@/lib/fetch";
 import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import Link from "next/link";
 import { DirectionBadge } from "@/components/ui/direction-badge";
+import RemindersWidget from "@/components/RemindersWidget";
 
 /* ── Types (unchanged) ── */
 type Signal = {
@@ -292,7 +293,7 @@ export function DashboardView() {
           </div>
 
           {/* ─── 3. ACTIVE TRADES ─── */}
-          <Link href="/trades" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.4s ease" }}>
+          <Link href="/trading?tab=trades" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.4s ease" }}>
             <div style={{
               background: C.surface, borderRadius: 10, padding: "14px 16px",
               border: hasActive ? `1px solid rgba(0,255,136,0.25)` : `1px solid ${C.borderSolid}`,
@@ -454,7 +455,7 @@ export function DashboardView() {
           )}
 
           {/* ─── 7. SIGNALS & QUALITY ─── */}
-          <Link href="/signals" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.65s ease" }}>
+          <Link href="/intelligence?tab=signals" style={{ textDecoration: "none", color: "inherit", animation: "slideUp 0.65s ease" }}>
             <div style={{
               background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10,
               padding: "14px 16px", cursor: "pointer",
@@ -472,6 +473,9 @@ export function DashboardView() {
               )}
             </div>
           </Link>
+
+          {/* ─── 8. REMINDERS ─── */}
+          <RemindersWidget />
 
         </div>
       </div>
