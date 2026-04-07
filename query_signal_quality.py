@@ -22,11 +22,31 @@ def get_trade_performance(conn):
     }
 
     try:
-        trades = conn.execute("""
-            SELECT pnl_pct, leveraged_pnl_pct, exit_reason, created_at
-            FROM trade_outcomes WHERE pnl_pct IS NOT NULL
-            ORDER BY created_at DESC
-        """).fetchall()
+        # Read P&L cutoff (same filter as get_data overall stats)
+        _perf_cutoff = None
+        try:
+            _cr2 = conn.execute(
+                "SELECT reset_at_unix FROM capital_resets "
+                "WHERE reset_type='pnl_stats' ORDER BY reset_at_unix DESC LIMIT 1"
+            ).fetchone()
+            if _cr2:
+                _perf_cutoff = int(_cr2["reset_at_unix"])
+        except Exception:
+            pass
+
+        if _perf_cutoff:
+            trades = conn.execute("""
+                SELECT pnl_pct, leveraged_pnl_pct, exit_reason, created_at
+                FROM trade_outcomes WHERE pnl_pct IS NOT NULL
+                  AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
+                ORDER BY created_at ASC
+            """, (_perf_cutoff,)).fetchall()
+        else:
+            trades = conn.execute("""
+                SELECT pnl_pct, leveraged_pnl_pct, exit_reason, created_at
+                FROM trade_outcomes WHERE pnl_pct IS NOT NULL
+                ORDER BY created_at ASC
+            """).fetchall()
 
         total = len(trades)
         if total == 0:
@@ -46,7 +66,11 @@ def get_trade_performance(conn):
         result["avg_loser_pct"] = round(sum(loss_pnls) / len(loss_pnls), 2) if loss_pnls else 0
         result["best_trade_pct"] = round(max(pnls), 2) if pnls else 0
         result["worst_trade_pct"] = round(min(pnls), 2) if pnls else 0
-        result["total_pnl_pct"] = round(sum(pnls), 2)
+        # Compound equity return (same fix as overall stats — do not SUM percentages)
+        _eq = 1.0
+        for _p in pnls:
+            _eq *= (1 + _p / 100)
+        result["total_pnl_pct"] = round((_eq - 1) * 100, 2)
 
         if loss_pnls and sum(loss_pnls) != 0:
             result["profit_factor"] = round(abs(sum(win_pnls)) / abs(sum(loss_pnls)), 2)
@@ -215,11 +239,18 @@ def get_data():
     for data in buckets.values():
         data["winRate"] = round(data["wins"] / data["trades"] * 100, 1) if data["trades"] > 0 else None
 
-    # Ticker performance
-    ticker_rows = conn.execute("""
-        SELECT ticker, pnl_pct, leveraged_pnl_pct
-        FROM trade_outcomes WHERE pnl_pct IS NOT NULL
-    """).fetchall()
+    # Ticker performance — filtered by same cutoff as overall stats
+    if pnl_cutoff_unix:
+        ticker_rows = conn.execute("""
+            SELECT ticker, pnl_pct, leveraged_pnl_pct
+            FROM trade_outcomes WHERE pnl_pct IS NOT NULL
+              AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
+        """, (pnl_cutoff_unix,)).fetchall()
+    else:
+        ticker_rows = conn.execute("""
+            SELECT ticker, pnl_pct, leveraged_pnl_pct
+            FROM trade_outcomes WHERE pnl_pct IS NOT NULL
+        """).fetchall()
 
     ticker_map = {}
     for t in ticker_rows:
