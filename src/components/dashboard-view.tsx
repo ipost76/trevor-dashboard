@@ -103,6 +103,13 @@ export function DashboardView() {
   const [streak, setStreak] = useState(0);
   const [lastPnl, setLastPnl] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(0);
+  const [pnlCutoffDate, setPnlCutoffDate] = useState<string | null>(null);
+  const [adminCapital, setAdminCapital] = useState(50);
+  const [adminNewCap, setAdminNewCap] = useState("");
+  const [adminModal, setAdminModal] = useState<"capital" | "pnl" | "history" | null>(null);
+  const [adminConfirmText, setAdminConfirmText] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminHistory, setAdminHistory] = useState<Array<{ id: number; reset_type: string; reset_at: string; old_value: string | null; new_value: string; notes: string | null }>>([]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
@@ -138,6 +145,12 @@ export function DashboardView() {
       chatHealth: false,
       auto: null,
     });
+    setPnlCutoffDate(sq?.overall?.pnlCutoffDate ?? null);
+    // Fetch admin state
+    try {
+      const adminState = await safeFetch<{ currentCapital?: number }>("/api/admin/current-state", { currentCapital: 50 });
+      if (adminState?.currentCapital) setAdminCapital(adminState.currentCapital);
+    } catch { /* non-critical */ }
     setLoading(false);
     setLastUpdated(Date.now());
   }, []);
@@ -427,6 +440,11 @@ export function DashboardView() {
             }}>
               {fmtPctSigned(data.totalPnl)}%
             </div>
+            {pnlCutoffDate && (
+              <div style={{ fontSize: 9, color: C.textTertiary, fontFamily: "var(--font-mono)", marginTop: -10, marginBottom: 8 }}>
+                Since: {new Date(pnlCutoffDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" })}
+              </div>
+            )}
 
             {/* W/L Counts */}
             <div style={{ display: "flex", justifyContent: "center", alignItems: "baseline", gap: 12, marginBottom: 10 }}>
@@ -571,8 +589,118 @@ export function DashboardView() {
           {/* ─── 8. REMINDERS ─── */}
           <RemindersWidget />
 
+          {/* ─── 9. ADMIN ─── */}
+          <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10, padding: 16, animation: "slideUp 0.5s ease" }}>
+            <SectionHeader icon="⚙️" label="ADMIN" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              {/* Capital */}
+              <div style={{ background: C.bg, borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: 0.5 }}>Capital</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-mono)", margin: "6px 0" }}>${adminCapital.toLocaleString("en-US", { minimumFractionDigits: 2 })}</div>
+                <button onClick={() => { setAdminModal("capital"); setAdminConfirmText(""); setAdminNewCap(String(adminCapital)); }}
+                  style={{ width: "100%", padding: "6px 0", fontSize: 10, fontFamily: "var(--font-mono)", background: C.redDim, color: C.red, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5 }}>
+                  Reset Capital
+                </button>
+              </div>
+              {/* P&L Stats */}
+              <div style={{ background: C.bg, borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: 0.5 }}>P&L Stats</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, fontFamily: "var(--font-mono)", margin: "6px 0" }}>
+                  {pnlCutoffDate ? `Since ${new Date(pnlCutoffDate).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" })}` : "All-time"}
+                </div>
+                <button onClick={() => { setAdminModal("pnl"); setAdminConfirmText(""); }}
+                  style={{ width: "100%", padding: "6px 0", fontSize: 10, fontFamily: "var(--font-mono)", background: C.redDim, color: C.red, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5 }}>
+                  Reset P&L Stats
+                </button>
+              </div>
+            </div>
+            <button onClick={async () => { setAdminModal("history"); const r = await safeFetch<{ resets: typeof adminHistory }>("/api/admin/reset-history", { resets: [] }); if (r?.resets) setAdminHistory(r.resets); }}
+              style={{ display: "block", margin: "10px auto 0", fontSize: 10, color: C.textSecondary, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-mono)", textDecoration: "underline" }}>
+              View Reset History →
+            </button>
+          </div>
+
         </div>
       </div>
+
+      {/* ─── ADMIN MODALS ─── */}
+      {adminModal && adminModal !== "history" && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setAdminModal(null)}>
+          <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 12, padding: 24, maxWidth: 400, width: "100%" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontFamily: "Orbitron, sans-serif", fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 12 }}>Confirm Reset</div>
+            <div style={{ fontSize: 12, color: C.textSecondary, fontFamily: "var(--font-mono)", marginBottom: 12, lineHeight: 1.6 }}>
+              {adminModal === "capital"
+                ? `Capital: $${adminCapital.toLocaleString()} → $${Number(adminNewCap || 0).toLocaleString()}`
+                : `P&L stats will rebase to today. Past trades hidden from stats.`}
+            </div>
+            {adminModal === "capital" && (
+              <input type="number" value={adminNewCap} onChange={(e) => setAdminNewCap(e.target.value)} min={1} step={0.01} placeholder="New capital ($)"
+                style={{ width: "100%", padding: "8px 10px", marginBottom: 10, background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+            )}
+            <div style={{ fontSize: 11, color: C.red, fontFamily: "var(--font-mono)", marginBottom: 10 }}>This cannot be undone. Trades are not affected.</div>
+            <input type="text" value={adminConfirmText} onChange={(e) => setAdminConfirmText(e.target.value)} placeholder='Type RESET to confirm'
+              style={{ width: "100%", padding: "8px 10px", marginBottom: 14, background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13, letterSpacing: 1 }} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setAdminModal(null)}
+                style={{ flex: 1, padding: "8px 0", fontSize: 11, fontFamily: "var(--font-mono)", background: "none", color: C.textSecondary, border: `1px solid ${C.borderSolid}`, borderRadius: 6, cursor: "pointer" }}>Cancel</button>
+              <button disabled={adminConfirmText !== "RESET" || adminLoading}
+                onClick={async () => {
+                  setAdminLoading(true);
+                  try {
+                    if (adminModal === "capital") {
+                      await fetch("/api/admin/reset-capital", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newCapital: Number(adminNewCap), confirmText: "RESET" }) });
+                      setAdminCapital(Number(adminNewCap));
+                    } else {
+                      await fetch("/api/admin/reset-pnl-stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmText: "RESET" }) });
+                    }
+                    setAdminModal(null);
+                    fetchDashboard();
+                  } catch { /* error handled by API */ }
+                  setAdminLoading(false);
+                }}
+                style={{ flex: 1, padding: "8px 0", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, background: adminConfirmText === "RESET" ? C.red : C.redDim, color: adminConfirmText === "RESET" ? "#fff" : `${C.red}66`, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: adminConfirmText === "RESET" ? "pointer" : "not-allowed", opacity: adminConfirmText === "RESET" ? 1 : 0.5 }}>
+                {adminLoading ? "..." : "Confirm Reset"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {adminModal === "history" && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={() => setAdminModal(null)}>
+          <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 12, padding: 24, maxWidth: 500, width: "100%", maxHeight: "70vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontFamily: "Orbitron, sans-serif", fontSize: 16, fontWeight: 700, color: C.textPrimary }}>Reset History</div>
+              <button onClick={() => setAdminModal(null)} style={{ background: "none", border: "none", color: C.textSecondary, cursor: "pointer", fontSize: 16 }}>✕</button>
+            </div>
+            {adminHistory.length === 0 ? (
+              <div style={{ fontSize: 12, color: C.textTertiary, fontFamily: "var(--font-mono)", textAlign: "center", padding: 20 }}>No resets recorded.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.borderSolid}` }}>
+                    <th style={{ textAlign: "left", padding: "6px 4px", color: C.textTertiary, fontWeight: 500 }}>Date (ET)</th>
+                    <th style={{ textAlign: "left", padding: "6px 4px", color: C.textTertiary, fontWeight: 500 }}>Type</th>
+                    <th style={{ textAlign: "left", padding: "6px 4px", color: C.textTertiary, fontWeight: 500 }}>Old → New</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminHistory.map((r) => (
+                    <tr key={r.id} style={{ borderBottom: `1px solid ${C.borderSolid}22` }}>
+                      <td style={{ padding: "6px 4px", color: C.textSecondary }}>{new Date(r.reset_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" })}</td>
+                      <td style={{ padding: "6px 4px", color: r.reset_type === "capital" ? C.cyan : C.yellow }}>{r.reset_type === "capital" ? "Capital" : "P&L Stats"}</td>
+                      <td style={{ padding: "6px 4px", color: C.textSecondary }}>{r.old_value || "—"} → {r.new_value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

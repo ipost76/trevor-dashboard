@@ -110,19 +110,54 @@ def get_data():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # Overall stats
-    trades = conn.execute("""
-        SELECT pnl_pct, leveraged_pnl_pct FROM trade_outcomes
-        WHERE pnl_pct IS NOT NULL
-    """).fetchall()
+    # P&L cutoff — read from capital_resets table (view-layer reset)
+    pnl_cutoff_date = None
+    pnl_cutoff_unix = None
+    try:
+        _cr = conn.execute(
+            "SELECT reset_at, reset_at_unix FROM capital_resets "
+            "WHERE reset_type='pnl_stats' ORDER BY reset_at_unix DESC LIMIT 1"
+        ).fetchone()
+        if _cr:
+            pnl_cutoff_date = _cr["reset_at"]
+            pnl_cutoff_unix = int(_cr["reset_at_unix"])
+    except Exception:
+        pass  # table may not exist yet — no filter
+
+    # Overall stats — filtered by cutoff if active, ordered by created_at ASC for compounding
+    if pnl_cutoff_unix:
+        trades = conn.execute("""
+            SELECT pnl_pct, leveraged_pnl_pct FROM trade_outcomes
+            WHERE pnl_pct IS NOT NULL AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
+            ORDER BY created_at ASC
+        """, (pnl_cutoff_unix,)).fetchall()
+    else:
+        trades = conn.execute("""
+            SELECT pnl_pct, leveraged_pnl_pct FROM trade_outcomes
+            WHERE pnl_pct IS NOT NULL
+            ORDER BY created_at ASC
+        """).fetchall()
 
     total = len(trades)
     wins = sum(1 for t in trades if (t['pnl_pct'] or 0) > 0)
     losses = sum(1 for t in trades if (t['pnl_pct'] or 0) <= 0)  # breakeven = loss
     pnls = [float(t['leveraged_pnl_pct'] or t['pnl_pct'] or 0) for t in trades]
-    total_pnl = sum(pnls)
+
+    # P&L aggregation: compound equity returns to get true total P&L %.
+    # DO NOT SUM individual pnl_pct values — that produces mathematically invalid results
+    # (a single trade cannot lose more than 100% un-leveraged, but SUM allows -200%+).
+    # Bug fixed 2026-04-07 — was previously displaying -146% on 58 trades.
+    # Compound: ((1+r1)(1+r2)...-1) × 100 — always > -100%, correct portfolio metric.
+    # Trades compounded in created_at ASC order (chronological).
+    equity = 1.0
+    for p in pnls:
+        equity *= (1 + p / 100)
+    total_pnl = round((equity - 1) * 100, 2) if pnls else 0
+
     win_pnls = [p for p in pnls if p > 0]
     loss_pnls = [p for p in pnls if p < 0]
+    # avgPnl is arithmetic mean of per-trade returns (NOT derived from compound total)
+    avg_pnl = round(sum(pnls) / total, 2) if total > 0 else 0
 
     avg_win = round(sum(win_pnls) / len(win_pnls), 2) if win_pnls else 0
     avg_loss_raw = round(sum(loss_pnls) / len(loss_pnls), 2) if loss_pnls else 0
@@ -136,8 +171,8 @@ def get_data():
         "wins": wins,
         "losses": losses,
         "winRate": round(wins / total * 100, 1) if total > 0 else 0,
-        "totalPnl": round(total_pnl, 2),
-        "avgPnl": round(total_pnl / total, 2) if total > 0 else 0,
+        "totalPnl": total_pnl,
+        "avgPnl": avg_pnl,
         "avgWin": avg_win,
         "avgLoss": avg_loss_raw,
         "profitFactor": round(abs(sum(win_pnls)) / abs(sum(loss_pnls)), 2)
@@ -146,6 +181,7 @@ def get_data():
         "expectancy": expectancy,
         "bestTrade": round(max(pnls), 2) if pnls else 0,
         "worstTrade": round(min(pnls), 2) if pnls else 0,
+        "pnlCutoffDate": pnl_cutoff_date,
     }
 
     # Calibration — use active_trades (has confidence + pnl_pct for closed trades)
