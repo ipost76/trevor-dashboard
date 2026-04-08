@@ -42,9 +42,18 @@ import sqlite3, json
 conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
 result = {}
 
-# XP
+# XP display cutoff — lifetime XP preserved in xp_ledger, only display filtered.
+# Future promotion/milestone logic MUST read lifetime XP, not this filtered value.
 try:
-    result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0])
+    _xp_cutoff = None
+    try:
+        _xc = conn.execute("SELECT reset_at_unix FROM capital_resets WHERE reset_type='xp' ORDER BY reset_at_unix DESC LIMIT 1").fetchone()
+        if _xc: _xp_cutoff = int(_xc[0])
+    except: pass
+    if _xp_cutoff:
+        result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger WHERE CAST(strftime('%s', created_at) AS INTEGER) >= ?", (_xp_cutoff,)).fetchone()[0])
+    else:
+        result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0])
 except: result["xp"] = 0
 
 # Trade insights (signals proxy)
@@ -128,6 +137,7 @@ print(json.dumps(result))
       else if (data.xp >= 400) data.rank = "Senior Analyst";
       else if (data.xp >= 150) data.rank = "Desk Analyst";
       else if (data.xp >= 50) data.rank = "Junior Analyst";
+      else data.rank = "Intern Quant";
     } catch { /* DB failed — graceful */ }
 
     // Log tail

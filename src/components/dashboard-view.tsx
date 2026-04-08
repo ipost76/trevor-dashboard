@@ -106,7 +106,7 @@ export function DashboardView() {
   const [pnlCutoffDate, setPnlCutoffDate] = useState<string | null>(null);
   const [adminCapital, setAdminCapital] = useState(50);
   const [adminNewCap, setAdminNewCap] = useState("");
-  const [adminModal, setAdminModal] = useState<"capital" | "pnl" | "history" | null>(null);
+  const [adminModal, setAdminModal] = useState<"capital" | "pnl" | "xp" | "history" | null>(null);
   const [adminConfirmText, setAdminConfirmText] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminHistory, setAdminHistory] = useState<Array<{ id: number; reset_type: string; reset_at: string; old_value: string | null; new_value: string; notes: string | null }>>([]);
@@ -592,7 +592,7 @@ export function DashboardView() {
           {/* ─── 9. ADMIN ─── */}
           <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10, padding: 16, animation: "slideUp 0.5s ease" }}>
             <SectionHeader icon="⚙️" label="ADMIN" />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginTop: 12 }}>
               {/* Capital */}
               <div style={{ background: C.bg, borderRadius: 8, padding: 12 }}>
                 <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: 0.5 }}>Capital</div>
@@ -612,6 +612,17 @@ export function DashboardView() {
                   style={{ width: "100%", padding: "6px 0", fontSize: 10, fontFamily: "var(--font-mono)", background: C.redDim, color: C.red, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5 }}>
                   Reset P&L Stats
                 </button>
+              </div>
+              {/* XP */}
+              <div style={{ background: C.bg, borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: 0.5 }}>XP</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: C.cyan, fontFamily: "var(--font-mono)", margin: "4px 0 2px" }}>{data.xp}</div>
+                <div style={{ fontSize: 9, color: C.textTertiary, fontFamily: "var(--font-mono)", marginBottom: 6 }}>{data.rank}</div>
+                <button onClick={() => { setAdminModal("xp"); setAdminConfirmText(""); }}
+                  style={{ width: "100%", padding: "6px 0", fontSize: 10, fontFamily: "var(--font-mono)", background: C.redDim, color: C.red, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: "pointer", fontWeight: 600, letterSpacing: 0.5 }}>
+                  Reset XP
+                </button>
+                <div style={{ fontSize: 8, color: C.textTertiary, fontFamily: "var(--font-mono)", marginTop: 4, textAlign: "center" }}>Lifetime XP preserved</div>
               </div>
             </div>
             <button onClick={async () => { setAdminModal("history"); const r = await safeFetch<{ resets: typeof adminHistory }>("/api/admin/reset-history", { resets: [] }); if (r?.resets) setAdminHistory(r.resets); }}
@@ -633,6 +644,8 @@ export function DashboardView() {
             <div style={{ fontSize: 12, color: C.textSecondary, fontFamily: "var(--font-mono)", marginBottom: 12, lineHeight: 1.6 }}>
               {adminModal === "capital"
                 ? `Capital: $${adminCapital.toLocaleString()} → $${Number(adminNewCap || 0).toLocaleString()}`
+                : adminModal === "xp"
+                ? `Displayed XP will reset to 0. Rank will show Intern Quant. Lifetime XP is preserved.`
                 : `P&L stats will rebase to today. Past trades hidden from stats.`}
             </div>
             {adminModal === "capital" && (
@@ -652,6 +665,8 @@ export function DashboardView() {
                     if (adminModal === "capital") {
                       await fetch("/api/admin/reset-capital", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newCapital: Number(adminNewCap), confirmText: "RESET" }) });
                       setAdminCapital(Number(adminNewCap));
+                    } else if (adminModal === "xp") {
+                      await fetch("/api/admin/reset-xp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmText: "RESET" }) });
                     } else {
                       await fetch("/api/admin/reset-pnl-stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmText: "RESET" }) });
                     }
