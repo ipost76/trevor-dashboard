@@ -24,6 +24,13 @@ type LiveTicker = {
   cg_oi_change_pct: number | null;
   cg_liq_magnet: string | null;
   cg_adjustment: number;
+  lev_recommended: number | null;
+  lev_vol_tier: string | null;
+  lev_atr_percentile: number | null;
+  mtf_h1_trend: string | null;
+  mtf_h4_trend: string | null;
+  mtf_alignment: string | null;
+  mtf_adjustment: number;
 };
 
 function scoreColor(v: number): string {
@@ -48,6 +55,35 @@ function dirColor(d: string) {
   if (d === "LONG") return "var(--neon-green)";
   if (d === "SHORT") return "var(--neon-red)";
   return "#8b9bb4";
+}
+
+function volTierColor(tier: string | null): string {
+  if (!tier) return "#8b9bb4";
+  if (tier === "CALM") return "#00ff88";
+  if (tier === "NORMAL") return "#ffaa00";
+  if (tier === "HIGH") return "#ff8800";
+  return "#ff3355"; // EXTREME
+}
+
+function alignmentColor(align: string | null): string {
+  if (!align) return "#8b9bb4";
+  if (align === "FULL_ALIGNED") return "#00ff88";
+  if (align === "PARTIAL") return "#ffaa00";
+  if (align === "NEUTRAL") return "#8b9bb4";
+  if (align === "CONFLICT") return "#ff8800";
+  return "#ff3355"; // FULL_CONFLICT
+}
+
+function alignmentLabel(align: string | null): string {
+  if (!align) return "—";
+  const labels: Record<string, string> = {
+    FULL_ALIGNED: "ALIGNED",
+    PARTIAL: "PARTIAL",
+    NEUTRAL: "NEUTRAL",
+    CONFLICT: "CONFLICT",
+    FULL_CONFLICT: "OPPOSED",
+  };
+  return labels[align] || align;
 }
 
 function relativeTime(iso: string | null): string {
@@ -363,6 +399,44 @@ export function LiveBoard() {
                   {t.cg_adjustment !== 0 && (
                     <div className="text-[10px] font-mono" style={{ color: t.cg_adjustment > 0 ? "#00ff88" : "#ff4444" }}>
                       🔮 CG: {t.cg_adjustment > 0 ? "+" : ""}{t.cg_adjustment} derivatives signal
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Row 3.6: Leverage Engine + MTF Alignment */}
+              {(t.lev_recommended !== null || (t.mtf_alignment && t.mtf_alignment !== "NEUTRAL")) && (
+                <>
+                  <div className="border-t border-[#1a2332]" />
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] font-mono">
+                    {t.lev_recommended !== null && (
+                      <span>
+                        <span className="text-muted-foreground">LEV:</span>{" "}
+                        <span style={{ color: volTierColor(t.lev_vol_tier) }}>
+                          {t.lev_recommended.toFixed(1)}x
+                        </span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {" "}{t.lev_vol_tier} (p{t.lev_atr_percentile?.toFixed(0)})
+                        </span>
+                      </span>
+                    )}
+                    {t.mtf_alignment && t.mtf_alignment !== "NEUTRAL" && (
+                      <span>
+                        <span className="text-muted-foreground">MTF:</span>{" "}
+                        <span style={{ color: alignmentColor(t.mtf_alignment) }}>
+                          {alignmentLabel(t.mtf_alignment)}
+                        </span>
+                        {t.mtf_adjustment !== 0 && (
+                          <span style={{ color: t.mtf_adjustment > 0 ? "#00ff88" : "#ff4444" }}>
+                            {" "}{t.mtf_adjustment > 0 ? "+" : ""}{t.mtf_adjustment}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  {(t.mtf_h1_trend || t.mtf_h4_trend) && (t.mtf_alignment && t.mtf_alignment !== "NEUTRAL") && (
+                    <div className="text-[10px] font-mono text-muted-foreground">
+                      1h: {t.mtf_h1_trend || "—"} · 4h: {t.mtf_h4_trend || "—"}
                     </div>
                   )}
                 </>
