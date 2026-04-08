@@ -32,6 +32,7 @@ def read_board():
         "SELECT lb.ticker, lb.direction, lb.confidence, lb.regime, lb.current_price, "
         "lb.momentum_score, lb.trend_score, lb.volume_score, lb.volatility_score, "
         "lb.microstructure_score, lb.insight_line, lb.updated_at, "
+        "lb.cg_funding_divergence, lb.cg_oi_change_pct, lb.cg_liq_magnet, lb.cg_adjustment, "
         "at.live_confidence, at.live_confidence_updated_at, at.live_groups_passing, "
         "at.live_regime, at.live_mom_score, at.live_trd_score, at.live_vol_score, "
         "at.live_vlt_score, at.live_mic_score, at.direction AS trade_direction "

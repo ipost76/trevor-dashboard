@@ -20,6 +20,10 @@ type LiveTicker = {
   microstructure_score: number;
   insight_line: string;
   updated_at: string;
+  cg_funding_divergence: number | null;
+  cg_oi_change_pct: number | null;
+  cg_liq_magnet: string | null;
+  cg_adjustment: number;
 };
 
 function scoreColor(v: number): string {
@@ -331,6 +335,38 @@ export function LiveBoard() {
                   </span>
                 ))}
               </div>
+
+              {/* Row 3.5: CoinGlass Derivatives Intel (BTC/ETH/SOL only) */}
+              {(t.cg_funding_divergence !== null || t.cg_oi_change_pct !== null || t.cg_liq_magnet) && (
+                <>
+                  <div className="border-t border-[#1a2332]" />
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[12px] font-mono">
+                    <span>
+                      <span className="text-muted-foreground">FR:</span>{" "}
+                      <span style={{ color: (t.cg_funding_divergence || 0) > 0.02 ? "#ff4444" : (t.cg_funding_divergence || 0) < -0.02 ? "#00ff88" : "#8b9bb4" }}>
+                        {t.cg_funding_divergence !== null ? `${(t.cg_funding_divergence * 100).toFixed(2)}%` : "—"}
+                      </span>
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">OI:</span>{" "}
+                      <span style={{ color: (t.cg_oi_change_pct || 0) > 0 ? "#00ff88" : (t.cg_oi_change_pct || 0) < 0 ? "#ff4444" : "#8b9bb4" }}>
+                        {t.cg_oi_change_pct !== null ? `${t.cg_oi_change_pct > 0 ? "+" : ""}${t.cg_oi_change_pct.toFixed(1)}%` : "—"}
+                      </span>
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">LIQ:</span>{" "}
+                      <span style={{ color: t.cg_liq_magnet === "UP" ? "#00ff88" : t.cg_liq_magnet === "DOWN" ? "#ff4444" : "#8b9bb4" }}>
+                        {t.cg_liq_magnet === "UP" ? "↑" : t.cg_liq_magnet === "DOWN" ? "↓" : "—"}
+                      </span>
+                    </span>
+                  </div>
+                  {t.cg_adjustment !== 0 && (
+                    <div className="text-[10px] font-mono" style={{ color: t.cg_adjustment > 0 ? "#00ff88" : "#ff4444" }}>
+                      🔮 CG: {t.cg_adjustment > 0 ? "+" : ""}{t.cg_adjustment} derivatives signal
+                    </div>
+                  )}
+                </>
+              )}
 
               <div className="border-t border-[#1a2332]" />
 
