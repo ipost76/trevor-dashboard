@@ -31,6 +31,10 @@ type LiveTicker = {
   mtf_h4_trend: string | null;
   mtf_alignment: string | null;
   mtf_adjustment: number;
+  alt_social_galaxy: number | null;
+  alt_whale_bias: string | null;
+  alt_macro_regime: string | null;
+  alt_adjustment: number;
 };
 
 function scoreColor(v: number): string {
@@ -437,6 +441,44 @@ export function LiveBoard() {
                   {(t.mtf_h1_trend || t.mtf_h4_trend) && (t.mtf_alignment && t.mtf_alignment !== "NEUTRAL") && (
                     <div className="text-[10px] font-mono text-muted-foreground">
                       1h: {t.mtf_h1_trend || "—"} · 4h: {t.mtf_h4_trend || "—"}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Row 3.8: Alt Data Intel (social, whale, macro) */}
+              {(t.alt_social_galaxy !== null || t.alt_whale_bias || t.alt_macro_regime || t.alt_adjustment !== 0) && (
+                <>
+                  <div className="border-t border-[#1a2332]" />
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[12px] font-mono">
+                    {t.alt_social_galaxy !== null && (
+                      <span>
+                        <span className="text-muted-foreground">SOC:</span>{" "}
+                        <span style={{ color: t.alt_social_galaxy > 70 ? "#00ff88" : t.alt_social_galaxy < 30 ? "#ff4444" : "#8b9bb4" }}>
+                          {t.alt_social_galaxy.toFixed(0)}
+                        </span>
+                      </span>
+                    )}
+                    {t.alt_whale_bias && t.alt_whale_bias !== "NEUTRAL" && (
+                      <span>
+                        <span className="text-muted-foreground">WHL:</span>{" "}
+                        <span style={{ color: t.alt_whale_bias === "LONG" ? "#00ff88" : "#ff4444" }}>
+                          {t.alt_whale_bias === "LONG" ? "↑" : "↓"}
+                        </span>
+                      </span>
+                    )}
+                    {t.alt_macro_regime && t.alt_macro_regime !== "NEUTRAL" && (
+                      <span>
+                        <span className="text-muted-foreground">MCR:</span>{" "}
+                        <span style={{ color: t.alt_macro_regime === "BULLISH" ? "#00ff88" : t.alt_macro_regime === "BEARISH" ? "#ff4444" : "#8b9bb4" }}>
+                          {t.alt_macro_regime}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  {t.alt_adjustment !== 0 && (
+                    <div className="text-[10px] font-mono" style={{ color: t.alt_adjustment > 0 ? "#00ff88" : "#ff4444" }}>
+                      🌐 Intel: {t.alt_adjustment > 0 ? "+" : ""}{t.alt_adjustment} alt data signal
                     </div>
                   )}
                 </>
