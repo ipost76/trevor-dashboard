@@ -77,6 +77,10 @@
 | training_sentiment | 100,870 | Sentiment data |
 | cost_tracking | 139 | API costs by day |
 | swarm_analyses | 0 | Research analyses (empty) |
+| quality_patterns | 72 | Mined patterns (2026-04-11) w/ `source_paper`/`source_backfill`/`source_live` counts + `source_bias_flag` |
+
+### Signal Quality Intelligence — Source Bias (2026-04-11)
+`quality_patterns` stores every mined pattern alongside a source distribution. `SOURCE_BIAS_THRESHOLD = 0.80` lives in `trevor/quality_intelligence.py:80` — any source ≥80% of total tags the row `BACKFILL_HEAVY (N%)` / `PAPER_HEAVY (N%)` / `LIVE_HEAVY (N%)`. Current state: all 72 patterns are `BACKFILL_HEAVY (~93%)` because the training universe is 867 backfill / 60 live / 2 paper. Bias fades as live data accumulates; the Hub `QualityPanel` surfaces a prominent amber banner on the Hero Status Card whenever any source crosses the 80% threshold.
 
 ### Critical Gotchas
 1. **`trade_insights` has NO `direction` column** — queries referencing it return 0 rows. Default to "LONG" in display.

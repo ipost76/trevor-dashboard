@@ -219,6 +219,21 @@ export default function QualityPanel() {
     ? summary.last_discovery.substring(0, 16).replace("T", " ")
     : "never";
 
+  // Training-bias banner: compute dominant source if any crosses SOURCE_BIAS_THRESHOLD (0.80).
+  // Matches trevor/quality_intelligence.py:compute_source_bias() — kept in sync manually.
+  const _sc = summary.source_counts;
+  const _scTotal = _sc?.total || 0;
+  let biasFlag: string | null = null;
+  let biasPct = 0;
+  if (_scTotal > 0) {
+    const _bf = (_sc.backfill || 0) / _scTotal;
+    const _pp = (_sc.paper || 0) / _scTotal;
+    const _lv = (_sc.live || 0) / _scTotal;
+    if (_bf >= 0.80) { biasFlag = "BACKFILL_HEAVY"; biasPct = _bf; }
+    else if (_pp >= 0.80) { biasFlag = "PAPER_HEAVY"; biasPct = _pp; }
+    else if (_lv >= 0.80) { biasFlag = "LIVE_HEAVY"; biasPct = _lv; }
+  }
+
   return (
     <div className="space-y-4 p-4">
       {/* ── Hero Status Card ── */}
@@ -235,6 +250,19 @@ export default function QualityPanel() {
             Refresh
           </button>
         </div>
+        {biasFlag && (
+          <div className="mb-3 bg-[#ffa502]/10 border border-[#ffa502]/50 rounded p-2.5 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#ffa502] flex-shrink-0 mt-0.5" />
+            <div className="flex-1 text-[11px] leading-tight">
+              <div className="text-[#ffa502] font-bold uppercase tracking-wider" style={{ fontFamily: "Orbitron" }}>
+                ⚠ Training Bias: {biasFlag} ({Math.round(biasPct * 100)}%)
+              </div>
+              <div className="text-[#ffa502]/80 mt-1">
+                All {summary.total} patterns inherit this source distribution (paper {_sc.paper} · backfill {_sc.backfill} · live {_sc.live}). Threshold ≥80%. Bias fades as live data accumulates.
+              </div>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <div className="text-[10px] uppercase text-[#8888a0]">Patterns</div>
