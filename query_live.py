@@ -18,28 +18,41 @@ try:
         result["xp"] = 0
 
     # Trade insights count
+    # Aggressive-mode exclusion: NULL-safe filter excludes aggressive-tagged signals from
+    # quality metrics (see !aggressive stats for tagged-only breakdown).
     try:
-        result["total"] = conn.execute("SELECT COUNT(*) FROM trade_insights").fetchone()[0]
+        result["total"] = conn.execute(
+            "SELECT COUNT(*) FROM trade_insights "
+            "WHERE (aggressive_mode = 0 OR aggressive_mode IS NULL)"
+        ).fetchone()[0]
     except Exception:
         result["total"] = 0
 
-    # Trade outcomes
+    # Trade outcomes — LEFT JOIN trade_insights on insight_id to exclude aggressive
+    # KNOWN LIMITATION: trade_outcomes.insight_id is currently NULL for existing rows
+    # (FK never populated by the signal-taking pipeline). JOIN is a no-op today but
+    # future-proof once insight_id population lands.
     try:
         rows = conn.execute(
             "SELECT COUNT(*), "
-            "SUM(CASE WHEN exit_reason='WIN' THEN 1 ELSE 0 END), "
-            "SUM(CASE WHEN exit_reason='LOSS' THEN 1 ELSE 0 END) "
-            "FROM trade_outcomes WHERE excluded = 0 OR excluded IS NULL"
+            "SUM(CASE WHEN too.exit_reason='WIN' THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN too.exit_reason='LOSS' THEN 1 ELSE 0 END) "
+            "FROM trade_outcomes too "
+            "LEFT JOIN trade_insights ti ON too.insight_id = ti.id "
+            "WHERE (too.excluded = 0 OR too.excluded IS NULL) "
+            "  AND COALESCE(ti.aggressive_mode, 0) = 0"
         ).fetchone()
         result["outcomes"] = {"decided": rows[0] or 0, "wins": int(rows[1] or 0), "losses": int(rows[2] or 0)}
     except Exception:
         result["outcomes"] = {"decided": 0, "wins": 0, "losses": 0}
 
-    # Recent trade insights
+    # Recent trade insights (aggressive-mode signals excluded from display for consistency
+    # with the "total" count above; use the live-board ⚡ badge or !aggressive stats to view them)
     try:
         rows = conn.execute(
             "SELECT id, ticker, signal_type, confidence, entry_price, target_price, "
             "stop_price, outcome, created_at FROM trade_insights "
+            "WHERE (aggressive_mode = 0 OR aggressive_mode IS NULL) "
             "ORDER BY created_at DESC LIMIT 15"
         ).fetchall()
         result["recent"] = [{

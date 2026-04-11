@@ -56,34 +56,46 @@ def _query_autotrader(sql, params=()):
 
 
 def get_trade_performance():
+    # Aggressive-mode exclusion: LEFT JOIN on insight_id + COALESCE(ti.aggressive_mode,0)=0.
+    # NOTE: trade_outcomes.insight_id is currently NULL for all existing rows — filter is
+    # a no-op today but future-proof. NULL treated as non-aggressive (correct default).
     return _query_trevor("""
         SELECT COUNT(*) as total,
-            SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN pnl_pct < 0 THEN 1 ELSE 0 END) as losses,
-            ROUND(100.0 * SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate,
-            ROUND(AVG(CASE WHEN pnl_pct > 0 THEN pnl_pct END), 2) as avg_winner,
-            ROUND(AVG(CASE WHEN pnl_pct < 0 THEN pnl_pct END), 2) as avg_loser,
-            ROUND(AVG(pnl_pct), 2) as avg_pnl,
-            ROUND(MIN(pnl_pct), 2) as worst_trade,
-            ROUND(MAX(pnl_pct), 2) as best_trade
-        FROM trade_outcomes
+            SUM(CASE WHEN too.pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN too.pnl_pct < 0 THEN 1 ELSE 0 END) as losses,
+            ROUND(100.0 * SUM(CASE WHEN too.pnl_pct > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate,
+            ROUND(AVG(CASE WHEN too.pnl_pct > 0 THEN too.pnl_pct END), 2) as avg_winner,
+            ROUND(AVG(CASE WHEN too.pnl_pct < 0 THEN too.pnl_pct END), 2) as avg_loser,
+            ROUND(AVG(too.pnl_pct), 2) as avg_pnl,
+            ROUND(MIN(too.pnl_pct), 2) as worst_trade,
+            ROUND(MAX(too.pnl_pct), 2) as best_trade
+        FROM trade_outcomes too
+        LEFT JOIN trade_insights ti ON too.insight_id = ti.id
+        WHERE COALESCE(ti.aggressive_mode, 0) = 0
     """)
 
 
 def get_ticker_breakdown():
+    # Aggressive-mode exclusion via LEFT JOIN (same pattern as get_trade_performance)
     return _query_trevor("""
-        SELECT ticker, COUNT(*) as total,
-            SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
-            ROUND(100.0 * SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate,
-            ROUND(AVG(pnl_pct), 2) as avg_pnl
-        FROM trade_outcomes GROUP BY ticker ORDER BY total DESC
+        SELECT too.ticker, COUNT(*) as total,
+            SUM(CASE WHEN too.pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
+            ROUND(100.0 * SUM(CASE WHEN too.pnl_pct > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) as win_rate,
+            ROUND(AVG(too.pnl_pct), 2) as avg_pnl
+        FROM trade_outcomes too
+        LEFT JOIN trade_insights ti ON too.insight_id = ti.id
+        WHERE COALESCE(ti.aggressive_mode, 0) = 0
+        GROUP BY too.ticker ORDER BY total DESC
     """)
 
 
 def get_recent_signals(limit=10):
+    # Direct NULL-safe filter — excludes aggressive-tagged signals from chat context
     return _query_trevor("""
         SELECT ticker, signal_type as direction, confidence, entry_price, created_at
-        FROM trade_insights ORDER BY created_at DESC LIMIT ?
+        FROM trade_insights
+        WHERE (aggressive_mode = 0 OR aggressive_mode IS NULL)
+        ORDER BY created_at DESC LIMIT ?
     """, (limit,))
 
 

@@ -1,11 +1,30 @@
 #!/usr/bin/env python3
-"""query_signal_quality.py — Hub API helper for signal quality data."""
+"""query_signal_quality.py — Hub API helper for signal quality data.
+
+Aggressive-mode exclusion (2026-04-11): `trade_outcomes` rows sourced from
+aggressive-mode signals are excluded from quality metrics by default via
+LEFT JOIN to `trade_insights` on `insight_id` + `COALESCE(ti.aggressive_mode, 0) = 0`.
+
+KNOWN LIMITATION: `trade_outcomes.insight_id` is currently NULL for all 60
+existing rows (FK was defined but never populated). The LEFT JOIN filter is
+a no-op today but future-proof — once the signal-taking pipeline populates
+`insight_id` on active_trade creation, this filter will correctly exclude
+aggressive-tagged outcomes. The `active_trades` calibration bucket query
+(line ~220) has NO link to trade_insights at all and remains unfiltered —
+documented pollution source during aggressive sessions. Use `!aggressive stats`
+in Discord for tagged-only breakdown.
+"""
 
 import sys
 import json
 import sqlite3
 
 DB_PATH = "/home/trevor/trevor/trevor.db"
+
+# NULL-safe aggressive filter for LEFT JOIN on insight_id
+# (NULL → COALESCE to 0 → passes filter as non-aggressive)
+_AGG_JOIN = "LEFT JOIN trade_insights ti ON trade_outcomes.insight_id = ti.id"
+_AGG_PRED = "COALESCE(ti.aggressive_mode, 0) = 0"
 
 
 def get_trade_performance(conn):
@@ -35,17 +54,23 @@ def get_trade_performance(conn):
             pass
 
         if _perf_cutoff:
-            trades = conn.execute("""
-                SELECT pnl_pct, leveraged_pnl_pct, exit_reason, created_at
-                FROM trade_outcomes WHERE pnl_pct IS NOT NULL
-                  AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
-                ORDER BY created_at ASC
+            trades = conn.execute(f"""
+                SELECT trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct, trade_outcomes.exit_reason, trade_outcomes.created_at
+                FROM trade_outcomes
+                {_AGG_JOIN}
+                WHERE trade_outcomes.pnl_pct IS NOT NULL
+                  AND CAST(strftime('%s', trade_outcomes.created_at) AS INTEGER) >= ?
+                  AND {_AGG_PRED}
+                ORDER BY trade_outcomes.created_at ASC
             """, (_perf_cutoff,)).fetchall()
         else:
-            trades = conn.execute("""
-                SELECT pnl_pct, leveraged_pnl_pct, exit_reason, created_at
-                FROM trade_outcomes WHERE pnl_pct IS NOT NULL
-                ORDER BY created_at ASC
+            trades = conn.execute(f"""
+                SELECT trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct, trade_outcomes.exit_reason, trade_outcomes.created_at
+                FROM trade_outcomes
+                {_AGG_JOIN}
+                WHERE trade_outcomes.pnl_pct IS NOT NULL
+                  AND {_AGG_PRED}
+                ORDER BY trade_outcomes.created_at ASC
             """).fetchall()
 
         total = len(trades)
@@ -150,16 +175,23 @@ def get_data():
 
     # Overall stats — filtered by cutoff if active, ordered by created_at ASC for compounding
     if pnl_cutoff_unix:
-        trades = conn.execute("""
-            SELECT pnl_pct, leveraged_pnl_pct FROM trade_outcomes
-            WHERE pnl_pct IS NOT NULL AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
-            ORDER BY created_at ASC
+        trades = conn.execute(f"""
+            SELECT trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct
+            FROM trade_outcomes
+            {_AGG_JOIN}
+            WHERE trade_outcomes.pnl_pct IS NOT NULL
+              AND CAST(strftime('%s', trade_outcomes.created_at) AS INTEGER) >= ?
+              AND {_AGG_PRED}
+            ORDER BY trade_outcomes.created_at ASC
         """, (pnl_cutoff_unix,)).fetchall()
     else:
-        trades = conn.execute("""
-            SELECT pnl_pct, leveraged_pnl_pct FROM trade_outcomes
-            WHERE pnl_pct IS NOT NULL
-            ORDER BY created_at ASC
+        trades = conn.execute(f"""
+            SELECT trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct
+            FROM trade_outcomes
+            {_AGG_JOIN}
+            WHERE trade_outcomes.pnl_pct IS NOT NULL
+              AND {_AGG_PRED}
+            ORDER BY trade_outcomes.created_at ASC
         """).fetchall()
 
     total = len(trades)
@@ -241,15 +273,21 @@ def get_data():
 
     # Ticker performance — filtered by same cutoff as overall stats
     if pnl_cutoff_unix:
-        ticker_rows = conn.execute("""
-            SELECT ticker, pnl_pct, leveraged_pnl_pct
-            FROM trade_outcomes WHERE pnl_pct IS NOT NULL
-              AND CAST(strftime('%s', created_at) AS INTEGER) >= ?
+        ticker_rows = conn.execute(f"""
+            SELECT trade_outcomes.ticker, trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct
+            FROM trade_outcomes
+            {_AGG_JOIN}
+            WHERE trade_outcomes.pnl_pct IS NOT NULL
+              AND CAST(strftime('%s', trade_outcomes.created_at) AS INTEGER) >= ?
+              AND {_AGG_PRED}
         """, (pnl_cutoff_unix,)).fetchall()
     else:
-        ticker_rows = conn.execute("""
-            SELECT ticker, pnl_pct, leveraged_pnl_pct
-            FROM trade_outcomes WHERE pnl_pct IS NOT NULL
+        ticker_rows = conn.execute(f"""
+            SELECT trade_outcomes.ticker, trade_outcomes.pnl_pct, trade_outcomes.leveraged_pnl_pct
+            FROM trade_outcomes
+            {_AGG_JOIN}
+            WHERE trade_outcomes.pnl_pct IS NOT NULL
+              AND {_AGG_PRED}
         """).fetchall()
 
     ticker_map = {}
