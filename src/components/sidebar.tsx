@@ -47,6 +47,7 @@ const NAV_ZONES: NavZone[] = [
       { label: "Signals", href: "/intelligence?tab=signals", tabKey: "signals" },
       { label: "Research", href: "/intelligence?tab=research", tabKey: "research" },
       { label: "Training", href: "/intelligence?tab=training", tabKey: "training" },
+      { label: "Quality", href: "/intelligence?tab=quality", tabKey: "quality" },
     ],
   },
   {
