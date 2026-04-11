@@ -106,10 +106,21 @@ export function DashboardView() {
   const [pnlCutoffDate, setPnlCutoffDate] = useState<string | null>(null);
   const [adminCapital, setAdminCapital] = useState(50);
   const [adminNewCap, setAdminNewCap] = useState("");
-  const [adminModal, setAdminModal] = useState<"capital" | "pnl" | "xp" | "history" | null>(null);
+  const [adminModal, setAdminModal] = useState<"capital" | "pnl" | "xp" | "history" | "aggressive_on" | "aggressive_off" | null>(null);
   const [adminConfirmText, setAdminConfirmText] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminHistory, setAdminHistory] = useState<Array<{ id: number; reset_type: string; reset_at: string; old_value: string | null; new_value: string; notes: string | null }>>([]);
+  const [aggressive, setAggressive] = useState<{
+    enabled: boolean;
+    threshold_delta: number;
+    revert_at?: string | null;
+    minutes_until_revert?: number | null;
+    total_signals_fired?: number;
+    cb_overall_status?: string;
+    last_event?: { event_type: string; actor: string; timestamp: string } | null;
+  } | null>(null);
+  const [aggressiveDelta, setAggressiveDelta] = useState("-5");
+  const [aggressiveHours, setAggressiveHours] = useState("48");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchDashboard = useCallback(async () => {
@@ -186,6 +197,20 @@ export function DashboardView() {
       setStreak(d.streak || 0);
       setLastPnl(d.lastPnl || 0);
     }).catch(() => {});
+  }, []);
+
+  // Fetch Aggressive Mode status (poll every 30s — matches /api/aggressive cache TTL window)
+  useEffect(() => {
+    const fetchAggressive = async () => {
+      try {
+        const res = await fetch("/api/aggressive");
+        const d = await res.json();
+        setAggressive(d);
+      } catch { /* non-critical */ }
+    };
+    fetchAggressive();
+    const iv = setInterval(fetchAggressive, 30000);
+    return () => clearInterval(iv);
   }, []);
 
   const toggleKillSwitch = async () => {
@@ -625,6 +650,70 @@ export function DashboardView() {
                 <div style={{ fontSize: 8, color: C.textTertiary, fontFamily: "var(--font-mono)", marginTop: 4, textAlign: "center" }}>Lifetime XP preserved</div>
               </div>
             </div>
+            {/* Aggressive Mode — full-width card below 3-col admin row (2026-04-10) */}
+            <div style={{
+              background: C.bg,
+              borderRadius: 8,
+              padding: 12,
+              marginTop: 12,
+              border: `1px solid ${aggressive?.enabled ? "#ffa502" : C.borderSolid}`,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                  <div style={{ fontSize: 9, color: C.textTertiary, textTransform: "uppercase", fontFamily: "var(--font-mono)", letterSpacing: 0.5 }}>
+                    ⚡ Aggressive Mode
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: aggressive?.enabled ? "#ffa502" : C.textSecondary, fontFamily: "var(--font-mono)", marginTop: 4 }}>
+                    {aggressive?.enabled ? `ON · Δ${aggressive.threshold_delta}` : "OFF"}
+                  </div>
+                  {aggressive?.enabled && aggressive.minutes_until_revert != null && (
+                    <div style={{ fontSize: 10, color: C.textTertiary, fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                      Reverts in {(aggressive.minutes_until_revert / 60).toFixed(1)}h
+                    </div>
+                  )}
+                  {aggressive && (aggressive.total_signals_fired || 0) > 0 && (
+                    <div style={{ fontSize: 10, color: C.textTertiary, fontFamily: "var(--font-mono)" }}>
+                      Signals tagged: {aggressive.total_signals_fired}
+                    </div>
+                  )}
+                  {aggressive?.cb_overall_status && aggressive.cb_overall_status !== "GREEN" && (
+                    <div style={{ fontSize: 10, color: "#ff4757", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                      ⚠ CB: {aggressive.cb_overall_status}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    if (aggressive?.enabled) {
+                      setAdminModal("aggressive_off");
+                    } else {
+                      setAggressiveDelta("-5");
+                      setAggressiveHours("48");
+                      setAdminModal("aggressive_on");
+                    }
+                    setAdminConfirmText("");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono)",
+                    background: aggressive?.enabled ? C.redDim : "#ffa50220",
+                    color: aggressive?.enabled ? C.red : "#ffa502",
+                    border: `1px solid ${aggressive?.enabled ? C.red : "#ffa502"}66`,
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    letterSpacing: 0.5,
+                    minHeight: 36,
+                  }}
+                >
+                  {aggressive?.enabled ? "Disable" : "Enable"}
+                </button>
+              </div>
+              <div style={{ fontSize: 9, color: C.textTertiary, fontFamily: "var(--font-mono)", marginTop: 8, lineHeight: 1.4 }}>
+                Data acquisition only · Signals tagged for filter-out · Auto-revert 48h · CB-protected
+              </div>
+            </div>
             <button onClick={async () => { setAdminModal("history"); const r = await safeFetch<{ resets: typeof adminHistory }>("/api/admin/reset-history", { resets: [] }); if (r?.resets) setAdminHistory(r.resets); }}
               style={{ display: "block", margin: "10px auto 0", fontSize: 10, color: C.textSecondary, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-mono)", textDecoration: "underline" }}>
               View Reset History →
@@ -635,30 +724,67 @@ export function DashboardView() {
       </div>
 
       {/* ─── ADMIN MODALS ─── */}
-      {adminModal && adminModal !== "history" && (
+      {adminModal && adminModal !== "history" && (() => {
+        const isAggressiveOn = adminModal === "aggressive_on";
+        const isAggressiveOff = adminModal === "aggressive_off";
+        const isAggressive = isAggressiveOn || isAggressiveOff;
+        const magicWord = isAggressiveOn ? "ENABLE" : isAggressiveOff ? "DISABLE" : "RESET";
+        const matched = adminConfirmText === magicWord;
+        const accentColor = isAggressiveOn ? "#ffa502" : C.red;
+        const title = isAggressiveOn
+          ? "Enable Aggressive Mode"
+          : isAggressiveOff
+          ? "Disable Aggressive Mode"
+          : "Confirm Reset";
+        return (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={() => setAdminModal(null)}>
           <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 12, padding: 24, maxWidth: 400, width: "100%" }}
             onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontFamily: "Orbitron, sans-serif", fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 12 }}>Confirm Reset</div>
+            <div style={{ fontFamily: "Orbitron, sans-serif", fontSize: 16, fontWeight: 700, color: C.textPrimary, marginBottom: 12 }}>{title}</div>
             <div style={{ fontSize: 12, color: C.textSecondary, fontFamily: "var(--font-mono)", marginBottom: 12, lineHeight: 1.6 }}>
               {adminModal === "capital"
                 ? `Capital: $${adminCapital.toLocaleString()} → $${Number(adminNewCap || 0).toLocaleString()}`
                 : adminModal === "xp"
                 ? `Displayed XP will reset to 0. Rank will show Intern Quant. Lifetime XP is preserved.`
-                : `P&L stats will rebase to today. Past trades hidden from stats.`}
+                : adminModal === "pnl"
+                ? `P&L stats will rebase to today. Past trades hidden from stats.`
+                : isAggressiveOn
+                ? `Lower per-ticker confidence thresholds by Δ for the duration. Auto-reverts to normal afterward. Every signal that fires under aggressive mode is tagged for filter-out from quality metrics.`
+                : `Aggressive mode will turn OFF immediately. Already-tagged signals stay tagged. Threshold returns to normal on next scan cycle (≤ 3 min).`}
             </div>
             {adminModal === "capital" && (
               <input type="number" value={adminNewCap} onChange={(e) => setAdminNewCap(e.target.value)} min={1} step={0.01} placeholder="New capital ($)"
                 style={{ width: "100%", padding: "8px 10px", marginBottom: 10, background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13 }} />
             )}
-            <div style={{ fontSize: 11, color: C.red, fontFamily: "var(--font-mono)", marginBottom: 10 }}>This cannot be undone. Trades are not affected.</div>
-            <input type="text" value={adminConfirmText} onChange={(e) => setAdminConfirmText(e.target.value)} placeholder='Type RESET to confirm'
+            {isAggressiveOn && (
+              <>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: C.textTertiary, fontFamily: "var(--font-mono)", marginBottom: 4 }}>Delta (−15 to 0)</div>
+                    <input type="number" value={aggressiveDelta} onChange={(e) => setAggressiveDelta(e.target.value)} min={-15} max={0} step={1}
+                      style={{ width: "100%", padding: "8px 10px", background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 9, color: C.textTertiary, fontFamily: "var(--font-mono)", marginBottom: 4 }}>Hours (max 72)</div>
+                    <input type="number" value={aggressiveHours} onChange={(e) => setAggressiveHours(e.target.value)} min={1} max={72} step={1}
+                      style={{ width: "100%", padding: "8px 10px", background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13 }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: "#ffa502", fontFamily: "var(--font-mono)", marginBottom: 10 }}>
+                  ⚠ Data acquisition only. Quality metrics WILL be polluted until follow-up filter-out sweep. Circuit breaker non-GREEN will block enable.
+                </div>
+              </>
+            )}
+            {!isAggressive && (
+              <div style={{ fontSize: 11, color: C.red, fontFamily: "var(--font-mono)", marginBottom: 10 }}>This cannot be undone. Trades are not affected.</div>
+            )}
+            <input type="text" value={adminConfirmText} onChange={(e) => setAdminConfirmText(e.target.value)} placeholder={`Type ${magicWord} to confirm`}
               style={{ width: "100%", padding: "8px 10px", marginBottom: 14, background: C.bg, border: `1px solid ${C.borderSolid}`, borderRadius: 6, color: C.textPrimary, fontFamily: "var(--font-mono)", fontSize: 13, letterSpacing: 1 }} />
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setAdminModal(null)}
                 style={{ flex: 1, padding: "8px 0", fontSize: 11, fontFamily: "var(--font-mono)", background: "none", color: C.textSecondary, border: `1px solid ${C.borderSolid}`, borderRadius: 6, cursor: "pointer" }}>Cancel</button>
-              <button disabled={adminConfirmText !== "RESET" || adminLoading}
+              <button disabled={!matched || adminLoading}
                 onClick={async () => {
                   setAdminLoading(true);
                   try {
@@ -667,20 +793,45 @@ export function DashboardView() {
                       setAdminCapital(Number(adminNewCap));
                     } else if (adminModal === "xp") {
                       await fetch("/api/admin/reset-xp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmText: "RESET" }) });
-                    } else {
+                    } else if (adminModal === "pnl") {
                       await fetch("/api/admin/reset-pnl-stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmText: "RESET" }) });
+                    } else if (isAggressiveOn) {
+                      await fetch("/api/aggressive", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          action: "enable",
+                          delta: parseInt(aggressiveDelta, 10),
+                          hours: parseFloat(aggressiveHours),
+                          reason: "hub_toggle",
+                        }),
+                      });
+                    } else if (isAggressiveOff) {
+                      await fetch("/api/aggressive", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "disable", reason: "hub_toggle" }),
+                      });
                     }
                     setAdminModal(null);
-                    fetchDashboard();
+                    if (!isAggressive) fetchDashboard();
+                    // Refetch aggressive snapshot after a short delay so the UI reflects the
+                    // bot-side state once the hub_commands queue picks up the change (~10s).
+                    if (isAggressive) {
+                      setTimeout(() => {
+                        fetch("/api/aggressive").then(r => r.json()).then(d => setAggressive(d)).catch(() => {});
+                      }, 12000);
+                    }
                   } catch { /* error handled by API */ }
                   setAdminLoading(false);
                 }}
-                style={{ flex: 1, padding: "8px 0", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, background: adminConfirmText === "RESET" ? C.red : C.redDim, color: adminConfirmText === "RESET" ? "#fff" : `${C.red}66`, border: `1px solid ${C.red}33`, borderRadius: 6, cursor: adminConfirmText === "RESET" ? "pointer" : "not-allowed", opacity: adminConfirmText === "RESET" ? 1 : 0.5 }}>
-                {adminLoading ? "..." : "Confirm Reset"}</button>
+                style={{ flex: 1, padding: "8px 0", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 700, background: matched ? accentColor : `${accentColor}22`, color: matched ? "#fff" : `${accentColor}66`, border: `1px solid ${accentColor}33`, borderRadius: 6, cursor: matched ? "pointer" : "not-allowed", opacity: matched ? 1 : 0.5 }}>
+                {adminLoading ? "..." : isAggressiveOn ? "Confirm Enable" : isAggressiveOff ? "Confirm Disable" : "Confirm Reset"}</button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {adminModal === "history" && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}

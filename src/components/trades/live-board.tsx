@@ -116,6 +116,7 @@ export function LiveBoard() {
   const [confirmTrade, setConfirmTrade] = useState<LiveTicker | null>(null);
   const [preflight, setPreflight] = useState<{ capital: number; currentMargin: number; percentUsed: number; record: { total: number; wins: number; losses: number; wr: number }; blocked: boolean; blockReason: string | null } | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
+  const [aggressive, setAggressive] = useState<{ enabled: boolean; threshold_delta: number } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -142,6 +143,20 @@ export function LiveBoard() {
       setTradeStats(d.stats || {});
       setBlockedCombos(d.blocked || []);
     }).catch(() => {});
+  }, []);
+
+  // Aggressive Mode badge state — poll every 30s (mode-level indicator, not per-signal)
+  useEffect(() => {
+    const fetchAggressive = async () => {
+      try {
+        const r = await fetch("/api/aggressive");
+        const d = await r.json();
+        setAggressive(d);
+      } catch { /* ignore */ }
+    };
+    fetchAggressive();
+    const iv = setInterval(fetchAggressive, 30_000);
+    return () => clearInterval(iv);
   }, []);
 
   const handleAdd = async () => {
@@ -306,6 +321,15 @@ export function LiveBoard() {
               <div className="flex items-center justify-between">
                 <span className="font-bold text-lg tracking-wider neon-green">
                   {t.ticker}
+                  {aggressive?.enabled && (
+                    <span
+                      title={`Aggressive Mode active — threshold lowered by ${aggressive.threshold_delta}. Signals firing now are tagged for filter-out.`}
+                      className="ml-2 text-[11px] font-mono align-middle"
+                      style={{ color: "#ffa502" }}
+                    >
+                      ⚡
+                    </span>
+                  )}
                 </span>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-base text-foreground">
