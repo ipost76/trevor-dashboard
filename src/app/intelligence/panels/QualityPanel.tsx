@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { OptunaShadowCard } from "@/components/intelligence/OptunaShadowCard";
 
 // ── Types ──
 type QualityPattern = {
@@ -291,6 +292,9 @@ export default function QualityPanel() {
           Significance: {Object.entries(summary.by_significance).map(([k, v]) => `${k}=${v}`).join(" \u00b7 ")}
         </div>
       </div>
+
+      {/* ── Optuna A/B Shadow (2026-04-11) ── */}
+      <OptunaShadowCard />
 
       {/* ── Top BOOST + BLOCK ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
