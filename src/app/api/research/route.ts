@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
+import { runPython } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -7,16 +7,9 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const scope = searchParams.get("scope") || "analyses";
   const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 200);
-  const offset = parseInt(searchParams.get("offset") || "0");
-
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const dashboardDir = process.cwd();
-  const scriptPath = join(dashboardDir, "query_research.py");
+  const offset = Math.max(parseInt(searchParams.get("offset") || "0"), 0);
 
   try {
-    const { execSync } = await import("child_process");
-
     if (scope === "analyses") {
       const filters: Record<string, string> = {};
       const ticker = searchParams.get("ticker");
@@ -26,11 +19,11 @@ export async function GET(request: NextRequest) {
       if (type) filters.type = type;
       if (search) filters.search = search;
 
-      const filtersJson = JSON.stringify(filters).replace(/'/g, "'\"'\"'");
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} analyses ${limit} ${offset} '${filtersJson}'`,
-        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = runPython(
+        "query_research.py",
+        ["analyses", String(limit), String(offset), JSON.stringify(filters)],
+        { timeout: 15000 }
+      );
       const data = JSON.parse(raw);
       return NextResponse.json({ ...data, limit, offset });
     }
@@ -41,19 +34,21 @@ export async function GET(request: NextRequest) {
       if (!query) {
         return NextResponse.json({ results: [], message: "Provide ?q= to search" });
       }
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} insights "${query.replace(/"/g, '\\"')}" "${collection}"`,
-        { encoding: "utf-8", timeout: 30000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = runPython(
+        "query_research.py",
+        ["insights", query, collection],
+        { timeout: 30000 }
+      );
       return NextResponse.json(JSON.parse(raw));
     }
 
     if (scope === "quick") {
       const ticker = searchParams.get("ticker") || "BTC";
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} quick "${ticker.replace(/"/g, '\\"')}"`,
-        { encoding: "utf-8", timeout: 30000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = runPython(
+        "query_research.py",
+        ["quick", ticker],
+        { timeout: 30000 }
+      );
       return NextResponse.json(JSON.parse(raw));
     }
 
