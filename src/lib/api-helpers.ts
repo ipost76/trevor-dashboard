@@ -38,6 +38,30 @@ export function runPython(
   return (result.stdout || "").trim();
 }
 
+// Run inline python source via stdin (python3 -). Untrusted values MUST be
+// passed via the env map and read inside the code with os.environ.get(...),
+// NEVER interpolated into the code string (which is Python-source injection).
+export function runPythonInline(
+  code: string,
+  options?: { timeout?: number; cwd?: string; env?: Record<string, string> }
+): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { spawnSync } = require("child_process");
+  const result = spawnSync(PYTHON_PATH, ["-"], {
+    encoding: "utf-8",
+    timeout: options?.timeout ?? 10000,
+    cwd: options?.cwd ?? TREVOR_DIR,
+    env: { ...process.env, HOME: "/home/trevor", ...(options?.env ?? {}) },
+    input: code,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`python exit=${result.status}: ${(result.stderr || "").slice(0, 500)}`);
+  }
+  return (result.stdout || "").trim();
+}
+
 // Retained for legacy callers. Prefer passing untrusted input as argv to
 // runPython — this strip cannot be relied on as a primary defense.
 export function sanitizeShellArg(input: string): string {

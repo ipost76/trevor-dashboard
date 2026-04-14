@@ -1,51 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const ticker = searchParams.get("ticker")?.toUpperCase();
-  const direction = searchParams.get("direction")?.toUpperCase();
-  const confidence = searchParams.get("confidence") ? parseInt(searchParams.get("confidence")!) : null;
+  const ticker = searchParams.get("ticker")?.toUpperCase() || "";
+  const direction = searchParams.get("direction")?.toUpperCase() || "";
+  const confidenceRaw = searchParams.get("confidence");
+  const confidence = confidenceRaw !== null ? parseInt(confidenceRaw) : NaN;
 
-  const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
-
-  try {
-    const { execSync } = await import("child_process");
-    const pyScript = `
-import sqlite3, json
-conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
+  const pyScript = `
+import sqlite3, json, os
+db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
+conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row
+
+ticker = os.environ.get("MATCH_TICKER", "")
+direction = os.environ.get("MATCH_DIRECTION", "")
+conf_raw = os.environ.get("MATCH_CONFIDENCE", "")
+confidence = int(conf_raw) if conf_raw.lstrip("-").isdigit() else None
+
 rows = conn.execute("SELECT * FROM ghost_strategies WHERE status='active'").fetchall()
 results = []
 for r in rows:
     d = dict(r)
-    # Filter by ticker
-    assets = d.get("assets") or ""
-    if ${ticker ? `True` : `False`} and assets:
-        asset_list = [a.strip().upper() for a in assets.split(",")]
-        if "${ticker || ""}" not in asset_list:
+    if ticker:
+        assets = d.get("assets") or ""
+        if assets:
+            asset_list = [a.strip().upper() for a in assets.split(",")]
+            if ticker not in asset_list:
+                continue
+    if direction:
+        strat_dir = (d.get("direction") or "BOTH").upper()
+        if strat_dir not in ("BOTH", direction):
             continue
-    # Filter by direction
-    strat_dir = (d.get("direction") or "BOTH").upper()
-    if ${direction ? `True` : `False`} and strat_dir not in ("BOTH", "${direction || ""}"):
-        continue
-    # Filter by min_confidence
-    mc = d.get("min_confidence")
-    if mc is not None and ${confidence !== null ? `True` : `False`} and ${confidence ?? 0} < mc:
-        continue
+    if confidence is not None:
+        mc = d.get("min_confidence")
+        if mc is not None and confidence < mc:
+            continue
     results.append(d)
 conn.close()
 print(json.dumps(results, default=str))
 `;
-    const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-    const raw = execSync(`${trevorDir}/venv/bin/python3 -`, {
-      input: pyScript,
-      encoding: "utf-8",
-      timeout: 10000,
-      env: { ...process.env, HOME: "/home/trevor" },
-    }).trim();
 
+  try {
+    const raw = runPythonInline(pyScript, {
+      timeout: 10000,
+      env: {
+        MATCH_TICKER: ticker,
+        MATCH_DIRECTION: direction,
+        MATCH_CONFIDENCE: Number.isFinite(confidence) ? String(confidence) : "",
+      },
+    });
     return NextResponse.json({ matches: JSON.parse(raw) }, {
       headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
     });

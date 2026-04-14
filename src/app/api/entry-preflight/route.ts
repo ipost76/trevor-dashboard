@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PYTHON_PATH, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -7,16 +7,14 @@ export async function GET(request: NextRequest) {
   const ticker = request.nextUrl.searchParams.get("ticker") || "";
   const direction = (request.nextUrl.searchParams.get("direction") || "LONG").toUpperCase();
 
-  try {
-    const { execSync } = await import("child_process");
-    const code = `
-import sqlite3, json, sys
+  const code = `
+import sqlite3, json, os
 db_path = "/home/trevor/trevor/trevor.db"
 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 cur = conn.cursor()
 
-ticker = "${ticker.replace(/"/g, "")}"
-direction = "${direction.replace(/"/g, "")}"
+ticker = os.environ.get("PF_TICKER", "")
+direction = os.environ.get("PF_DIRECTION", "LONG")
 
 # Capital + exposure
 capital = 50.0
@@ -50,13 +48,12 @@ print(json.dumps({
     "blockReason": block_reason,
 }))
 `;
-    const raw = execSync(`${PYTHON_PATH} -`, {
-      input: code,
-      encoding: "utf-8",
+
+  try {
+    const raw = runPythonInline(code, {
       timeout: 5000,
-      cwd: TREVOR_DIR,
-      env: { ...process.env, HOME: "/home/trevor" },
-    }).trim();
+      env: { PF_TICKER: ticker, PF_DIRECTION: direction },
+    });
     return NextResponse.json(JSON.parse(raw));
   } catch {
     return NextResponse.json({ capital: 50, currentMargin: 0, percentUsed: 0, record: { total: 0, wins: 0, losses: 0, wr: 0 }, blocked: false, blockReason: null });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { join } from "path";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -141,31 +142,39 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { trade_id, margin_usd } = body;
 
-  if (!trade_id || margin_usd == null || margin_usd <= 0) {
+  // Strict validation: trade_id must be a non-empty string, margin_usd a finite positive number.
+  if (
+    typeof trade_id !== "string" ||
+    trade_id.length === 0 ||
+    trade_id.length > 200 ||
+    typeof margin_usd !== "number" ||
+    !Number.isFinite(margin_usd) ||
+    margin_usd <= 0
+  ) {
     return NextResponse.json({ error: "Missing trade_id or invalid margin_usd" }, { status: 400 });
   }
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const dbPath = process.env.TREVOR_DB_PATH || join(trevorDir, "trevor.db");
-
-  try {
-    const { execSync } = await import("child_process");
-    const pythonPath = join(trevorDir, "venv", "bin", "python3");
-    const code = `
-import sqlite3, json
-conn = sqlite3.connect("${dbPath}")
-conn.execute("UPDATE active_trades SET margin_usd=? WHERE trade_id=?", (${margin_usd}, "${trade_id}"))
+  const code = `
+import sqlite3, json, os
+db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
+trade_id = os.environ.get("PATCH_TRADE_ID", "")
+margin_usd = float(os.environ.get("PATCH_MARGIN_USD", "0") or "0")
+conn = sqlite3.connect(db_path)
+conn.execute("UPDATE active_trades SET margin_usd=? WHERE trade_id=?", (margin_usd, trade_id))
 conn.commit()
-r = conn.execute("SELECT margin_usd, leverage FROM active_trades WHERE trade_id=?", ("${trade_id}",)).fetchone()
+r = conn.execute("SELECT margin_usd, leverage FROM active_trades WHERE trade_id=?", (trade_id,)).fetchone()
 conn.close()
 if r:
     print(json.dumps({"ok": True, "margin_usd": r[0], "notional": round(r[0] * (r[1] or 1), 2)}))
 else:
     print(json.dumps({"ok": False, "error": "Trade not found"}))
 `;
-    const raw = execSync(`${pythonPath} -c '${code.replace(/'/g, "'\"'\"'")}'`, {
-      encoding: "utf-8", timeout: 5000, cwd: trevorDir,
-    }).trim();
+
+  try {
+    const raw = runPythonInline(code, {
+      timeout: 5000,
+      env: { PATCH_TRADE_ID: trade_id, PATCH_MARGIN_USD: String(margin_usd) },
+    });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
