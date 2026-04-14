@@ -16,21 +16,30 @@ export function safeJsonParse<T>(raw: string, fallback: T): T {
 export function runPython(
   script: string,
   args: string[] = [],
-  options?: { timeout?: number; cwd?: string }
+  options?: { timeout?: number; cwd?: string; input?: string }
 ): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { execSync } = require("child_process");
+  const { spawnSync } = require("child_process");
   const scriptPath = join(DASHBOARD_DIR, script);
-  const escapedArgs = args.map((a) => `'${a.replace(/'/g, "'\"'\"'")}'`);
-  const cmd = `${PYTHON_PATH} ${scriptPath} ${escapedArgs.join(" ")}`;
-  return execSync(cmd, {
+  // spawnSync with argv array — NO shell, NO interpolation. User input can
+  // safely contain $, backtick, quotes, newlines; it never reaches a shell.
+  const result = spawnSync(PYTHON_PATH, [scriptPath, ...args], {
     encoding: "utf-8",
     timeout: options?.timeout ?? 15000,
     cwd: options?.cwd ?? TREVOR_DIR,
     env: { ...process.env, HOME: "/home/trevor" },
-  }).trim();
+    input: options?.input,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`python exit=${result.status}: ${(result.stderr || "").slice(0, 500)}`);
+  }
+  return (result.stdout || "").trim();
 }
 
+// Retained for legacy callers. Prefer passing untrusted input as argv to
+// runPython — this strip cannot be relied on as a primary defense.
 export function sanitizeShellArg(input: string): string {
   return input.replace(/[;&|`$(){}[\]!#~<>\\]/g, "");
 }
