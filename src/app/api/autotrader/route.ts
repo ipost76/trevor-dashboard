@@ -171,11 +171,10 @@ export async function POST(request: Request) {
     const { action } = body;
 
     if (action === "pause" || action === "resume") {
-      // Write action to a file that the engine monitors
-      const { execSync } = await import("child_process");
-      execSync(`echo '${action}' > /home/trevor/trevor/autotrader/.engine_command`, {
-        timeout: 2000,
-      });
+      // Write action to a file that the engine monitors.
+      // fs.writeFileSync avoids any shell involvement.
+      const { writeFileSync } = await import("fs");
+      writeFileSync("/home/trevor/trevor/autotrader/.engine_command", `${action}\n`);
       return NextResponse.json({ ok: true, action });
     }
 

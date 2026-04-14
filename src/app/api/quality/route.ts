@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 
 // /api/quality — Signal Quality Intelligence summary
 //
@@ -19,54 +19,72 @@ export const dynamic = "force-dynamic";
 const PY = "/home/trevor/trevor/venv/bin/python";
 const HELPER = "/home/trevor/trevor-dashboard/query_quality.py";
 const CACHE_TTL = 60_000;
+const ALLOWED_SCOPES = new Set([
+  "summary",
+  "patterns",
+  "ticker",
+  "regime",
+  "recent_matches",
+  "by_ticker",
+  "by_regime",
+  "by_confidence",
+]);
 
 const _cache: Map<string, { data: unknown; ts: number }> = new Map();
 
-function shellQuote(s: string): string {
-  return "'" + String(s).replace(/'/g, "'\\''") + "'";
-}
-
-function runHelper(args: string): unknown {
-  const cmd = `${PY} ${HELPER} ${args}`;
-  const raw = execSync(cmd, { timeout: 15_000, encoding: "utf-8" });
-  return JSON.parse(raw);
+function runHelper(args: string[]): unknown {
+  // spawnSync with argv — no shell interpolation.
+  const result = spawnSync(PY, [HELPER, ...args], {
+    timeout: 15_000,
+    encoding: "utf-8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`quality helper exit=${result.status}: ${(result.stderr || "").slice(0, 500)}`);
+  }
+  return JSON.parse(result.stdout || "null");
 }
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const scope = (url.searchParams.get("scope") || "summary").toLowerCase();
+    if (!ALLOWED_SCOPES.has(scope)) {
+      return NextResponse.json({ error: `unknown scope: ${scope}` }, { status: 400 });
+    }
     const active = url.searchParams.get("active");
     const ticker = url.searchParams.get("ticker");
     const regime = url.searchParams.get("regime");
     const limit = url.searchParams.get("limit");
 
     let cacheKey = scope;
-    let helperArgs = scope;
+    let helperArgs: string[] = [scope];
 
     if (scope === "patterns") {
       if (active === "1" || active === "true") {
-        helperArgs = "patterns active";
+        helperArgs = ["patterns", "active"];
         cacheKey = "patterns_active";
       } else {
-        helperArgs = "patterns";
+        helperArgs = ["patterns"];
       }
     } else if (scope === "ticker") {
       if (!ticker) {
         return NextResponse.json({ error: "missing ticker" }, { status: 400 });
       }
-      helperArgs = `ticker ${shellQuote(ticker)}`;
+      helperArgs = ["ticker", ticker];
       cacheKey = `ticker_${ticker}`;
     } else if (scope === "regime") {
       if (!regime) {
         return NextResponse.json({ error: "missing regime" }, { status: 400 });
       }
-      helperArgs = `regime ${shellQuote(regime)}`;
+      helperArgs = ["regime", regime];
       cacheKey = `regime_${regime}`;
     } else if (scope === "recent_matches") {
       const n = limit ? parseInt(limit, 10) : 20;
-      helperArgs = `recent_matches ${isNaN(n) ? 20 : n}`;
-      cacheKey = `recent_matches_${n}`;
+      const safeN = Number.isFinite(n) && n > 0 ? Math.min(n, 500) : 20;
+      helperArgs = ["recent_matches", String(safeN)];
+      cacheKey = `recent_matches_${safeN}`;
     }
 
     const now = Date.now();
