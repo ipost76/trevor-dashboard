@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { existsSync, readFileSync, statSync } from "fs";
 
 export const dynamic = "force-dynamic";
-
-const KILL_SWITCH_PATH = "/home/trevor/trevor/.kill_switch";
-const AT_PAUSED_PATH = "/home/trevor/trevor/.autotrader_paused";
 
 // In-memory cache (5 min TTL) — avoids 500ms Hyperliquid API ping on every call
 let _healthCache: { data: unknown; ts: number } | null = null;
@@ -89,14 +85,6 @@ if result["kill_switch"]["active"]:
     except:
         pass
 
-# AutoTrader pause
-result["autotrader_paused"] = {"active": os.path.exists('/home/trevor/trevor/.autotrader_paused')}
-if result["autotrader_paused"]["active"]:
-    try:
-        result["autotrader_paused"]["reason"] = open('/home/trevor/trevor/.autotrader_paused').read().strip()
-    except:
-        pass
-
 print(json.dumps(result, default=str))
 `;
 
@@ -106,18 +94,8 @@ print(json.dumps(result, default=str))
     ).trim();
     const data = JSON.parse(pyResult);
 
-    // Add autotrader paused status from file system
-    let atPaused = { active: false, reason: "" };
-    if (existsSync(AT_PAUSED_PATH)) {
-      atPaused = {
-        active: true,
-        reason: readFileSync(AT_PAUSED_PATH, "utf-8").trim(),
-      };
-    }
-
     const responseData = {
       ...data,
-      autotrader_paused: atPaused,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
     };

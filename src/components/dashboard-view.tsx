@@ -60,7 +60,6 @@ type SystemHealth = {
   signals?: { today: number; seven_day_avg: number; change_pct: number };
   api?: { hyperliquid: { healthy: boolean; latency_ms: number } };
   kill_switch?: { active: boolean };
-  autotrader_paused?: { active: boolean; reason?: string };
 };
 
 /* ── Colors ── */
@@ -303,7 +302,7 @@ export function DashboardView() {
               {ksConfirm === "activate" ? "HALT ALL SYSTEMS?" : "RESUME ALL SYSTEMS?"}
             </div>
             <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 14, lineHeight: 1.4 }}>
-              {ksConfirm === "activate" ? "This will halt ALL signal generation and AutoTrader execution." : "Resume all signal generation and AutoTrader execution?"}
+              {ksConfirm === "activate" ? "This will halt ALL signal generation." : "Resume all signal generation?"}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setKsConfirm(null)} style={{ padding: "6px 12px", fontSize: 11, borderRadius: 4, border: `1px solid ${C.borderSolid}`, background: "transparent", color: C.textSecondary, cursor: "pointer" }}>Cancel</button>
@@ -349,9 +348,6 @@ export function DashboardView() {
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {health.autotrader_paused?.active && (
-                <Badge color={C.yellow} bg={C.yellowDim} glow>AT: PAUSED</Badge>
-              )}
               {!killSwitch.active && (
                 <button onClick={() => setKsConfirm("activate")} style={{
                   background: "transparent", border: `1px solid rgba(255,59,92,0.25)`, borderRadius: 4,

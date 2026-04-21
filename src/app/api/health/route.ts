@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const DB_PATH = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
-const AT_DB_PATH = "/home/trevor/trevor/autotrader/autotrader.db";
 
 export async function GET() {
   const startTime = performance.now();
@@ -14,19 +13,12 @@ export async function GET() {
   // DB connectivity: verify files exist and are readable (no subprocess)
   let dbOk = false;
   let dbSizeKb = 0;
-  let atDbOk = false;
   try {
     fs.accessSync(DB_PATH, fs.constants.R_OK);
     dbOk = true;
     dbSizeKb = Math.round(fs.statSync(DB_PATH).size / 1024);
   } catch {
     // DB file not accessible
-  }
-  try {
-    fs.accessSync(AT_DB_PATH, fs.constants.R_OK);
-    atDbOk = true;
-  } catch {
-    // AutoTrader DB not accessible
   }
 
   // System resources (Node.js built-in — zero cost)
@@ -43,7 +35,6 @@ export async function GET() {
     database: {
       trevor_db: dbOk,
       trevor_db_size_kb: dbSizeKb,
-      autotrader_db: atDbOk,
     },
     system: {
       memory_percent: memPercent,

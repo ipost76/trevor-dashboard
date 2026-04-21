@@ -35,7 +35,6 @@ const NAV_ZONES: NavZone[] = [
     children: [
       { label: "Trades", href: "/trading?tab=trades", tabKey: "trades" },
       { label: "Holdings", href: "/trading?tab=holdings", tabKey: "holdings" },
-      { label: "AutoTrader", href: "/trading?tab=autotrader", tabKey: "autotrader" },
     ],
   },
   {
@@ -75,7 +74,6 @@ const NAV_ZONES: NavZone[] = [
 const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/trades": "trading",
   "/holdings": "trading",
-  "/autotrader": "trading",
   "/signals": "intelligence",
   "/research": "intelligence",
   "/training": "intelligence",
