@@ -1,19 +1,19 @@
 "use client";
 
-import { PauseCircle, BarChart2 } from "lucide-react";
+import { PauseCircle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { HeaderBar } from "@/components/autotrader/HeaderBar";
 import { PositionCard } from "@/components/autotrader/PositionCard";
 import { ConfigPanel } from "@/components/autotrader/ConfigPanel";
+import { AnalyticsSection } from "@/components/autotrader/AnalyticsSection";
+import { TradeHistoryTable } from "@/components/autotrader/TradeHistoryTable";
 import { useAutoTraderStream } from "@/hooks/useAutoTraderStream";
 
-// Auto Trader page — Part 1 overhaul (2026-04-23)
-// Single scroll: Header → Open Positions → Config → (Part 2 placeholder)
-// Real-time via /api/auto-trader/stream SSE. Part 2 adds charts + history.
+// Auto Trader page — Parts 1+2 (2026-04-23)
+// Single scroll: Header → Open Positions → Config → Analytics → History.
+// Real-time positions via /api/auto-trader/stream SSE.
 
 const MUTED = "#8888a0";
-const BORDER = "#1e2030";
-const SURFACE = "#12131a";
 
 export default function AutoTraderPanel() {
   const { positions, summary, state } = useAutoTraderStream();
@@ -68,28 +68,11 @@ export default function AutoTraderPanel() {
       {/* ── Section 3: Config panel ── */}
       <ConfigPanel />
 
-      {/* ── Section 4: Part 2 placeholder ── */}
-      <section
-        className="rounded-lg flex flex-col items-center justify-center py-8 text-center"
-        style={{
-          background: SURFACE,
-          border: `1px dashed ${BORDER}`,
-          color: MUTED,
-        }}
-      >
-        <BarChart2 size={20} style={{ opacity: 0.3 }} />
-        <div
-          className="mt-1 text-[11px] uppercase tracking-[0.12em]"
-          style={{
-            fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
-          }}
-        >
-          Analytics &amp; History
-        </div>
-        <div className="mt-0.5 text-[10px] opacity-70">
-          equity curve · closed trades · WR by ticker — Part 2
-        </div>
-      </section>
+      {/* ── Section 4: Analytics (charts) ── */}
+      <AnalyticsSection />
+
+      {/* ── Section 5: Trade history ── */}
+      <TradeHistoryTable />
     </div>
   );
 }

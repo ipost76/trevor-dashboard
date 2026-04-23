@@ -639,3 +639,40 @@ trade history (current P2 placeholder renders in-page).
 - Expandable closed trades table (replaces legacy `recent_trades`).
 - WR by ticker, by exit reason.
 - Deprecate legacy `/api/auto-trader` + `query_auto_trader.py` once P2 lands.
+
+## Auto Trader Page Overhaul — Part 2 (2026-04-23)
+
+Adds analytics charts + expandable trade history below the P1 config panel.
+The Auto Trader page is now a complete single-scroll dashboard:
+**Header → Open Positions (SSE) → Config → Analytics → History**.
+
+### New API routes
+| Route | Purpose | Cache |
+|-------|---------|-------|
+| `/api/auto-trader/equity-curve` | Chronological equity snapshots (running P&L from starting capital) | 30s |
+| `/api/auto-trader/analytics` | by_ticker + by_exit_reason (zero-seeded canonical list) + overall summary | 30s |
+| `/api/auto-trader/history` | Paginated closed trades. Query params: `page`, `limit` (≤100), `filter` (all\|winners\|losers), `period` (all\|7d\|30d). Full detail columns per row. | none |
+
+One consolidated Python helper `query_auto_trader_history.py` with three scopes: `equity-curve`, `analytics`, `history [page] [limit] [filter] [period]`. READ-ONLY (`file:...?mode=ro`). Canonical exit-reason palette seeded at count=0 so the chart always shows the full executor surface: `timeout_240min` (amber), `stop_hit` (red), `trailing_stop` (blue), `tech_signals` (cyan), `partial_profit` (green). DB reasons not in the canonical list merge in with a sign-based color.
+
+### New components
+| Path | Purpose |
+|------|---------|
+| `src/components/autotrader/EquityCurveChart.tsx` | Recharts `ComposedChart` — line + area-fill with gradient that crosses at starting_capital (not 0). Ref line at starting capital. Custom tooltip: Trade #N · TICKER DIR · Equity · Cum · Δ. |
+| `src/components/autotrader/WinRateByTickerChart.tsx` | Vertical bars, per-ticker WR%. Color tiers (green ≥55, amber 45-54, red <45). `LabelList` shows trade count above each bar. 50% ref line. |
+| `src/components/autotrader/PnlByExitReasonChart.tsx` | Horizontal bars, total P&L per reason. Green ≥0, red <0. Labels "reason (count)" on Y, dollar values on bar-end. |
+| `src/components/autotrader/AnalyticsSection.tsx` | Fetches both endpoints (60s refresh), renders overall stat strip + 3 charts (equity full width, WR & exit-reason 2-col on lg). Shimmer skeletons while loading. |
+| `src/components/autotrader/TradeHistoryTable.tsx` | Filter pills (All/Winners/Losers × 7D/30D/All), paginated list (20/page + Load More), click-to-expand rows. Exit-reason color pills match analytics palette. Expanded detail grid: entry→exit, leverage, size, confidence (+adj), regime, market_state, peak P&L, breakeven, partials count+realized, fees, net P&L, opened/closed. |
+
+### Modified
+- `src/app/trading/panels/AutoTraderPanel.tsx` — P2 placeholder replaced with `<AnalyticsSection />` + `<TradeHistoryTable />`. Five-section scroll: Header → Positions → Config → Analytics → History.
+
+### Verification
+- Build: clean, 0 type errors. `/trading` bundle 41.5 → 48.1 kB (+6.6kB for charts + history).
+- All 3 endpoints returned expected shapes. `history?filter=winners&period=7d` correctly narrows results.
+- Pagination validated: 26 trades → 6 pages at limit=5, `has_more` flips correctly.
+- Analytics: 5 tickers + 5 reasons (with canonical zero-fill) + overall summary including profit_factor.
+- Sacred files unchanged (5 .py + 4 .md in brain/).
+- Auto-close canary clean.
+- Chart primitives reuse `CHART_COLORS` theme (no new palette drift).
+- No new npm deps (Recharts 2.15.4 was already installed).
