@@ -593,3 +593,49 @@ sudo systemctl restart trevor-dashboard
 | `/api/trade-stats` | Win/loss by ticker+direction, blocked combos | 60s |
 | `/api/entry-preflight` | Exposure, track record, filter blocks for entry modal | none |
 | `/api/time-slots` | Win rates by 4h bucket + day-of-week | 60s |
+
+## Auto Trader Page Overhaul — Part 1 (2026-04-23)
+
+Real-time Auto Trader page with SSE-driven open positions + editable config.
+Rewrites `AutoTraderPanel.tsx` from a 30s-polling table into a scrollable
+page with full exit engine visibility. Part 2 will add equity chart + closed
+trade history (current P2 placeholder renders in-page).
+
+### New files
+| Path | Purpose |
+|------|---------|
+| `src/app/api/auto-trader/stream/route.ts` | SSE endpoint, 30s tick, emits `positions` + `summary` events. Uses a 5s module-level cache to coalesce multi-tab ticks. |
+| `src/app/api/auto-trader/config/route.ts` | `GET` reads auto_config; `PUT` writes a single whitelisted key. |
+| `query_auto_trader_live.py` | READ-ONLY extended snapshot (all exit engine columns, 7d stats, trades_today, full config). |
+| `query_auto_trader_config.py` | Whitelisted writer for `auto_config` ONLY. Enforces `ALLOWED_WRITE_KEYS` + type coercion (bool/int/float). |
+| `src/hooks/useAutoTraderStream.ts` | SSE hook, exposes `{ positions, summary, state, lastUpdate }`. |
+| `src/components/autotrader/HeaderBar.tsx` | Hero bar: enabled pill, equity hero, 7D stats, connection indicator. |
+| `src/components/autotrader/PositionCard.tsx` | Per-position card: primary row (ticker/dir/entry→current/P&L/leverage/hold) + exit engine row (Trail/BE/Peak/Partials/R/Conf/regime). |
+| `src/components/autotrader/ConfigPanel.tsx` | Inline-editable auto_config grid with optimistic save (saving…/✓ SAVED/failed). View-only per-ticker leverage. |
+
+### Modified
+- `src/app/trading/panels/AutoTraderPanel.tsx` — single scroll: Header → Open Positions (cards) → Config Panel → Part 2 placeholder. Recent closed trades removed (moves to P2).
+
+### Architecture
+- SSE stream pushes every 30s; shared 5s cache keeps Python spawns to one per tick across all subscribed clients.
+- Live P&L computed Node-side using executor's formula (LONG: `(curr-entry)/entry*100*lev`, SHORT: `(entry-curr)/entry*100*lev`). `live_pnl_usd = notional * live_pnl_pct / 100`.
+- R-multiple = `live_pnl_pct / (|entry-stop|/entry*100*leverage)`.
+- Hyperliquid `allMids` fetched directly in SSE tick; `price_stale: true` falls through to "stale" badge when HL is unreachable.
+- Auth: middleware cookie. New routes inherit `/api/*` protection (401 without cookie) for free.
+- `trevor.db` remains READ-ONLY from Hub except for `auto_config` (whitelist: AUTO_TRADER_ENABLED, MAX_CONCURRENT, MAX_TRADES_PER_DAY, MAX_CONSECUTIVE_LOSSES, PAUSE_AFTER_LOSSES_MINUTES, AGGRESSIVE_THRESHOLD, TICKER_DISCOVERY, CAPITAL_USD, PER_TRADE_USD, LEVERAGE_DEFAULT). Whitelist enforced in both Node body validator AND Python writer.
+- Legacy `/api/auto-trader` + `query_auto_trader.py` left in place, no callers; deprecate in P2.
+- Per-ticker leverage map is a Python constant in `auto_trader/executor.py` — shown view-only in Config Panel.
+
+### Verification
+- Build: clean, 0 type errors. `/trading` bundle +3.1kB.
+- SSE first event ~100ms after connect. Both open positions enrich with Hyperliquid prices + computed hold_display + R-multiple.
+- Config PUT rejected non-whitelisted key `DISCOVERED_TICKERS` with 400. Valid whitelisted key saved canonically.
+- Sacred files unchanged (5 .py in /home/trevor/trevor/, 4 .md in /home/trevor/trevor/brain/).
+- Auto-close canary clean (no `auto.close`/`force_close`/`AUTO_CLOSE` introductions in Hub src).
+- Mobile: HeaderBar wraps enabled pill + equity stacked on narrow. PositionCard exit-engine row wraps. ConfigPanel collapses to 1-col at <640px.
+
+### Next (Part 2)
+- Equity curve chart (Recharts already in deps).
+- Expandable closed trades table (replaces legacy `recent_trades`).
+- WR by ticker, by exit reason.
+- Deprecate legacy `/api/auto-trader` + `query_auto_trader.py` once P2 lands.
