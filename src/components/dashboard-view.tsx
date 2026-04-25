@@ -6,7 +6,7 @@ import { safeFetch } from "@/lib/fetch";
 import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
 import Link from "next/link";
 import { DirectionBadge } from "@/components/ui/direction-badge";
-import RemindersWidget from "@/components/RemindersWidget";
+// RemindersWidget removed 2026-04-25 — channel cleanup
 
 /* ── Types (unchanged) ── */
 type Signal = {
@@ -607,8 +607,7 @@ export function DashboardView() {
             </div>
           </Link>
 
-          {/* ─── 8. REMINDERS ─── */}
-          <RemindersWidget />
+          {/* ─── 8. REMINDERS removed 2026-04-25 — channel cleanup ─── */}
 
           {/* ─── 9. ADMIN ─── */}
           <div style={{ background: C.surface, border: `1px solid ${C.borderSolid}`, borderRadius: 10, padding: 16, animation: "slideUp 0.5s ease" }}>

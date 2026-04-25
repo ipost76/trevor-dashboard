@@ -44,7 +44,6 @@ const NAV_ZONES: NavZone[] = [
     href: "/intelligence",
     children: [
       { label: "Signals", href: "/intelligence?tab=signals", tabKey: "signals" },
-      { label: "Research", href: "/intelligence?tab=research", tabKey: "research" },
       { label: "Training", href: "/intelligence?tab=training", tabKey: "training" },
       { label: "Quality", href: "/intelligence?tab=quality", tabKey: "quality" },
     ],
@@ -57,8 +56,6 @@ const NAV_ZONES: NavZone[] = [
     children: [
       { label: "Control Panel", href: "/command?tab=control", tabKey: "control" },
       { label: "Ghost HQ", href: "/command?tab=ghosthq", tabKey: "ghosthq" },
-      { label: "Reminders", href: "/command?tab=reminders", tabKey: "reminders" },
-      { label: "Dev Tasks", href: "/command?tab=devtasks", tabKey: "devtasks" },
     ],
   },
   {
