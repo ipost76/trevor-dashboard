@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
 
-// GET /api/auto-trader/history?page=1&limit=20&filter=all|winners|losers&period=7d|30d|all
+// GET /api/auto-trader/history?page=1&limit=20&filter=all|winners|losers&period=7d|30d|all&mode=all|live|paper
 // Paginated closed trades with full detail for the expandable rows.
 
 export const dynamic = "force-dynamic";
@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 const ALLOWED_FILTER = new Set(["all", "winners", "losers"]);
 const ALLOWED_PERIOD = new Set(["all", "7d", "30d"]);
+const ALLOWED_MODE = new Set(["all", "live", "paper"]);
 const MAX_LIMIT = 100;
 
 type ClosedTrade = Record<string, unknown>;
@@ -21,11 +22,12 @@ type HistoryResponse = {
   limit: number;
   filter: string;
   period: string;
+  mode: string;
   has_more: boolean;
   error?: string;
 };
 
-const FALLBACK = (page: number, limit: number, filt: string, period: string): HistoryResponse => ({
+const FALLBACK = (page: number, limit: number, filt: string, period: string, mode: string): HistoryResponse => ({
   trades: [],
   total: 0,
   page,
@@ -33,6 +35,7 @@ const FALLBACK = (page: number, limit: number, filt: string, period: string): Hi
   limit,
   filter: filt,
   period,
+  mode,
   has_more: false,
 });
 
@@ -42,6 +45,7 @@ export async function GET(req: NextRequest) {
   const limitRaw = parseInt(sp.get("limit") || "20", 10);
   const filter = sp.get("filter") || "all";
   const period = sp.get("period") || "all";
+  const mode = (sp.get("mode") || "all").toLowerCase();
 
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
   const limit = Number.isFinite(limitRaw) && limitRaw > 0
@@ -49,18 +53,22 @@ export async function GET(req: NextRequest) {
     : 20;
   const safeFilter = ALLOWED_FILTER.has(filter) ? filter : "all";
   const safePeriod = ALLOWED_PERIOD.has(period) ? period : "all";
+  const safeMode = ALLOWED_MODE.has(mode) ? mode : "all";
 
   try {
     const raw = runPython(
       "query_auto_trader_history.py",
-      ["history", String(page), String(limit), safeFilter, safePeriod],
+      ["history", String(page), String(limit), safeFilter, safePeriod, safeMode],
       { timeout: 10_000 }
     );
-    const data = safeJsonParse<HistoryResponse>(raw, FALLBACK(page, limit, safeFilter, safePeriod));
+    const data = safeJsonParse<HistoryResponse>(
+      raw,
+      FALLBACK(page, limit, safeFilter, safePeriod, safeMode)
+    );
     return NextResponse.json(data);
   } catch (e) {
     return NextResponse.json(
-      { ...FALLBACK(page, limit, safeFilter, safePeriod), error: String(e) },
+      { ...FALLBACK(page, limit, safeFilter, safePeriod, safeMode), error: String(e) },
       { status: 500 }
     );
   }

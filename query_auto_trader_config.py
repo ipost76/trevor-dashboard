@@ -26,18 +26,33 @@ DB_PATH = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 
 # Keys the Hub is allowed to write. Everything else is rejected.
 # Value type is used for validation only; DB stores TEXT.
+# 2026-04-26: LIVE_* family added so the Hub Configuration panel can edit
+# real-money trading parameters. LIVE_HARD_CAPITAL_CAP_USD intentionally
+# stays view-only (code-enforced floor; never written from the Hub).
+# LIVE_ORDER_TYPE is also view-only (string enum; would need a select UI).
 ALLOWED_WRITE_KEYS: dict[str, str] = {
+    # Paper / generic
     "AUTO_TRADER_ENABLED": "bool",
     "MAX_CONCURRENT": "int",
     "MAX_TRADES_PER_DAY": "int",
-    "MAX_CONSECUTIVE_LOSSES": "int",
-    "PAUSE_AFTER_LOSSES_MINUTES": "int",
     "AGGRESSIVE_THRESHOLD": "int",
     "TICKER_DISCOVERY": "bool",
     "CAPITAL_USD": "float",
     "PER_TRADE_USD": "float",
     "LEVERAGE_DEFAULT": "float",
+    # Live
+    "AUTO_LIVE_ENABLED": "bool",
+    "LIVE_CAPITAL_USD": "float",
+    "LIVE_PER_TRADE_USD": "float",
+    "LIVE_MAX_CONCURRENT": "int",
+    "LIVE_MAX_DAILY_TRADES": "int",
+    "LIVE_LEVERAGE_DEFAULT": "float",
+    "LIVE_DEAD_MAN_SWITCH_MS": "int",
+    "LIVE_SDK_ERROR_THRESHOLD": "int",
+    "LIVE_SLIPPAGE_PCT": "float",
 }
+# 2026-04-25: MAX_CONSECUTIVE_LOSSES + PAUSE_AFTER_LOSSES_MINUTES removed
+# (Gate 4 deleted; auto trader no longer self-pauses).
 
 
 def _coerce(value: str, kind: str) -> tuple[bool, str, str]:

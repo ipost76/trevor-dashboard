@@ -66,13 +66,13 @@ export default function AutoTraderPanel() {
       </section>
 
       {/* ── Section 3: Config panel ── */}
-      <ConfigPanel />
+      <ConfigPanel summary={summary} />
 
       {/* ── Section 4: Analytics (charts) ── */}
-      <AnalyticsSection />
+      <AnalyticsSection summary={summary} />
 
       {/* ── Section 5: Trade history ── */}
-      <TradeHistoryTable />
+      <TradeHistoryTable summary={summary} />
     </div>
   );
 }

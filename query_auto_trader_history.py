@@ -41,8 +41,15 @@ DETAIL_COLS = [
     "pnl_usd", "pnl_pct", "fees_usd", "exit_reason", "hold_duration_minutes",
     "peak_pnl_pct", "peak_price", "trough_price", "partial_exits_taken",
     "partial_pnl_realized", "breakeven_stop_active", "regime_at_entry",
-    "market_state", "opened_at", "closed_at",
+    "market_state", "opened_at", "closed_at", "trade_mode",
 ]
+
+
+def _mode_clause(mode: str) -> tuple[str, tuple]:
+    """Return (sql_fragment, bind_args) for trade_mode filter. all → no clause."""
+    if mode in ("live", "paper"):
+        return "AND trade_mode = ?", (mode,)
+    return "", ()
 
 
 def _connect_ro() -> sqlite3.Connection:
@@ -61,40 +68,68 @@ def _starting_capital(conn: sqlite3.Connection) -> float:
 
 # ─────────────────────────── equity curve ───────────────────────────
 def equity_curve(conn: sqlite3.Connection) -> dict:
+    """Returns chronologically merged points with separate live/paper running
+    equities. Each row contains: trade_id, ticker, direction, trade_mode,
+    pnl_usd, closed_at, equity (mode-specific running total at this trade),
+    live_equity, paper_equity (both series at every step), pnl_cumulative
+    (mode-specific cumulative)."""
     starting = _starting_capital(conn)
     try:
         rows = conn.execute(
-            "SELECT id, ticker, direction, pnl_usd, closed_at "
+            "SELECT id, ticker, direction, pnl_usd, closed_at, "
+            "COALESCE(trade_mode, 'paper') "
             "FROM auto_trades WHERE status = 'closed' "
             "ORDER BY closed_at ASC"
         ).fetchall()
     except sqlite3.OperationalError:
         rows = []
 
-    points = []
-    running = starting
+    points: list[dict] = []
+    running_live = starting
+    running_paper = starting
     for r in rows:
         pnl = float(r[3] or 0.0)
-        running += pnl
+        mode = (r[5] or "paper").lower()
+        if mode == "live":
+            running_live += pnl
+            equity_now = running_live
+            cum = running_live - starting
+        else:
+            running_paper += pnl
+            equity_now = running_paper
+            cum = running_paper - starting
         points.append({
             "trade_id": r[0],
             "ticker": r[1],
             "direction": r[2],
+            "trade_mode": mode,
             "pnl_usd": round(pnl, 4),
             "closed_at": r[4],
-            "equity": round(running, 4),
-            "pnl_cumulative": round(running - starting, 4),
+            "equity": round(equity_now, 4),
+            "live_equity": round(running_live, 4),
+            "paper_equity": round(running_paper, 4),
+            "pnl_cumulative": round(cum, 4),
         })
+
+    live_count = sum(1 for p in points if p["trade_mode"] == "live")
+    paper_count = len(points) - live_count
+
     return {
         "points": points,
         "starting_capital": round(starting, 4),
-        "current_equity": round(running, 4),
+        "current_equity_live": round(running_live, 4),
+        "current_equity_paper": round(running_paper, 4),
+        # current_equity preserved for backwards compat (paper baseline of legacy view)
+        "current_equity": round(running_paper, 4),
         "total_trades": len(points),
+        "live_count": live_count,
+        "paper_count": paper_count,
     }
 
 
 # ─────────────────────────── analytics ──────────────────────────────
-def analytics(conn: sqlite3.Connection) -> dict:
+def analytics(conn: sqlite3.Connection, mode: str = "all") -> dict:
+    mode_sql, mode_args = _mode_clause(mode)
     # by_ticker
     by_ticker = []
     try:
@@ -104,8 +139,9 @@ def analytics(conn: sqlite3.Connection) -> dict:
             "  SUM(CASE WHEN pnl_usd <= 0 THEN 1 ELSE 0 END), "
             "  COALESCE(SUM(pnl_usd), 0), "
             "  COALESCE(AVG(pnl_pct), 0) "
-            "FROM auto_trades WHERE status = 'closed' "
-            "GROUP BY ticker ORDER BY COUNT(*) DESC"
+            f"FROM auto_trades WHERE status = 'closed' {mode_sql} "
+            "GROUP BY ticker ORDER BY COUNT(*) DESC",
+            mode_args,
         ):
             total = int(row[1] or 0)
             wins = int(row[2] or 0)
@@ -131,8 +167,9 @@ def analytics(conn: sqlite3.Connection) -> dict:
         for row in conn.execute(
             "SELECT COALESCE(exit_reason, 'unknown'), COUNT(*), "
             "COALESCE(SUM(pnl_usd), 0), COALESCE(AVG(pnl_pct), 0) "
-            "FROM auto_trades WHERE status = 'closed' "
-            "GROUP BY exit_reason"
+            f"FROM auto_trades WHERE status = 'closed' {mode_sql} "
+            "GROUP BY exit_reason",
+            mode_args,
         ):
             reason = row[0] or "unknown"
             count = int(row[1] or 0)
@@ -170,7 +207,8 @@ def analytics(conn: sqlite3.Connection) -> dict:
     try:
         rows = conn.execute(
             "SELECT id, ticker, direction, pnl_usd, pnl_pct, "
-            "hold_duration_minutes FROM auto_trades WHERE status = 'closed'"
+            f"hold_duration_minutes FROM auto_trades WHERE status = 'closed' {mode_sql}",
+            mode_args,
         ).fetchall()
     except sqlite3.OperationalError:
         rows = []
@@ -221,6 +259,7 @@ def analytics(conn: sqlite3.Connection) -> dict:
         "by_ticker": by_ticker,
         "by_exit_reason": by_exit_reason,
         "overall": overall,
+        "mode": mode,
     }
 
 
@@ -242,14 +281,16 @@ def _filter_clause(filt: str) -> str:
 
 
 def history(conn: sqlite3.Connection, page: int, limit: int,
-            filt: str, period: str) -> dict:
-    where_extra = f"{_filter_clause(filt)} {_period_clause(period)}".strip()
+            filt: str, period: str, mode: str = "all") -> dict:
+    mode_sql, mode_args = _mode_clause(mode)
+    where_extra = f"{_filter_clause(filt)} {_period_clause(period)} {mode_sql}".strip()
     offset = max(0, (page - 1) * limit)
 
     try:
         total_row = conn.execute(
             f"SELECT COUNT(*) FROM auto_trades "
-            f"WHERE status = 'closed' {where_extra}"
+            f"WHERE status = 'closed' {where_extra}",
+            mode_args,
         ).fetchone()
         total = int(total_row[0] or 0)
     except sqlite3.OperationalError:
@@ -262,12 +303,14 @@ def history(conn: sqlite3.Connection, page: int, limit: int,
             f"SELECT {cols} FROM auto_trades "
             f"WHERE status = 'closed' {where_extra} "
             "ORDER BY closed_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            (*mode_args, limit, offset),
         )
         for row in cur.fetchall():
             d = {DETAIL_COLS[i]: row[i] for i in range(len(DETAIL_COLS))}
             # Coerce breakeven_stop_active to bool for consistency
             d["breakeven_stop_active"] = bool(d.get("breakeven_stop_active") or 0)
+            # Default trade_mode to 'paper' when NULL (legacy rows)
+            d["trade_mode"] = (d.get("trade_mode") or "paper").lower()
             trades.append(d)
     except sqlite3.OperationalError:
         trades = []
@@ -282,6 +325,7 @@ def history(conn: sqlite3.Connection, page: int, limit: int,
         "limit": limit,
         "filter": filt,
         "period": period,
+        "mode": mode,
         "has_more": (page < pages),
     }
 
@@ -299,9 +343,12 @@ def main() -> int:
         if scope == "equity-curve":
             out = equity_curve(conn)
         elif scope == "analytics":
-            out = analytics(conn)
+            mode = sys.argv[2] if len(sys.argv) > 2 else "all"
+            if mode not in ("all", "live", "paper"):
+                mode = "all"
+            out = analytics(conn, mode)
         elif scope == "history":
-            # args: page limit filter period
+            # args: page limit filter period mode
             try:
                 page = int(sys.argv[2]) if len(sys.argv) > 2 else 1
                 limit = int(sys.argv[3]) if len(sys.argv) > 3 else 20
@@ -309,13 +356,16 @@ def main() -> int:
                 page, limit = 1, 20
             filt = sys.argv[4] if len(sys.argv) > 4 else "all"
             period = sys.argv[5] if len(sys.argv) > 5 else "all"
+            mode = sys.argv[6] if len(sys.argv) > 6 else "all"
             page = max(1, page)
             limit = max(1, min(100, limit))
             if filt not in ("all", "winners", "losers"):
                 filt = "all"
             if period not in ("all", "7d", "30d"):
                 period = "all"
-            out = history(conn, page, limit, filt, period)
+            if mode not in ("all", "live", "paper"):
+                mode = "all"
+            out = history(conn, page, limit, filt, period, mode)
         else:
             sys.stdout.write(json.dumps(
                 {"error": f"unknown scope: {scope}"}))

@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Settings } from "lucide-react";
+import { Settings, ChevronDown, ChevronRight } from "lucide-react";
+import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 
 // Editable auto_config panel.
 // - Numeric fields commit on blur / Enter. Toggles commit on click.
 // - Optimistic UI with a short "saved" flash and inline error text.
 // - Per-ticker leverage is view-only (source-of-truth is the executor constant).
+//
+// 2026-04-26 — Premium pass: split into PAPER + LIVE sections with explicit
+// LIVE_* edits, surfaces SDK error count and dead-man switch, and exposes
+// the hard capital cap as view-only (code-enforced floor).
 
 const GREEN = "#00ff88";
 const RED = "#ff4757";
@@ -37,18 +42,41 @@ type FieldDef = {
   suffix?: string;
 };
 
-const NUMERIC_FIELDS: FieldDef[] = [
+const PAPER_NUMERIC: FieldDef[] = [
   { key: "AGGRESSIVE_THRESHOLD", label: "Threshold", kind: "int", hint: "confidence floor" },
   { key: "MAX_CONCURRENT", label: "Max Concurrent", kind: "int" },
   { key: "MAX_TRADES_PER_DAY", label: "Max Daily", kind: "int" },
-  { key: "MAX_CONSECUTIVE_LOSSES", label: "Loss Streak Cap", kind: "int" },
-  { key: "PAUSE_AFTER_LOSSES_MINUTES", label: "Pause After Losses", kind: "int", suffix: "min" },
-  { key: "LEVERAGE_DEFAULT", label: "Discovery Leverage", kind: "float", suffix: "x", hint: "for non-mapped tickers" },
+  { key: "LEVERAGE_DEFAULT", label: "Discovery Leverage", kind: "float", suffix: "x", hint: "non-mapped tickers" },
+  {
+    key: "PER_TRADE_USD",
+    label: "Per-Trade (fallback)",
+    kind: "float",
+    suffix: "$",
+    hint: "dynamic $5–15 by confidence",
+  },
+  { key: "CAPITAL_USD", label: "Starting Capital", kind: "float", suffix: "$" },
 ];
 
-const TOGGLE_FIELDS: FieldDef[] = [
-  { key: "AUTO_TRADER_ENABLED", label: "Auto Trader", kind: "bool" },
-  { key: "TICKER_DISCOVERY", label: "Ticker Discovery", kind: "bool" },
+const LIVE_NUMERIC: FieldDef[] = [
+  { key: "LIVE_PER_TRADE_USD", label: "Per-Trade", kind: "float", suffix: "$", hint: "real money per trade" },
+  { key: "LIVE_MAX_CONCURRENT", label: "Max Concurrent", kind: "int" },
+  { key: "LIVE_MAX_DAILY_TRADES", label: "Max Daily", kind: "int" },
+  { key: "LIVE_LEVERAGE_DEFAULT", label: "Default Leverage", kind: "float", suffix: "x" },
+  { key: "LIVE_CAPITAL_USD", label: "Starting Capital", kind: "float", suffix: "$" },
+  { key: "LIVE_SLIPPAGE_PCT", label: "Slippage", kind: "float", suffix: "%", hint: "fraction (0.01 = 1%)" },
+  {
+    key: "LIVE_DEAD_MAN_SWITCH_MS",
+    label: "Dead-Man Switch",
+    kind: "int",
+    suffix: "ms",
+    hint: "halt if heartbeat misses",
+  },
+  {
+    key: "LIVE_SDK_ERROR_THRESHOLD",
+    label: "SDK Error Threshold",
+    kind: "int",
+    hint: "trigger pause after N errors",
+  },
 ];
 
 type ConfigResponse = {
@@ -60,11 +88,17 @@ type ConfigResponse = {
 
 type FieldStatus = "idle" | "saving" | "saved" | "error";
 
-export function ConfigPanel() {
+export function ConfigPanel({
+  summary,
+}: {
+  summary: AutoTraderSummary | null;
+}) {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, { s: FieldStatus; err?: string }>>({});
+  const [paperOpen, setPaperOpen] = useState(true);
+  const [liveOpen, setLiveOpen] = useState(true);
   const clearTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const setFieldStatus = useCallback(
@@ -129,6 +163,14 @@ export function ConfigPanel() {
     [setFieldStatus]
   );
 
+  const isLiveMode = (config["AUTO_LIVE_ENABLED"] || "false").toLowerCase() === "true";
+  const sdkErrors = Number(summary?.sdk_errors ?? 0);
+  const liveCap = Number(
+    summary?.live_hard_cap ?? config["LIVE_HARD_CAPITAL_CAP_USD"] ?? 50
+  );
+  const deadManMs = Number(config["LIVE_DEAD_MAN_SWITCH_MS"] ?? 300000);
+  const orderType = (config["LIVE_ORDER_TYPE"] || "market").toLowerCase();
+
   return (
     <div
       className="rounded-lg"
@@ -162,62 +204,148 @@ export function ConfigPanel() {
         </div>
       ) : (
         <div className="p-3 sm:p-4">
-          {/* Toggles (prominent row) */}
+          {/* Master toggles */}
           <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {TOGGLE_FIELDS.map((f) => (
-              <ToggleRow
-                key={f.key}
-                field={f}
-                value={config[f.key]}
-                status={status[f.key] || { s: "idle" }}
-                onChange={(v) => save(f.key, v ? "true" : "false")}
-              />
-            ))}
-          </div>
-
-          {/* Numeric fields 2-col grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {NUMERIC_FIELDS.map((f) => (
-              <NumericRow
-                key={f.key}
-                field={f}
-                value={config[f.key]}
-                status={status[f.key] || { s: "idle" }}
-                onCommit={(v) => save(f.key, v)}
-              />
-            ))}
-          </div>
-
-          {/* PER_TRADE_USD — numeric but with dynamic-range caption */}
-          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <NumericRow
+            <ToggleRow
               field={{
-                key: "PER_TRADE_USD",
-                label: "Per-Trade (fallback)",
-                kind: "float",
-                suffix: "$",
-                hint: "dynamic $5–15 by confidence",
+                key: "AUTO_TRADER_ENABLED",
+                label: "Auto Trader",
+                kind: "bool",
               }}
-              value={config["PER_TRADE_USD"]}
-              status={status["PER_TRADE_USD"] || { s: "idle" }}
-              onCommit={(v) => save("PER_TRADE_USD", v)}
+              value={config["AUTO_TRADER_ENABLED"]}
+              status={status["AUTO_TRADER_ENABLED"] || { s: "idle" }}
+              onChange={(v) => save("AUTO_TRADER_ENABLED", v ? "true" : "false")}
             />
-            <NumericRow
+            <ToggleRow
               field={{
-                key: "CAPITAL_USD",
-                label: "Starting Capital",
-                kind: "float",
-                suffix: "$",
+                key: "AUTO_LIVE_ENABLED",
+                label: "🟢 Live Mode (real money)",
+                kind: "bool",
               }}
-              value={config["CAPITAL_USD"]}
-              status={status["CAPITAL_USD"] || { s: "idle" }}
-              onCommit={(v) => save("CAPITAL_USD", v)}
+              value={config["AUTO_LIVE_ENABLED"]}
+              status={status["AUTO_LIVE_ENABLED"] || { s: "idle" }}
+              onChange={(v) => save("AUTO_LIVE_ENABLED", v ? "true" : "false")}
+              danger
             />
           </div>
 
-          {/* Leverage view-only */}
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <ToggleRow
+              field={{
+                key: "TICKER_DISCOVERY",
+                label: "Ticker Discovery",
+                kind: "bool",
+              }}
+              value={config["TICKER_DISCOVERY"]}
+              status={status["TICKER_DISCOVERY"] || { s: "idle" }}
+              onChange={(v) => save("TICKER_DISCOVERY", v ? "true" : "false")}
+            />
+            {/* spacer to keep grid alignment on desktop */}
+            <div className="hidden sm:block" />
+          </div>
+
+          {/* LIVE section (highlighted when live mode active) */}
+          <SectionHeader
+            label="🟢 Live Trading"
+            sub="real-money parameters"
+            isOpen={liveOpen}
+            highlight={isLiveMode}
+            onToggle={() => setLiveOpen((v) => !v)}
+          />
+          {liveOpen && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {LIVE_NUMERIC.map((f) => (
+                  <NumericRow
+                    key={f.key}
+                    field={f}
+                    value={config[f.key]}
+                    status={status[f.key] || { s: "idle" }}
+                    onCommit={(v) => save(f.key, v)}
+                    accent={isLiveMode}
+                  />
+                ))}
+              </div>
+
+              {/* Live view-only block */}
+              <div
+                className="mt-3 rounded border px-3 py-2"
+                style={{ borderColor: BORDER, background: INPUT_BG }}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className="text-[10px] uppercase tracking-[0.1em]"
+                    style={{ color: MUTED }}
+                  >
+                    Live Status (view-only)
+                  </span>
+                  <span className="text-[10px]" style={{ color: MUTED, opacity: 0.7 }}>
+                    code-enforced
+                  </span>
+                </div>
+                <div
+                  className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[12px]"
+                  style={{
+                    fontFamily: "var(--font-mono, 'IBM Plex Mono', monospace)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  <ViewOnly
+                    label="Hard Cap"
+                    value={`$${liveCap.toFixed(0)}`}
+                    color={GREEN}
+                    title="LIVE_HARD_CAPITAL_CAP_USD — uneditable floor"
+                  />
+                  <ViewOnly
+                    label="SDK Errors"
+                    value={String(sdkErrors)}
+                    color={sdkErrors > 0 ? AMBER : TEXT}
+                  />
+                  <ViewOnly
+                    label="Dead-Man"
+                    value={`${(deadManMs / 1000).toFixed(0)}s`}
+                    color={TEXT}
+                    title={`${deadManMs}ms`}
+                  />
+                  <ViewOnly
+                    label="Order Type"
+                    value={orderType}
+                    color={TEXT}
+                    title="LIVE_ORDER_TYPE — code-enforced"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* PAPER section */}
+          <div className="mt-4">
+            <SectionHeader
+              label="📄 Paper Trading"
+              sub="simulated parameters"
+              isOpen={paperOpen}
+              highlight={!isLiveMode}
+              onToggle={() => setPaperOpen((v) => !v)}
+            />
+            {paperOpen && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {PAPER_NUMERIC.map((f) => (
+                  <NumericRow
+                    key={f.key}
+                    field={f}
+                    value={config[f.key]}
+                    status={status[f.key] || { s: "idle" }}
+                    onCommit={(v) => save(f.key, v)}
+                    accent={!isLiveMode}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Per-ticker leverage view-only */}
           <div
-            className="mt-3 rounded border px-3 py-2"
+            className="mt-4 rounded border px-3 py-2"
             style={{ borderColor: BORDER, background: INPUT_BG }}
           >
             <div className="flex items-center justify-between">
@@ -259,27 +387,96 @@ export function ConfigPanel() {
   );
 }
 
+/* ── Section header with collapse chevron ── */
+function SectionHeader({
+  label,
+  sub,
+  isOpen,
+  highlight,
+  onToggle,
+}: {
+  label: string;
+  sub?: string;
+  isOpen: boolean;
+  highlight?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full flex items-center justify-between py-2 transition"
+      style={{ color: highlight ? GREEN : MUTED }}
+    >
+      <div className="flex items-center gap-2">
+        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span
+          className="text-[11px] uppercase tracking-[0.12em]"
+          style={{
+            fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
+            color: highlight ? GREEN : MUTED,
+          }}
+        >
+          {label}
+        </span>
+        {sub && (
+          <span className="text-[10px] opacity-60 normal-case tracking-normal">
+            {sub}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function ViewOnly({
+  label,
+  value,
+  color,
+  title,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  title?: string;
+}) {
+  return (
+    <div className="flex flex-col" title={title}>
+      <span className="text-[9px] uppercase tracking-[0.1em] opacity-70" style={{ color: MUTED }}>
+        {label}
+      </span>
+      <b style={{ color }}>{value}</b>
+    </div>
+  );
+}
+
 /* ── Toggle switch ── */
 function ToggleRow({
   field,
   value,
   status,
   onChange,
+  danger,
 }: {
   field: FieldDef;
   value: string | undefined;
   status: { s: FieldStatus; err?: string };
   onChange: (on: boolean) => void;
+  danger?: boolean;
 }) {
   const on = (value || "false").toLowerCase() === "true";
   const saving = status.s === "saving";
-  const trackBg = on ? GREEN : "#2a2d3a";
+  const trackBg = on ? (danger ? GREEN : GREEN) : "#2a2d3a";
   const thumbX = on ? 18 : 2;
 
   return (
     <div
       className="flex items-center justify-between rounded border px-3 py-2"
-      style={{ background: INPUT_BG, borderColor: BORDER }}
+      style={{
+        background: INPUT_BG,
+        borderColor: danger && on ? GREEN : BORDER,
+        boxShadow: danger && on ? `inset 0 0 16px ${GREEN}22` : "none",
+      }}
     >
       <div className="flex flex-col min-w-0">
         <span className="text-[11px]" style={{ color: MUTED }}>
@@ -337,11 +534,13 @@ function NumericRow({
   value,
   status,
   onCommit,
+  accent,
 }: {
   field: FieldDef;
   value: string | undefined;
   status: { s: FieldStatus; err?: string };
   onCommit: (value: string) => void;
+  accent?: boolean;
 }) {
   // Local draft so we don't overwrite while user is typing
   const [draft, setDraft] = useState<string>(value ?? "");
@@ -358,8 +557,9 @@ function NumericRow({
   const borderColor = useMemo(() => {
     if (status.s === "error") return RED;
     if (focused) return GREEN;
+    if (accent) return `${GREEN}33`;
     return BORDER;
-  }, [focused, status.s]);
+  }, [focused, status.s, accent]);
 
   const commit = () => {
     const trimmed = draft.trim();

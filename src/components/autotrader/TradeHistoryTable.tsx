@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ClipboardList, ChevronRight, ChevronDown } from "lucide-react";
 import { DirectionBadge } from "@/components/ui/direction-badge";
 import { fmtDollarPrice, fmtPctSigned } from "@/lib/format";
+import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 
 // Filterable, paginated, expandable history of closed auto trades.
 // - Filter pills: All / Winners / Losers × 7D / 30D / All Time
@@ -46,6 +47,7 @@ type Trade = {
   market_state: string | null;
   opened_at: string;
   closed_at: string;
+  trade_mode: "live" | "paper";
 };
 
 type HistoryResponse = {
@@ -56,11 +58,13 @@ type HistoryResponse = {
   limit: number;
   filter: string;
   period: string;
+  mode: string;
   has_more: boolean;
 };
 
 type FilterKind = "all" | "winners" | "losers";
 type PeriodKind = "all" | "7d" | "30d";
+type ModeKind = "all" | "live" | "paper";
 
 const PAGE_SIZE = 20;
 
@@ -96,9 +100,16 @@ function fmtAgo(iso: string): string {
   return `${month} ${day} ${hh}:${mm}`;
 }
 
-export function TradeHistoryTable() {
+export function TradeHistoryTable({
+  summary,
+}: {
+  summary: AutoTraderSummary | null;
+}) {
+  const isLiveMode = summary?.mode === "live";
   const [filter, setFilter] = useState<FilterKind>("all");
   const [period, setPeriod] = useState<PeriodKind>("all");
+  // Default to current bot mode (live → live, paper → paper)
+  const [mode, setMode] = useState<ModeKind>(isLiveMode ? "live" : "paper");
   const [trades, setTrades] = useState<Trade[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -108,8 +119,19 @@ export function TradeHistoryTable() {
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  // Re-derive default mode when summary mode flips (e.g. flipping to live in config)
+  useEffect(() => {
+    setMode(isLiveMode ? "live" : "paper");
+  }, [isLiveMode]);
+
   const fetchPage = useCallback(
-    async (p: number, append: boolean, f: FilterKind, per: PeriodKind) => {
+    async (
+      p: number,
+      append: boolean,
+      f: FilterKind,
+      per: PeriodKind,
+      m: ModeKind
+    ) => {
       if (append) setLoadingMore(true);
       else setLoading(true);
       try {
@@ -118,6 +140,7 @@ export function TradeHistoryTable() {
           limit: String(PAGE_SIZE),
           filter: f,
           period: per,
+          mode: m,
         });
         const res = await fetch(`/api/auto-trader/history?${qs.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -140,8 +163,8 @@ export function TradeHistoryTable() {
 
   useEffect(() => {
     setExpanded(new Set());
-    fetchPage(1, false, filter, period);
-  }, [filter, period, fetchPage]);
+    fetchPage(1, false, filter, period, mode);
+  }, [filter, period, mode, fetchPage]);
 
   const toggle = (id: number) => {
     setExpanded((prev) => {
@@ -175,13 +198,28 @@ export function TradeHistoryTable() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
+          <PillGroup<ModeKind>
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "live", label: "Live" },
+              { value: "paper", label: "Paper" },
+              { value: "all", label: "All" },
+            ]}
+          />
+          <span
+            className="text-[10px]"
+            style={{ color: MUTED, opacity: 0.4 }}
+          >
+            |
+          </span>
           <PillGroup<FilterKind>
             value={filter}
             onChange={setFilter}
             options={[
               { value: "all", label: "All" },
-              { value: "winners", label: "Winners" },
-              { value: "losers", label: "Losers" },
+              { value: "winners", label: "Wins" },
+              { value: "losers", label: "Losses" },
             ]}
           />
           <span
@@ -196,7 +234,7 @@ export function TradeHistoryTable() {
             options={[
               { value: "7d", label: "7D" },
               { value: "30d", label: "30D" },
-              { value: "all", label: "All Time" },
+              { value: "all", label: "All" },
             ]}
           />
         </div>
@@ -219,11 +257,18 @@ export function TradeHistoryTable() {
                 <span style={{ color: RED }}>failed to load</span>
                 <span className="text-[10px] opacity-70">{err}</span>
               </>
-            ) : total === 0 && filter === "all" && period === "all" ? (
+            ) : total === 0 && filter === "all" && period === "all" && mode === "all" ? (
               <>
                 <span>no closed trades yet</span>
                 <span className="text-[10px] opacity-70">
                   waiting for the first one
+                </span>
+              </>
+            ) : total === 0 && mode === "live" ? (
+              <>
+                <span>🟢 no live trades yet</span>
+                <span className="text-[10px] opacity-70">
+                  flip to Paper or All to see history
                 </span>
               </>
             ) : (
@@ -256,7 +301,7 @@ export function TradeHistoryTable() {
             <button
               type="button"
               disabled={loadingMore}
-              onClick={() => fetchPage(page + 1, true, filter, period)}
+              onClick={() => fetchPage(page + 1, true, filter, period, mode)}
               className="rounded border px-3 py-1 text-[11px] uppercase tracking-[0.08em] transition"
               style={{
                 background: "transparent",
@@ -324,6 +369,7 @@ function TradeRow({
           {t.ticker}
         </span>
         <DirectionBadge dir={t.direction} />
+        <ModeBadge isLive={t.trade_mode === "live"} />
 
         <span
           className="text-[12px] sm:text-[13px] font-semibold"
@@ -466,6 +512,25 @@ function Detail({
       </span>
       <span className="truncate">{children}</span>
     </div>
+  );
+}
+
+/* ── LIVE / PAPER micro badge ── */
+function ModeBadge({ isLive }: { isLive: boolean }) {
+  return (
+    <span
+      className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
+      style={{
+        background: isLive ? `${GREEN}1a` : `${MUTED}22`,
+        color: isLive ? GREEN : MUTED,
+        border: `1px solid ${isLive ? `${GREEN}55` : `${MUTED}44`}`,
+        letterSpacing: "0.1em",
+        fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
+      }}
+      title={isLive ? "Real money trade" : "Simulated trade"}
+    >
+      {isLive ? "LIVE" : "PAPER"}
+    </span>
   );
 }
 

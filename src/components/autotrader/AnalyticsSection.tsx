@@ -5,6 +5,7 @@ import { BarChart2 } from "lucide-react";
 import { EquityCurveChart } from "./EquityCurveChart";
 import { WinRateByTickerChart } from "./WinRateByTickerChart";
 import { PnlByExitReasonChart } from "./PnlByExitReasonChart";
+import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 
 const GREEN = "#00ff88";
 const RED = "#ff4757";
@@ -13,15 +14,19 @@ const TEXT = "#e8e8f0";
 const MUTED = "#8888a0";
 const BORDER = "#1e2030";
 const SURFACE = "#12131a";
-const PANEL_BG = "#0b110c"; // slightly greenish dark for chart backgrounds
+const PANEL_BG = "#0b110c";
+const DARK = "#0a0a0f";
 
 type EquityPoint = {
   trade_id: number;
   ticker: string;
   direction: string;
+  trade_mode: "live" | "paper";
   pnl_usd: number;
   closed_at: string;
   equity: number;
+  live_equity: number;
+  paper_equity: number;
   pnl_cumulative: number;
 };
 
@@ -29,7 +34,11 @@ type EquityResponse = {
   points: EquityPoint[];
   starting_capital: number;
   current_equity: number;
+  current_equity_live: number;
+  current_equity_paper: number;
   total_trades: number;
+  live_count: number;
+  paper_count: number;
 };
 
 type TickerRow = {
@@ -68,9 +77,36 @@ type AnalyticsResponse = {
   by_ticker: TickerRow[];
   by_exit_reason: ExitReasonRow[];
   overall: Overall;
+  mode: string;
 };
 
-export function AnalyticsSection() {
+type Show = "live" | "paper" | "both";
+type ModeFilter = "all" | "live" | "paper";
+
+export function AnalyticsSection({
+  summary,
+}: {
+  summary: AutoTraderSummary | null;
+}) {
+  // Equity curve view (independent toggle, defaults to current mode + paper backdrop)
+  const isLiveMode = summary?.mode === "live";
+  const [show, setShow] = useState<Show>(isLiveMode ? "both" : "paper");
+  // Charts mode filter — defaults to current mode
+  const [modeFilter, setModeFilter] = useState<ModeFilter>(
+    isLiveMode ? "live" : "paper"
+  );
+
+  // When the bot's mode flips, re-derive defaults once
+  useEffect(() => {
+    if (isLiveMode) {
+      setShow("both");
+      setModeFilter("live");
+    } else {
+      setShow("paper");
+      setModeFilter("paper");
+    }
+  }, [isLiveMode]);
+
   const [equity, setEquity] = useState<EquityResponse | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +118,7 @@ export function AnalyticsSection() {
       try {
         const [eqRes, anRes] = await Promise.all([
           fetch("/api/auto-trader/equity-curve"),
-          fetch("/api/auto-trader/analytics"),
+          fetch(`/api/auto-trader/analytics?mode=${modeFilter}`),
         ]);
         if (cancelled) return;
         const eq = (await eqRes.json()) as EquityResponse;
@@ -103,29 +139,42 @@ export function AnalyticsSection() {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [modeFilter]);
 
   const overall = analytics?.overall;
 
   return (
     <section>
       {/* Heading */}
-      <div className="mb-2 flex items-center gap-2 px-1">
-        <BarChart2 size={14} style={{ color: MUTED }} />
-        <span
-          className="text-[11px] uppercase tracking-[0.12em]"
-          style={{
-            fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
-            color: MUTED,
-          }}
-        >
-          Analytics
-        </span>
-        {err && (
-          <span className="text-[10px]" style={{ color: RED }}>
-            · {err}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2">
+          <BarChart2 size={14} style={{ color: MUTED }} />
+          <span
+            className="text-[11px] uppercase tracking-[0.12em]"
+            style={{
+              fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
+              color: MUTED,
+            }}
+          >
+            Analytics
           </span>
-        )}
+          {err && (
+            <span className="text-[10px]" style={{ color: RED }}>
+              · {err}
+            </span>
+          )}
+        </div>
+
+        <ModePillGroup<ModeFilter>
+          value={modeFilter}
+          onChange={setModeFilter}
+          options={[
+            { value: "live", label: "Live" },
+            { value: "paper", label: "Paper" },
+            { value: "all", label: "All" },
+          ]}
+          label="WR · P&L"
+        />
       </div>
 
       {/* Overall summary strip */}
@@ -193,6 +242,9 @@ export function AnalyticsSection() {
             <span className="opacity-70">Avg hold:</span>{" "}
             <b style={{ color: TEXT }}>{fmtMinutes(overall.avg_hold_minutes)}</b>
           </span>
+          <span className="ml-auto opacity-70">
+            mode: <b style={{ color: TEXT }}>{(analytics?.mode || "all").toUpperCase()}</b>
+          </span>
         </div>
       )}
 
@@ -202,23 +254,36 @@ export function AnalyticsSection() {
         style={{ background: PANEL_BG, borderColor: BORDER }}
       >
         <div
-          className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.1em]"
+          className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.1em]"
           style={{ color: MUTED }}
         >
           <span>Equity Curve</span>
-          {equity && (
-            <span className="opacity-70">
-              {equity.total_trades} trades · $
-              {equity.current_equity.toFixed(2)} current
-            </span>
-          )}
+          <div className="flex items-center gap-2 normal-case tracking-normal">
+            {equity && (
+              <span className="opacity-70 hidden sm:inline">
+                live ${equity.current_equity_live.toFixed(2)} · paper $
+                {equity.current_equity_paper.toFixed(2)}
+              </span>
+            )}
+            <ModePillGroup<Show>
+              value={show}
+              onChange={setShow}
+              options={[
+                { value: "live", label: "Live" },
+                { value: "paper", label: "Paper" },
+                { value: "both", label: "Both" },
+              ]}
+            />
+          </div>
         </div>
         {loading && !equity ? (
-          <ChartSkeleton height={200} />
+          <ChartSkeleton height={220} />
         ) : (
           <EquityCurveChart
             points={equity?.points || []}
             startingCapital={equity?.starting_capital ?? 50}
+            show={show}
+            liveCount={equity?.live_count ?? 0}
           />
         )}
       </div>
@@ -240,6 +305,8 @@ export function AnalyticsSection() {
           </div>
           {loading && !analytics ? (
             <ChartSkeleton height={180} />
+          ) : analytics?.by_ticker?.length === 0 ? (
+            <EmptyMode mode={modeFilter} />
           ) : (
             <WinRateByTickerChart data={analytics?.by_ticker || []} />
           )}
@@ -266,6 +333,66 @@ export function AnalyticsSection() {
         </div>
       </div>
     </section>
+  );
+}
+
+function ModePillGroup<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+  label?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {label && (
+        <span
+          className="text-[9px] uppercase tracking-[0.1em] opacity-70"
+          style={{ color: MUTED }}
+        >
+          {label}
+        </span>
+      )}
+      <div
+        className="flex items-center gap-0.5 rounded-full border p-0.5"
+        style={{ borderColor: BORDER, background: DARK }}
+      >
+        {options.map((o) => {
+          const active = o.value === value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => onChange(o.value)}
+              className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] transition"
+              style={{
+                fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
+                background: active ? GREEN : "transparent",
+                color: active ? DARK : MUTED,
+                fontWeight: active ? 700 : 500,
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EmptyMode({ mode }: { mode: ModeFilter }) {
+  return (
+    <div
+      className="flex items-center justify-center text-[11px] py-12"
+      style={{ color: MUTED }}
+    >
+      no <b className="mx-1">{mode}</b> trades yet
+    </div>
   );
 }
 

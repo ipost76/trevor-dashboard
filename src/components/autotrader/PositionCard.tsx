@@ -30,6 +30,7 @@ export function PositionCard({ p }: { p: AutoTraderPosition }) {
   const hasPrice = p.current_price != null && !p.price_stale;
   const peakFadingDown = p.peak_pnl_pct > 0 && p.live_pnl_pct < p.peak_pnl_pct;
   const confDisplay = p.adjusted_confidence ?? p.confidence;
+  const isLiveTrade = p.trade_mode === "live";
 
   const rColor =
     p.r_multiple >= 1 ? GREEN : p.r_multiple < 0 ? RED : TEXT;
@@ -58,6 +59,7 @@ export function PositionCard({ p }: { p: AutoTraderPosition }) {
           {p.ticker}
         </div>
         <DirectionBadge dir={p.direction} />
+        <ModeBadge isLive={isLiveTrade} />
 
         <div
           className="flex items-center gap-1.5 text-[12px] sm:text-[13px]"
@@ -113,6 +115,16 @@ export function PositionCard({ p }: { p: AutoTraderPosition }) {
           {p.hold_display}
         </span>
       </div>
+
+      {/* ── Progress bar: stop → target ── */}
+      <ProgressBar
+        entry={p.entry_price}
+        stop={p.stop_price}
+        target={p.target_price}
+        current={p.current_price}
+        direction={p.direction}
+        isProfit={isProfit}
+      />
 
       {/* ── Exit engine row ── */}
       <div
@@ -209,4 +221,143 @@ export function PositionCard({ p }: { p: AutoTraderPosition }) {
       </div>
     </div>
   );
+}
+
+/* ── LIVE / PAPER micro badge ── */
+function ModeBadge({ isLive }: { isLive: boolean }) {
+  return (
+    <span
+      className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
+      style={{
+        background: isLive ? `${GREEN}1a` : `${MUTED}22`,
+        color: isLive ? GREEN : MUTED,
+        border: `1px solid ${isLive ? `${GREEN}55` : `${MUTED}44`}`,
+        letterSpacing: "0.1em",
+        fontFamily: "var(--font-display, 'Orbitron', sans-serif)",
+      }}
+      title={isLive ? "Real money trade" : "Simulated trade"}
+    >
+      {isLive ? "LIVE" : "PAPER"}
+    </span>
+  );
+}
+
+/* ── Stop → Target progress bar ──
+   Visual ribbon with 3 anchors: stop (left/red), entry (mid-tick), target (right/green).
+   A vertical "current" tick floats based on price position.
+   For LONG: stop < entry < target. For SHORT: stop > entry > target (we flip the math). */
+function ProgressBar({
+  entry,
+  stop,
+  target,
+  current,
+  direction,
+  isProfit,
+}: {
+  entry: number;
+  stop: number;
+  target: number;
+  current: number | null;
+  direction: string;
+  isProfit: boolean;
+}) {
+  if (!entry || !stop || !target) return null;
+
+  const isLong = direction.toUpperCase() !== "SHORT";
+
+  // Map [stop → target] to [0 → 1]. Same formula works for both directions
+  // because we just normalize against the absolute travel.
+  const range = target - stop;
+  if (range === 0) return null;
+  const entryFrac = clamp01((entry - stop) / range);
+
+  let curFrac: number | null = null;
+  if (current != null && isFinite(current)) {
+    curFrac = clamp01((current - stop) / range);
+  }
+
+  const profitColor = isProfit ? GREEN : RED;
+  const stopColor = isLong ? RED : GREEN;
+  const targetColor = isLong ? GREEN : RED;
+
+  return (
+    <div className="mt-2.5 mb-1">
+      <div
+        className="relative h-1.5 rounded-full overflow-visible"
+        style={{
+          background: `linear-gradient(90deg, ${stopColor}55 0%, ${MUTED}33 ${(
+            entryFrac * 100
+          ).toFixed(2)}%, ${targetColor}55 100%)`,
+          border: `1px solid ${BORDER}`,
+        }}
+        aria-label={`Stop ${stop} entry ${entry} target ${target} current ${current ?? "n/a"}`}
+      >
+        {/* Entry tick */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2"
+          style={{
+            left: `${(entryFrac * 100).toFixed(2)}%`,
+            transform: "translate(-50%, -50%)",
+            width: 1,
+            height: 8,
+            background: MUTED,
+            opacity: 0.6,
+          }}
+          aria-hidden
+          title={`Entry ${entry}`}
+        />
+        {/* Current tick */}
+        {curFrac != null && (
+          <div
+            className="absolute"
+            style={{
+              left: `${(curFrac * 100).toFixed(2)}%`,
+              top: "50%",
+              transform: "translate(-50%, -50%)",
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              background: profitColor,
+              boxShadow: `0 0 8px ${profitColor}`,
+              border: `2px solid #0a0a0f`,
+              zIndex: 1,
+            }}
+            aria-hidden
+            title={`Current ${current}`}
+          />
+        )}
+      </div>
+
+      {/* Endpoint labels */}
+      <div
+        className="mt-1 flex justify-between text-[9px]"
+        style={{
+          color: MUTED,
+          fontFamily: "var(--font-mono, 'IBM Plex Mono', monospace)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        <span style={{ color: stopColor, opacity: 0.85 }}>
+          STOP {fmtCompact(stop)}
+        </span>
+        <span style={{ opacity: 0.6 }}>ENTRY {fmtCompact(entry)}</span>
+        <span style={{ color: targetColor, opacity: 0.85 }}>
+          TGT {fmtCompact(target)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function clamp01(v: number): number {
+  if (!isFinite(v)) return 0.5;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+function fmtCompact(n: number): string {
+  if (!isFinite(n)) return "—";
+  // Mirror fmtPrice: up to 3 decimals, strip trailing zeros
+  return n.toFixed(3).replace(/\.?0+$/, "");
 }

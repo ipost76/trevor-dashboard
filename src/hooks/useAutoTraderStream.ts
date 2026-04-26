@@ -23,6 +23,7 @@ export type AutoTraderPosition = {
   opened_at: string;
   regime_at_entry: string | null;
   market_state: string | null;
+  trade_mode: "live" | "paper";
 
   // enriched server-side:
   current_price: number | null;
@@ -37,13 +38,22 @@ export type AutoTraderPosition = {
 
 export type AutoTraderSummary = {
   enabled: boolean;
+  mode: "live" | "paper";
   equity: number;
+  equity_source: "hyperliquid" | "simulated";
   starting_capital: number;
   pnl_total: number;
+  today_pnl: number;
+  today_count: number;
   open_count: number;
+  open_notional: number;
   max_concurrent: number;
   trades_today: number;
   max_daily: number;
+  last_trade_at: string | null;
+  consecutive_losses: number;
+  sdk_errors: number;
+  live_hard_cap: number;
   stats_7d: {
     total_trades: number;
     wins: number;

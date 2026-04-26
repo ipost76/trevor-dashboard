@@ -24,24 +24,35 @@ type Position = Record<string, unknown> & {
   leverage: number;
   notional_usd: number;
   opened_at: string;
+  trade_mode?: string;
 };
 
 type Summary = {
   enabled: boolean;
+  mode: "live" | "paper";
   equity: number;
+  equity_source: "hyperliquid" | "simulated";
   starting_capital: number;
   pnl_total: number;
+  today_pnl: number;
+  today_count: number;
   open_count: number;
+  open_notional: number;
   max_concurrent: number;
   trades_today: number;
   max_daily: number;
+  last_trade_at: string | null;
+  consecutive_losses: number;
+  sdk_errors: number;
+  live_hard_cap: number;
   stats_7d: { total_trades: number; wins: number; losses: number; win_rate: number; total_pnl: number };
 };
 
 type Cached = { positions: Record<string, unknown>[]; summary: Summary; ts: number };
 let sharedCache: Cached | null = null;
 const CACHE_TTL_MS = 5_000;
-const TICK_MS = 30_000;
+// 2026-04-26: hero requested 15s push cadence for premium live feel.
+const TICK_MS = 15_000;
 
 async function fetchHyperliquidMids(): Promise<Record<string, number>> {
   try {
@@ -84,19 +95,35 @@ async function buildTick(): Promise<{ positions: Record<string, unknown>[]; summ
   const raw = runPython("query_auto_trader_live.py", [], { timeout: 10_000 });
   const snap = safeJsonParse<{
     enabled: boolean;
+    mode?: string;
     equity: number;
     starting_capital: number;
     open_positions: Position[];
     stats_7d: Summary["stats_7d"];
     trades_today: number;
+    today_pnl?: number;
+    today_count?: number;
+    open_notional?: number;
+    last_trade_at?: string | null;
+    consecutive_losses?: number;
+    sdk_errors?: number;
+    live_hard_cap?: number;
     config: Record<string, string>;
   }>(raw, {
     enabled: false,
+    mode: "paper",
     equity: 0,
     starting_capital: 50,
     open_positions: [],
     stats_7d: { total_trades: 0, wins: 0, losses: 0, win_rate: 0, total_pnl: 0 },
     trades_today: 0,
+    today_pnl: 0,
+    today_count: 0,
+    open_notional: 0,
+    last_trade_at: null,
+    consecutive_losses: 0,
+    sdk_errors: 0,
+    live_hard_cap: 50,
     config: {},
   });
 
@@ -144,16 +171,40 @@ async function buildTick(): Promise<{ positions: Record<string, unknown>[]; summ
 
   const equity = Number(snap.equity || 0);
   const starting = Number(snap.starting_capital || 50);
+  const mode: "live" | "paper" = snap.mode === "live" ? "live" : "paper";
+  const isLive = mode === "live";
+
+  // For live mode, draw concurrency/daily caps from LIVE_* config keys.
+  const maxConcurrent = isLive
+    ? Number(snap.config?.LIVE_MAX_CONCURRENT ?? 3)
+    : Number(snap.config?.MAX_CONCURRENT ?? 5);
+  const maxDaily = isLive
+    ? Number(snap.config?.LIVE_MAX_DAILY_TRADES ?? 10)
+    : Number(snap.config?.MAX_TRADES_PER_DAY ?? 15);
+
+  const openNotional =
+    snap.open_notional != null
+      ? Number(snap.open_notional)
+      : positions.reduce((acc, p) => acc + Number(p.notional_usd || 0), 0);
 
   const summary: Summary = {
     enabled: !!snap.enabled,
+    mode,
     equity,
+    equity_source: isLive ? "hyperliquid" : "simulated",
     starting_capital: starting,
     pnl_total: Math.round((equity - starting) * 10000) / 10000,
+    today_pnl: Math.round(Number(snap.today_pnl ?? 0) * 10000) / 10000,
+    today_count: Number(snap.today_count ?? 0),
     open_count: positions.length,
-    max_concurrent: Number(snap.config?.MAX_CONCURRENT ?? 5),
+    open_notional: Math.round(openNotional * 100) / 100,
+    max_concurrent: maxConcurrent,
     trades_today: Number(snap.trades_today || 0),
-    max_daily: Number(snap.config?.MAX_TRADES_PER_DAY ?? 15),
+    max_daily: maxDaily,
+    last_trade_at: snap.last_trade_at ?? null,
+    consecutive_losses: Number(snap.consecutive_losses ?? 0),
+    sdk_errors: Number(snap.sdk_errors ?? 0),
+    live_hard_cap: Number(snap.live_hard_cap ?? 50),
     stats_7d: snap.stats_7d || { total_trades: 0, wins: 0, losses: 0, win_rate: 0, total_pnl: 0 },
   };
 

@@ -12,17 +12,31 @@ import { runPython, safeJsonParse } from "@/lib/api-helpers";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+// 2026-04-25: MAX_CONSECUTIVE_LOSSES + PAUSE_AFTER_LOSSES_MINUTES removed
+// (Gate 4 deleted in trevor/auto_trader/manager.py; auto trader no longer
+// self-pauses). Whitelist enforced in both this route AND the Python writer.
+// 2026-04-26: LIVE_* family added (premium live dashboard). Mirrors the
+// Python ALLOWED_WRITE_KEYS in query_auto_trader_config.py exactly.
 const ALLOWED_WRITE_KEYS = new Set<string>([
+  // Paper / generic
   "AUTO_TRADER_ENABLED",
   "MAX_CONCURRENT",
   "MAX_TRADES_PER_DAY",
-  "MAX_CONSECUTIVE_LOSSES",
-  "PAUSE_AFTER_LOSSES_MINUTES",
   "AGGRESSIVE_THRESHOLD",
   "TICKER_DISCOVERY",
   "CAPITAL_USD",
   "PER_TRADE_USD",
   "LEVERAGE_DEFAULT",
+  // Live (real money)
+  "AUTO_LIVE_ENABLED",
+  "LIVE_CAPITAL_USD",
+  "LIVE_PER_TRADE_USD",
+  "LIVE_MAX_CONCURRENT",
+  "LIVE_MAX_DAILY_TRADES",
+  "LIVE_LEVERAGE_DEFAULT",
+  "LIVE_DEAD_MAN_SWITCH_MS",
+  "LIVE_SDK_ERROR_THRESHOLD",
+  "LIVE_SLIPPAGE_PCT",
 ]);
 
 export async function GET() {
