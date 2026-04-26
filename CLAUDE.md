@@ -676,3 +676,77 @@ One consolidated Python helper `query_auto_trader_history.py` with three scopes:
 - Auto-close canary clean.
 - Chart primitives reuse `CHART_COLORS` theme (no new palette drift).
 - No new npm deps (Recharts 2.15.4 was already installed).
+
+## Auto Trader Premium Live Dashboard (2026-04-26)
+
+Premium overhaul of `/trading?tab=autotrader` for the paper→live transition.
+Page is mode-aware end-to-end (HeaderBar, PositionCards, charts, history,
+config). Single-scroll: Header → Open Positions → Config → Analytics → History.
+
+### New behavior
+- **Mode badge** in HeaderBar — "🟢 LIVE" or "📄 PAPER", driven by
+  `AUTO_LIVE_ENABLED` config key. Sticky on scroll (z-21 above tab strip).
+- **Kill switch** (new `KillSwitch.tsx`) — 2-tap with 3s confirmation
+  window. POSTs `/api/kill-switch` activate/deactivate (flag file
+  `/home/trevor/trevor/.kill_switch`). Shows DEACTIVATE state when active.
+- **4 hero stat cards** — Equity, Total P&L, Today P&L, Open positions
+  (count/max + $ exposure). 2×2 mobile, 4×1 desktop.
+- **Warning chips** — SDK errors (live + count > 0), N-loss streak (≥2),
+  near hard cap (live equity ≥ 90% of `LIVE_HARD_CAPITAL_CAP_USD`).
+- **PositionCard** — LIVE/PAPER micro-badge + stop→target progress bar
+  (current price floats as glowing dot; entry tick at midpoint).
+- **EquityCurveChart** — two `<Line>` series; `live_equity` and `paper_equity`
+  tracked at every step. Live/Paper/Both pill above chart. Empty-live placeholder.
+- **WR by ticker / P&L by exit reason** — re-fetch on mode change
+  (`?mode=live|paper|all`).
+- **TradeHistoryTable** — mode pill (Live/Paper/All) + per-row LIVE/PAPER
+  badge. Defaults to current bot mode.
+- **ConfigPanel** — split into PAPER and LIVE collapsible sections.
+  LIVE section editable: `AUTO_LIVE_ENABLED`, `LIVE_PER_TRADE_USD`,
+  `LIVE_MAX_CONCURRENT`, `LIVE_MAX_DAILY_TRADES`, `LIVE_LEVERAGE_DEFAULT`,
+  `LIVE_CAPITAL_USD`, `LIVE_SLIPPAGE_PCT`, `LIVE_DEAD_MAN_SWITCH_MS`,
+  `LIVE_SDK_ERROR_THRESHOLD`. View-only: `LIVE_HARD_CAPITAL_CAP_USD`
+  ($50 code-enforced), SDK error count, dead-man switch (seconds), order type.
+
+### SSE summary fields added
+`mode`, `equity_source` ("hyperliquid" | "simulated"), `today_pnl`,
+`today_count`, `open_notional`, `last_trade_at`, `consecutive_losses`,
+`sdk_errors`, `live_hard_cap`. SSE tick lowered 30s → 15s.
+
+### API routes
+| Route | Change |
+|------|--------|
+| `/api/auto-trader/stream` | New summary fields; 15s tick |
+| `/api/auto-trader/equity-curve` | Each point carries `trade_mode` + `live_equity` + `paper_equity` running totals |
+| `/api/auto-trader/analytics` | Accepts `?mode=all\|live\|paper` |
+| `/api/auto-trader/history` | Accepts `?mode=all\|live\|paper`; rows include `trade_mode` |
+| `/api/auto-trader/config` | Whitelist extended with 9 LIVE_* keys (plus AUTO_LIVE_ENABLED). `LIVE_HARD_CAPITAL_CAP_USD` and `LIVE_ORDER_TYPE` remain view-only. |
+
+### Whitelist (final, 17 keys)
+Paper/generic: AUTO_TRADER_ENABLED, MAX_CONCURRENT, MAX_TRADES_PER_DAY,
+AGGRESSIVE_THRESHOLD, TICKER_DISCOVERY, CAPITAL_USD, PER_TRADE_USD,
+LEVERAGE_DEFAULT.
+Live (real money): AUTO_LIVE_ENABLED, LIVE_CAPITAL_USD, LIVE_PER_TRADE_USD,
+LIVE_MAX_CONCURRENT, LIVE_MAX_DAILY_TRADES, LIVE_LEVERAGE_DEFAULT,
+LIVE_DEAD_MAN_SWITCH_MS, LIVE_SDK_ERROR_THRESHOLD, LIVE_SLIPPAGE_PCT.
+Mirrored exactly in `query_auto_trader_config.py` ALLOWED_WRITE_KEYS.
+
+### Files
+- New: `src/components/autotrader/KillSwitch.tsx`
+- Rewritten: `EquityCurveChart.tsx`, `HeaderBar.tsx`, `ConfigPanel.tsx`,
+  `AnalyticsSection.tsx`
+- Edited: `PositionCard.tsx`, `TradeHistoryTable.tsx`,
+  `useAutoTraderStream.ts`, all 5 `auto-trader/*` API routes,
+  `query_auto_trader_live.py`, `query_auto_trader_history.py`,
+  `query_auto_trader_config.py`
+
+### Verification
+- Build clean. /trading bundle 48.1 → 51.7 kB (+3.6kB).
+- SSE first event ~100ms; emits both `positions` and `summary` with all new fields.
+- Analytics + history mode filter end-to-end (paper: 53 trades, 47.2% WR;
+  live: 0 trades; all: 53). Equity-curve splits correctly: live_count=0,
+  paper_count=53, current_equity_live=$50, current_equity_paper=$40.69.
+- Config write+read+restore tested for `LIVE_PER_TRADE_USD`. Disallowed
+  key (`LIVE_HARD_CAPITAL_CAP_USD`) rejected with 400.
+- Kill switch GET returns `{"active":false}` baseline.
+- Sacred files unchanged. trevor.service untouched (PID 2076449 preserved).
