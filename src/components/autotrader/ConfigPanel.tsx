@@ -42,10 +42,13 @@ type FieldDef = {
   suffix?: string;
 };
 
+// 2026-04-27 Aggressive Mode Sweep: limit fields removed from UI.
+// Removed: MAX_CONCURRENT, MAX_TRADES_PER_DAY, CAPITAL_USD (paper);
+//          LIVE_MAX_CONCURRENT, LIVE_MAX_DAILY_TRADES, LIVE_CAPITAL_USD,
+//          LIVE_DEAD_MAN_SWITCH_MS, LIVE_SDK_ERROR_THRESHOLD (live).
+// Dead-man switch + hard capital cap remain CODE-ENFORCED — see view-only block.
 const PAPER_NUMERIC: FieldDef[] = [
-  { key: "AGGRESSIVE_THRESHOLD", label: "Threshold", kind: "int", hint: "confidence floor" },
-  { key: "MAX_CONCURRENT", label: "Max Concurrent", kind: "int" },
-  { key: "MAX_TRADES_PER_DAY", label: "Max Daily", kind: "int" },
+  { key: "AGGRESSIVE_THRESHOLD", label: "Threshold", kind: "int", hint: "confidence floor — only execution gate" },
   { key: "LEVERAGE_DEFAULT", label: "Discovery Leverage", kind: "float", suffix: "x", hint: "non-mapped tickers" },
   {
     key: "PER_TRADE_USD",
@@ -54,29 +57,12 @@ const PAPER_NUMERIC: FieldDef[] = [
     suffix: "$",
     hint: "dynamic $5–15 by confidence",
   },
-  { key: "CAPITAL_USD", label: "Starting Capital", kind: "float", suffix: "$" },
 ];
 
 const LIVE_NUMERIC: FieldDef[] = [
   { key: "LIVE_PER_TRADE_USD", label: "Per-Trade", kind: "float", suffix: "$", hint: "real money per trade" },
-  { key: "LIVE_MAX_CONCURRENT", label: "Max Concurrent", kind: "int" },
-  { key: "LIVE_MAX_DAILY_TRADES", label: "Max Daily", kind: "int" },
   { key: "LIVE_LEVERAGE_DEFAULT", label: "Default Leverage", kind: "float", suffix: "x" },
-  { key: "LIVE_CAPITAL_USD", label: "Starting Capital", kind: "float", suffix: "$" },
   { key: "LIVE_SLIPPAGE_PCT", label: "Slippage", kind: "float", suffix: "%", hint: "fraction (0.01 = 1%)" },
-  {
-    key: "LIVE_DEAD_MAN_SWITCH_MS",
-    label: "Dead-Man Switch",
-    kind: "int",
-    suffix: "ms",
-    hint: "halt if heartbeat misses",
-  },
-  {
-    key: "LIVE_SDK_ERROR_THRESHOLD",
-    label: "SDK Error Threshold",
-    kind: "int",
-    hint: "trigger pause after N errors",
-  },
 ];
 
 type ConfigResponse = {
@@ -164,12 +150,9 @@ export function ConfigPanel({
   );
 
   const isLiveMode = (config["AUTO_LIVE_ENABLED"] || "false").toLowerCase() === "true";
-  const sdkErrors = Number(summary?.sdk_errors ?? 0);
   const liveCap = Number(
     summary?.live_hard_cap ?? config["LIVE_HARD_CAPITAL_CAP_USD"] ?? 50
   );
-  const deadManMs = Number(config["LIVE_DEAD_MAN_SWITCH_MS"] ?? 300000);
-  const orderType = (config["LIVE_ORDER_TYPE"] || "market").toLowerCase();
 
   return (
     <div
@@ -284,7 +267,7 @@ export function ConfigPanel({
                   </span>
                 </div>
                 <div
-                  className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[12px]"
+                  className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]"
                   style={{
                     fontFamily: "var(--font-mono, 'IBM Plex Mono', monospace)",
                     fontVariantNumeric: "tabular-nums",
@@ -294,24 +277,13 @@ export function ConfigPanel({
                     label="Hard Cap"
                     value={`$${liveCap.toFixed(0)}`}
                     color={GREEN}
-                    title="LIVE_HARD_CAPITAL_CAP_USD — uneditable floor"
+                    title="LIVE_HARD_CAPITAL_CAP_USD — uneditable safety floor"
                   />
                   <ViewOnly
-                    label="SDK Errors"
-                    value={String(sdkErrors)}
-                    color={sdkErrors > 0 ? AMBER : TEXT}
-                  />
-                  <ViewOnly
-                    label="Dead-Man"
-                    value={`${(deadManMs / 1000).toFixed(0)}s`}
+                    label="Starting Capital"
+                    value={`$${Number(config["LIVE_CAPITAL_USD"] ?? 50).toFixed(0)}`}
                     color={TEXT}
-                    title={`${deadManMs}ms`}
-                  />
-                  <ViewOnly
-                    label="Order Type"
-                    value={orderType}
-                    color={TEXT}
-                    title="LIVE_ORDER_TYPE — code-enforced"
+                    title="LIVE_CAPITAL_USD"
                   />
                 </div>
               </div>

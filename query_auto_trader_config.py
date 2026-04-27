@@ -33,24 +33,21 @@ DB_PATH = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 ALLOWED_WRITE_KEYS: dict[str, str] = {
     # Paper / generic
     "AUTO_TRADER_ENABLED": "bool",
-    "MAX_CONCURRENT": "int",
-    "MAX_TRADES_PER_DAY": "int",
     "AGGRESSIVE_THRESHOLD": "int",
     "TICKER_DISCOVERY": "bool",
-    "CAPITAL_USD": "float",
     "PER_TRADE_USD": "float",
     "LEVERAGE_DEFAULT": "float",
     # Live
     "AUTO_LIVE_ENABLED": "bool",
-    "LIVE_CAPITAL_USD": "float",
     "LIVE_PER_TRADE_USD": "float",
-    "LIVE_MAX_CONCURRENT": "int",
-    "LIVE_MAX_DAILY_TRADES": "int",
     "LIVE_LEVERAGE_DEFAULT": "float",
-    "LIVE_DEAD_MAN_SWITCH_MS": "int",
-    "LIVE_SDK_ERROR_THRESHOLD": "int",
     "LIVE_SLIPPAGE_PCT": "float",
 }
+# 2026-04-27 Aggressive Mode Sweep: removed MAX_CONCURRENT / MAX_TRADES_PER_DAY
+# / CAPITAL_USD / LIVE_MAX_CONCURRENT / LIVE_MAX_DAILY_TRADES / LIVE_CAPITAL_USD
+# / LIVE_DEAD_MAN_SWITCH_MS / LIVE_SDK_ERROR_THRESHOLD. Auto trader fires on
+# every qualifying signal — only execution gate is confidence vs per-ticker
+# threshold. Dead-man switch + hard capital cap remain code-enforced.
 # 2026-04-25: MAX_CONSECUTIVE_LOSSES + PAUSE_AFTER_LOSSES_MINUTES removed
 # (Gate 4 deleted; auto trader no longer self-pauses).
 
