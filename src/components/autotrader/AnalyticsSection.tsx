@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { BarChart2 } from "lucide-react";
 import { EquityCurveChart } from "./EquityCurveChart";
-import { WinRateByTickerChart } from "./WinRateByTickerChart";
 import { PnlByExitReasonChart } from "./PnlByExitReasonChart";
 import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 
@@ -288,50 +287,48 @@ export function AnalyticsSection({
         )}
       </div>
 
-      {/* Two-column: WR by ticker | P&L by exit reason */}
-      <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <div
-          className="rounded-lg border p-3"
-          style={{ background: PANEL_BG, borderColor: BORDER }}
-        >
+      {/* P&L by exit reason — hide entirely when no data has accumulated.
+          Per-ticker performance is now its own section above (PerTickerCards). */}
+      {(() => {
+        const reasons = analytics?.by_exit_reason || [];
+        const hasReasonData = reasons.some(
+          (r) => (r.count ?? 0) > 0 || Math.abs(r.total_pnl ?? 0) > 0.005
+        );
+        if (loading && !analytics) {
+          return (
+            <div
+              className="mt-3 rounded-lg border p-3"
+              style={{ background: PANEL_BG, borderColor: BORDER }}
+            >
+              <div
+                className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.1em]"
+                style={{ color: MUTED }}
+              >
+                <span>P&amp;L by Exit Reason</span>
+              </div>
+              <ChartSkeleton height={150} />
+            </div>
+          );
+        }
+        if (!hasReasonData) return null;
+        return (
           <div
-            className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.1em]"
-            style={{ color: MUTED }}
+            className="mt-3 rounded-lg border p-3"
+            style={{ background: PANEL_BG, borderColor: BORDER }}
           >
-            <span>Win Rate by Ticker</span>
-            <span className="opacity-70 normal-case tracking-normal">
-              ref 50%
-            </span>
+            <div
+              className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.1em]"
+              style={{ color: MUTED }}
+            >
+              <span>P&amp;L by Exit Reason</span>
+              <span className="opacity-70 normal-case tracking-normal">
+                green/red split
+              </span>
+            </div>
+            <PnlByExitReasonChart data={reasons} />
           </div>
-          {loading && !analytics ? (
-            <ChartSkeleton height={180} />
-          ) : analytics?.by_ticker?.length === 0 ? (
-            <EmptyMode mode={modeFilter} />
-          ) : (
-            <WinRateByTickerChart data={analytics?.by_ticker || []} />
-          )}
-        </div>
-
-        <div
-          className="rounded-lg border p-3"
-          style={{ background: PANEL_BG, borderColor: BORDER }}
-        >
-          <div
-            className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-[0.1em]"
-            style={{ color: MUTED }}
-          >
-            <span>P&amp;L by Exit Reason</span>
-            <span className="opacity-70 normal-case tracking-normal">
-              green/red split
-            </span>
-          </div>
-          {loading && !analytics ? (
-            <ChartSkeleton height={150} />
-          ) : (
-            <PnlByExitReasonChart data={analytics?.by_exit_reason || []} />
-          )}
-        </div>
-      </div>
+        );
+      })()}
     </section>
   );
 }
@@ -381,17 +378,6 @@ function ModePillGroup<T extends string>({
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function EmptyMode({ mode }: { mode: ModeFilter }) {
-  return (
-    <div
-      className="flex items-center justify-center text-[11px] py-12"
-      style={{ color: MUTED }}
-    >
-      no <b className="mx-1">{mode}</b> trades yet
     </div>
   );
 }

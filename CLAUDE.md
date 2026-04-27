@@ -750,3 +750,181 @@ Mirrored exactly in `query_auto_trader_config.py` ALLOWED_WRITE_KEYS.
   key (`LIVE_HARD_CAPITAL_CAP_USD`) rejected with 400.
 - Kill switch GET returns `{"active":false}` baseline.
 - Sacred files unchanged. trevor.service untouched (PID 2076449 preserved).
+
+## AutoTrader Premium Redesign — Flow + Activity Feed + Per-Ticker (2026-04-26)
+
+Front-end-only restructure of `/trading?tab=autotrader` per Ghost's "cramped,
+cluttered, dev-y" feedback on the prior dd294b2 deploy. Backend (SSE stream,
+mode-aware analytics, equity curve splits, config whitelist) UNCHANGED. Three
+NEW READ-ONLY query helpers + three NEW API routes + three NEW components +
+KillSwitch.tsx DELETED + PositionCard rewritten + AnalyticsSection refactored.
+trevor.service PID 2076449 preserved (only trevor-dashboard restarted).
+
+### Section order (top to bottom)
+
+1. **Header zone** — calm 3-row layout: identity bar (status pill + watch
+   summary + last-signal pulsing dot) → equity hero (Orbitron 36/48px + 30-trade
+   sparkline) → context strip (Total / Today / Open / Win / Streak inline, `·`
+   separated). Total height <200px on 375vw. Kill button DELETED entirely.
+2. **Active section** — open positions (rich 5-section cards) OR
+   `<ScanningEmptyState>` with radar pulse + 5 sacred-ticker pills (green
+   scanning / amber cooldown with Nm remaining / gray recent_reject). Tap a
+   pill → expand to last-3 confidence trail with reject reasons.
+3. **Activity feed** — `<ActivityFeed>` polls `/api/auto-trader/activity` every
+   15s, last 50 events from auto_trades + active_signal_cards. 4 filter pills
+   (All / Live / Trades / Rejects). Newer-than-60s events pulse green;
+   older-than-1h fade to 55% opacity. Type-color icons (🟢/💰/🔴/✅/⏸️).
+4. **Per-ticker performance** — `<PerTickerCards>` 5-card grid (2-col mobile,
+   5-col desktop). Each card: ticker + sparkline / large total P&L + W/L
+   record / color-coded WR bar (red <40 / amber 40-55 / green >55) / avg win,
+   avg loss, best. Mode pills (All / Live / Paper, default = current bot mode).
+5. **Analytics** — equity curve (kept) + `PnlByExitReasonChart` rendered ONLY
+   when `by_exit_reason.some(count > 0 OR |total_pnl| > 0.005)` — no empty
+   chart on fresh deploy. WR-by-ticker chart REMOVED (replaced by per-ticker
+   cards above).
+6. **Trade history** — `<TradeHistoryTable>` unchanged.
+7. **Configuration** — `<ConfigPanel>` moved to bottom. Polish: 1.6s green
+   border flash on save commit (extends `borderColor` memo), 🔒 prefix on
+   view-only labels (`Hard Cap`, `SDK Errors`, `Dead-Man`, `Order Type`).
+
+### NEW Python helpers (READ-ONLY, mode=ro URI)
+
+| File | Purpose | Cache TTL |
+|---|---|---|
+| `query_auto_trader_scan_status.py` | Per-ticker scan state for empty-state pills (signal_cooldowns + last 3 active_signal_cards rows) | 30s |
+| `query_auto_trader_activity.py` | Activity feed events from auto_trades (open/close) + active_signal_cards (accept/reject). Args: limit, since_iso, filter | 10s |
+| `query_auto_trader_per_ticker.py` | Per-ticker stats + 60-point cumulative-pnl sparkline. Mode arg | 60s |
+
+All use `datetime()` SQL wrappers on timestamp comparisons to avoid the
+2026-04-24 Observatory T-vs-space string-comparison trap.
+
+### NEW API routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/auto-trader/scan-status` | GET | 5 sacred tickers, scanning/cooldown/recent_reject status |
+| `/api/auto-trader/activity?limit=N&filter=all\|live\|trades\|rejections&since=ISO` | GET | Activity feed events, newest first |
+| `/api/auto-trader/per-ticker?mode=all\|live\|paper` | GET | Per-ticker performance breakdown |
+
+All cached, all 401 without session cookie (existing middleware).
+
+### NEW components
+
+| Path | Purpose |
+|---|---|
+| `src/components/autotrader/ScanningEmptyState.tsx` | Replaces giant `PauseCircle` empty state. Radar-pulse + 5 ticker pills + click-to-expand confidence trail. |
+| `src/components/autotrader/ActivityFeed.tsx` | Real-time event stream with filter pills + 60s-fresh pulse + 1h fade. |
+| `src/components/autotrader/PerTickerCards.tsx` | 5 ticker cards with sparkline + WR bar + stat detail. Mode-aware. |
+
+### Modified components
+
+| Path | Change |
+|---|---|
+| `src/components/autotrader/HeaderBar.tsx` | Full rewrite: 3-row calm layout, KillSwitch import deleted, equity sparkline added. |
+| `src/components/autotrader/PositionCard.tsx` | Full rewrite: 6 sections (header / entered-line / big P&L+progress / stats / mini chart / exit logic). Mini-chart accumulates client-side from SSE updates with reference lines for entry/stop/target. Exit logic line computed from BE state + partials + peak + remaining timeout. |
+| `src/components/autotrader/AnalyticsSection.tsx` | Removed `WinRateByTickerChart` + `EmptyMode` helper. P&L-by-exit-reason rendered only when data exists. |
+| `src/components/autotrader/ConfigPanel.tsx` | Save-commit 1.6s green border flash (`borderColor` memo extended). 🔒 prefix on `ViewOnly` labels. |
+| `src/app/trading/panels/AutoTraderPanel.tsx` | Section reorder per spec. |
+
+### Deleted
+
+- `src/components/autotrader/KillSwitch.tsx` — Discord `!auto kill` is the
+  kill switch; the in-page button caused stress/clutter per Ghost. The
+  system-wide kill switch on the main Dashboard (`/api/kill-switch` + `.kill_switch`
+  flag) is a different feature, untouched.
+
+### Ghost-approved deviations from prompt
+
+1. **HTTP polling instead of new SSE channel** for the activity feed. The
+   prompt suggested adding an `activity` event to the existing 15s SSE tick;
+   I went with `/api/auto-trader/activity` polling at 15s for simpler
+   integration. Same effective cadence, no `stream/route.ts` modification.
+2. **Mini-chart history accumulated client-side** from SSE `current_price`
+   updates (deque-in-useRef, max 60 points). Avoids new HL endpoint or extra
+   API pressure — chart fills in over the trade's lifetime. Cold-start shows
+   "accumulating price history…" placeholder for first ~30s.
+3. **Python helpers in trevor-dashboard root** (matching existing convention:
+   `query_auto_trader_live.py`, `query_auto_trader_history.py`,
+   `query_auto_trader_config.py`). Per Ghost's prompt #2 confirmation: dashboard
+   helpers are READ-ONLY query scripts, NOT bot pipeline edits. No new npm deps.
+
+### Verification (all PASS)
+
+- `npm run build` clean. /trading bundle **51.7 → 53.6 kB** (+1.9kB net for
+  the entire restructure including 3 new components + KillSwitch deletion).
+- All 3 new endpoints return JSON via authenticated curl:
+  - `/api/auto-trader/scan-status` — 5 tickers; live state showed
+    BTC/ETH/SOL=scanning, HYPE=cooldown 55.4m, FARTCOIN=cooldown 16.3m
+  - `/api/auto-trader/per-ticker?mode=paper` — 5 tickers with full stats +
+    equity_points (BTC 7 trades, ETH 5, SOL 11, HYPE 8, FARTCOIN 22)
+  - `/api/auto-trader/activity?limit=5` — 5 most recent accepted events
+    incl. fresh post-deploy HYPE LONG @ 23:54:30 UTC; `?filter=rejections`
+    correctly returned only `expired` + `direction_flip` events
+- Negative test: `/api/auto-trader/activity` without cookie → 401 (middleware
+  auth). `/api/auto-trader/per-ticker` invalid mode → falls through to default
+  ("all").
+- **trevor.service PID 2076449 UNCHANGED** (the meta-check Ghost cares about).
+  Only `trevor-dashboard.service` restarted: 2150463 → 2158290 at
+  2026-04-26 23:57:33 UTC. Pattern 2 readiness gate fired READY at 23:58:52.
+- Sacred 12/12 byte-identical pre/post via md5sum against
+  `/tmp/sacred_pre_phase5.md5`.
+- `hooks/guard_recurring_bugs.sh` 13/13 PASS.
+- `signal_filter_rules` UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0
+  reseed row per Rule 30 known residual).
+- Pattern 1 dashboard-error watch + Pattern 6 trevor.service recurring-bug
+  canary (both 540s wrapped, dispatched per Mandate before restart): 0
+  qualifying emits during active window.
+
+### Files
+
+**Dashboard repo (this commit):**
+- New: `query_auto_trader_scan_status.py`, `query_auto_trader_activity.py`,
+  `query_auto_trader_per_ticker.py`
+- New: `src/app/api/auto-trader/scan-status/route.ts`,
+  `src/app/api/auto-trader/activity/route.ts`,
+  `src/app/api/auto-trader/per-ticker/route.ts`
+- New: `src/components/autotrader/ScanningEmptyState.tsx`,
+  `src/components/autotrader/ActivityFeed.tsx`,
+  `src/components/autotrader/PerTickerCards.tsx`
+- Modified: `src/components/autotrader/HeaderBar.tsx`,
+  `src/components/autotrader/PositionCard.tsx`,
+  `src/components/autotrader/AnalyticsSection.tsx`,
+  `src/components/autotrader/ConfigPanel.tsx`,
+  `src/app/trading/panels/AutoTraderPanel.tsx`
+- Deleted: `src/components/autotrader/KillSwitch.tsx`
+- Docs: `CLAUDE.md` (this section)
+
+**Trevor repo:** zero source-code changes. `BEHAVIOR_RULES.md` Section 3
+changelog + `CLAUDE.md` Hub-only cross-reference entry committed separately.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard
+git revert <commit-hash>
+sudo systemctl restart trevor-dashboard.service
+# Restores prior cramped header + KillSwitch + WR-by-ticker chart layout.
+# trevor.service PID 2076449 stays untouched either way.
+```
+
+### Hard constraints honored
+
+- Rule 1 (NO AUTO-CLOSE) preserved — display-only restructure, zero trade-
+  closing code added or modified
+- Rule 14 (sacred files) — 12/12 byte-identical pre/post
+- Rule 15 (additive DB) — N/A (zero schema changes)
+- Rule 16 (surgical edits) — only files specified in prompt's Phase 5 git
+  add list staged
+- Rule 22 (no Discord channels touched)
+- Rule 30 (no ticker/direction blocks) — `signal_filter_rules` unchanged
+- Rule 31 (auto trader never self-pauses) — N/A (UI only)
+- No new npm dependencies (Recharts 2.15.4 reused; no `pandas_ta`-style PyPI
+  installs)
+- Mobile-first verified at 375vw (header <200px, ticker pills wrap cleanly,
+  activity feed scrollable, per-ticker grid 2-col)
+- No HTML `<form>` tags introduced
+- Honesty: live behavioral proof of mini-chart price history accumulation
+  deferred to first opened position post-deploy (0 open at deploy time;
+  smoke validated via existing 53 closed paper trades + scan-status
+  cooldown rendering)
+

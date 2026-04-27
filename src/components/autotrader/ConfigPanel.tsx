@@ -442,8 +442,11 @@ function ViewOnly({
 }) {
   return (
     <div className="flex flex-col" title={title}>
-      <span className="text-[9px] uppercase tracking-[0.1em] opacity-70" style={{ color: MUTED }}>
-        {label}
+      <span
+        className="text-[9px] uppercase tracking-[0.1em] opacity-70"
+        style={{ color: MUTED }}
+      >
+        🔒 {label}
       </span>
       <b style={{ color }}>{value}</b>
     </div>
@@ -555,6 +558,7 @@ function NumericRow({
   const err = status.s === "error" ? status.err : undefined;
 
   const borderColor = useMemo(() => {
+    if (status.s === "saved") return GREEN; // 1.6s green flash on save commit
     if (status.s === "error") return RED;
     if (focused) return GREEN;
     if (accent) return `${GREEN}33`;
