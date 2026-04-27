@@ -38,7 +38,6 @@ type Summary = {
   today_count: number;
   open_count: number;
   open_notional: number;
-  max_concurrent: number;
   trades_today: number;
   max_daily: number;
   last_trade_at: string | null;
@@ -174,10 +173,8 @@ async function buildTick(): Promise<{ positions: Record<string, unknown>[]; summ
   const mode: "live" | "paper" = snap.mode === "live" ? "live" : "paper";
   const isLive = mode === "live";
 
-  // For live mode, draw concurrency/daily caps from LIVE_* config keys.
-  const maxConcurrent = isLive
-    ? Number(snap.config?.LIVE_MAX_CONCURRENT ?? 3)
-    : Number(snap.config?.MAX_CONCURRENT ?? 5);
+  // 2026-04-27: max_concurrent removed (Aggressive Mode Sweep — no concurrent cap).
+  // Daily cap also removed by the sweep but max_daily field kept here for now.
   const maxDaily = isLive
     ? Number(snap.config?.LIVE_MAX_DAILY_TRADES ?? 10)
     : Number(snap.config?.MAX_TRADES_PER_DAY ?? 15);
@@ -198,7 +195,6 @@ async function buildTick(): Promise<{ positions: Record<string, unknown>[]; summ
     today_count: Number(snap.today_count ?? 0),
     open_count: positions.length,
     open_notional: Math.round(openNotional * 100) / 100,
-    max_concurrent: maxConcurrent,
     trades_today: Number(snap.trades_today || 0),
     max_daily: maxDaily,
     last_trade_at: snap.last_trade_at ?? null,

@@ -47,7 +47,6 @@ export type AutoTraderSummary = {
   today_count: number;
   open_count: number;
   open_notional: number;
-  max_concurrent: number;
   trades_today: number;
   max_daily: number;
   last_trade_at: string | null;

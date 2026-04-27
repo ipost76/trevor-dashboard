@@ -116,7 +116,6 @@ export function HeaderBar({ summary, connection }: Props) {
     Math.abs(todayPnl) < 0.005 ? MUTED : todayPnl > 0 ? GREEN : RED;
 
   const openCount = Number(summary?.open_count ?? 0);
-  const maxConcurrent = Number(summary?.max_concurrent ?? (isLive ? 3 : 5));
   const wins = summary?.stats_7d?.wins ?? 0;
   const losses = summary?.stats_7d?.losses ?? 0;
   const wr = summary?.stats_7d?.win_rate ?? null;
@@ -186,7 +185,7 @@ export function HeaderBar({ summary, connection }: Props) {
           className="sm:hidden truncate min-w-0 flex-1"
           style={{ opacity: 0.85 }}
         >
-          {openCount}/{maxConcurrent} open · ${cap.toFixed(0)}
+          {openCount} open · ${cap.toFixed(0)}
         </span>
 
         {/* Right: scanning / last signal indicator */}
@@ -284,7 +283,7 @@ export function HeaderBar({ summary, connection }: Props) {
         <span>
           <span className="opacity-70">Open:</span>{" "}
           <b style={{ color: openCount > 0 ? CYAN : TEXT }}>
-            {openCount}/{maxConcurrent}
+            {openCount}
           </b>
         </span>
         <span style={{ opacity: 0.4 }}>·</span>
