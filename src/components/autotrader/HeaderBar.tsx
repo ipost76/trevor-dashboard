@@ -15,7 +15,6 @@ import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 //     Total: ±$X · Today: N trades · Open: N/M · Win: X% · Streak: ❄️ NL
 //
 // Total height target: <200px on 375vw. Eye lands on equity, flows down.
-// Kill button removed entirely (Discord !auto kill is the kill switch).
 
 const GREEN = "#00ff88";
 const RED = "#ff4757";

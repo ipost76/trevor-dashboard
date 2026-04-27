@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, TrendingUp, Brain, Settings, MessageSquare,
+  LayoutDashboard, TrendingUp, Brain, Settings, MessageSquare, Bot,
   ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef, Suspense } from "react";
@@ -25,6 +25,13 @@ const NAV_ZONES: NavZone[] = [
     label: "DASHBOARD",
     icon: LayoutDashboard,
     href: "/dashboard",
+    children: [],
+  },
+  {
+    id: "autotrader",
+    label: "AUTO TRADER",
+    icon: Bot,
+    href: "/autotrader",
     children: [],
   },
   {
@@ -475,7 +482,7 @@ function SidebarInner() {
                   lineHeight: 1,
                   marginTop: 2,
                 }}>
-                  {zone.id === "intelligence" ? "INTEL" : zone.label}
+                  {zone.id === "intelligence" ? "INTEL" : zone.id === "autotrader" ? "AUTO" : zone.label}
                 </span>
               </Link>
             );

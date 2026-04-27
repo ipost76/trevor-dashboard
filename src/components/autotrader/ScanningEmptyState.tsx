@@ -104,9 +104,6 @@ export function ScanningEmptyState({ enabled }: Props) {
         >
           Auto Trader OFF
         </span>
-        <span className="text-[10px] mt-1" style={{ color: MUTED, opacity: 0.7 }}>
-          Use <span style={{ fontFamily: "monospace" }}>!auto on</span> in Discord to enable
-        </span>
       </div>
     );
   }

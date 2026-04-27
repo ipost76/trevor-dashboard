@@ -928,3 +928,136 @@ sudo systemctl restart trevor-dashboard.service
   smoke validated via existing 53 closed paper trades + scan-status
   cooldown rendering)
 
+## Auto Trader Nav Promotion — 2026-04-27
+
+Promoted Auto Trader from a Trading-tab to a standalone top-level page in the
+Hub navigation. Six-item bottom nav: Dashboard → Auto Trader → Trading →
+Intelligence → Command → Chat. Trading page now has only Trades + Holdings
+tabs. Zero backend changes; pure routing + nav restructure. trevor.service
+untouched. Deploy verified live with open FARTCOIN LONG position +1.39%.
+
+### What changed
+
+- **New route `/autotrader`** — `src/app/autotrader/page.tsx` wraps the
+  extracted `AutoTraderPage` component in the same Orbitron page-title +
+  scrollable content chrome that `TabContainer` provides. `loading.tsx`
+  mirrors `trading/loading.tsx` (Skeleton).
+- **AutoTraderPanel relocated** — moved from
+  `src/app/trading/panels/AutoTraderPanel.tsx` →
+  `src/components/autotrader/AutoTraderPage.tsx`. File contents unchanged
+  except the default export name (`AutoTraderPanel` →`AutoTraderPage`).
+  Imports of the 8 sub-components untouched.
+- **`next.config.ts` redirect removed** — dropped the
+  `/autotrader → /trading?tab=autotrader` 308 line at line 12. The new page
+  route now resolves directly. `/trades` and `/holdings` redirects retained.
+- **Sidebar `NAV_ZONES` extended** — new entry inserted at index 1 (between
+  Dashboard and Trading): `id="autotrader"`, `label="AUTO TRADER"`, icon
+  `Bot` (lucide-react), `href="/autotrader"`, no children. Mobile bottom-nav
+  label special-case extended (`zone.id === "autotrader" ? "AUTO" : ...`)
+  alongside the existing `INTEL` shortening for Intelligence — keeps 6 items
+  fitting cleanly on a 375px viewport.
+- **Trading page reduced to 2 tabs** — `src/app/trading/page.tsx` drops the
+  `autotrader` tab. `AutoTraderPanel` import removed. `?tab=autotrader` URL
+  param falls through to default tab (`trades`) cleanly via TabContainer's
+  existing `defaultTab` fallback.
+- **`!auto` Discord command references removed**:
+  - `src/components/autotrader/ScanningEmptyState.tsx:107-109` — the
+    visible "Use `!auto on` in Discord to enable" text under "Auto Trader
+    OFF" is gone. Empty state now shows just the OFF label.
+  - `src/components/autotrader/HeaderBar.tsx:18` — stale comment
+    "Kill button removed entirely (Discord !auto kill is the kill switch)"
+    deleted.
+  - `src/app/api/auto-trader/route.ts:7` — stale comment "Writes
+    (enable/disable) go through the Discord !auto command" deleted.
+  - The `!auto` Discord commands no longer exist in TREVOR; config changes
+    happen via CC prompts only.
+
+### Sidebar active-state behavior
+
+`getActiveZoneId(pathname)` already supports the new zone via the existing
+`pathname.startsWith(zone.href)` check (sidebar.tsx:90). When on
+`/autotrader`, the Auto Trader nav item highlights `#00ff88` and Trading
+does NOT. Verified via authenticated curl: all 6 routes return 200.
+
+### Bundle deltas (post-build)
+
+| Route | Before | After |
+|---|---|---|
+| `/trading` | 36.2 kB / 272 kB First Load | 36.8 kB / 253 kB |
+| `/autotrader` | (didn't exist as page) | 20.1 kB / 224 kB |
+
+The `-19 kB` First Load reduction on `/trading` is the AutoTrader weight
+moving to its own route. The route-level chunks code-split as expected.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npm run build` | clean, 0 type errors, 0 lint warnings (Phase 1 + Phase 2 + Phase 3 builds all clean) |
+| `hooks/guard_recurring_bugs.sh` | **13/13 PASS** |
+| Sacred files (9) md5 pre/post | **9/9 byte-identical** (IDENTITY/BRAIN/SOUL/AGENTS in `brain/`, swarms_brain, training_bridge, signal_guard, signal_cooldown, signal_cleanup) |
+| Auto-close canary | CLEAN (no `auto.close`/`force_close`/`AUTO_CLOSE` introductions in Hub `src/`; one positive-assertion match in TrainingPanel.tsx text "Never auto-closes" — pre-existing doc string) |
+| `!auto` strings remaining in Hub `src/` | **0** |
+| `auto.trader` strings remaining in `src/app/trading/` | **0** |
+| All 6 nav routes (authenticated) | 200/200/200/200/200/200 |
+| SSE `/api/auto-trader/stream` | 200, content-type text/event-stream, both `positions` + `summary` events emitted with live FARTCOIN data ($0.21218, +1.394% live P&L, equity $49.50, mode=live) |
+| trevor-dashboard.service post-restart | active (running), MainPID 2203445, NRestarts=0, "TREVOR Hub ready" within 4s |
+| trevor.service | UNTOUCHED (only Hub restarted) |
+
+### Risk flags handled
+
+- **`/trading?tab=autotrader` URL bookmarks**: TabContainer's `defaultTab`
+  fallback at `TabContainer.tsx:23-25` (`validTab = tabs.find(t => t.id ===
+  paramTab); activeTab = validTab ? paramTab! : (defaultTab || tabs[0]?.id)`)
+  silently routes invalid tab params to the default — anyone with the old
+  bookmark lands on Trades. Acceptable for single-user Hub.
+- **308 redirect cache**: browsers cache `permanent: true` redirects
+  aggressively. Hard refresh may be needed if `/autotrader` was visited
+  during the redirect period. Acceptable since Hub is single-user (Ghost).
+- **Mobile bottom nav width at 375px**: 6 items × ~62px each, all icons
+  retain ≥48px touch targets via `minWidth: 48px`. Auto Trader uses 4-char
+  "AUTO" label (shortest of any zone), Intelligence keeps 5-char "INTEL"
+  shortening — both fit cleanly at `font-size: 9px`.
+- **`useLongPress` rules-of-hooks lint**: pre-existing eslint-disable
+  comment at `sidebar.tsx:436` calls the hook inside `.map()`. Safe because
+  array length never changes at runtime; adding one entry keeps it stable.
+  Not refactored in this PR.
+
+### Files
+
+**Added:**
+- `src/app/autotrader/page.tsx`
+- `src/app/autotrader/loading.tsx`
+- `src/components/autotrader/AutoTraderPage.tsx`
+
+**Modified:**
+- `src/components/sidebar.tsx` (Bot icon import + new NAV_ZONES entry +
+  AUTO label special-case)
+- `src/app/trading/page.tsx` (drop autotrader tab + import)
+- `src/components/autotrader/HeaderBar.tsx` (stale `!auto` comment)
+- `src/components/autotrader/ScanningEmptyState.tsx` (visible `!auto`
+  Discord instruction removed)
+- `src/app/api/auto-trader/route.ts` (stale `!auto` comment)
+- `next.config.ts` (drop `/autotrader → /trading?tab=autotrader` redirect)
+
+**Deleted:**
+- `src/app/trading/panels/AutoTraderPanel.tsx` (relocated to
+  `components/autotrader/AutoTraderPage.tsx`)
+
+**Untouched (pre-existing local edits, NOT included in commit):**
+- `.env`, `.env.local` — Discord token + DASHBOARD_PASS rotations from the
+  2026-04-24 Hub Lockdown work, never committed; deliberately stayed out
+  of scope here.
+- `tsconfig.tsbuildinfo` — build cache churn, ignored.
+
+### Hard constraints honored
+
+- Rule 1 (NO AUTO-CLOSE) preserved — pure nav restructure, zero
+  trade-closing code touched
+- Rule 14 (sacred files) — 9/9 byte-identical
+- Surgical edits — only the listed files staged
+- No new npm dependencies (`Bot` icon already present in lucide-react)
+- TREVOR (`trevor.service`) UNTOUCHED — only `trevor-dashboard.service`
+  restarted at 2026-04-27 04:29:38 UTC
+
+

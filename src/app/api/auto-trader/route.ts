@@ -4,7 +4,6 @@ import { execSync } from "child_process";
 // /api/auto-trader — Mirrored Auto Trader snapshot (Prompt 5/6, 2026-04-21)
 //
 // GET → 30s in-memory cache, calls query_auto_trader.py (READ-ONLY).
-// Writes (enable/disable) go through the Discord !auto command; no POST here.
 //
 // Auth: middleware enforces session cookie on all /api/* (except /api/auth, /api/health).
 

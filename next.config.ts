@@ -9,7 +9,6 @@ const nextConfig: NextConfig = {
       // TRADING zone
       { source: '/trades', destination: '/trading?tab=trades', permanent: true },
       { source: '/holdings', destination: '/trading?tab=holdings', permanent: true },
-      { source: '/autotrader', destination: '/trading?tab=autotrader', permanent: true },
       // INTELLIGENCE zone
       { source: '/signals', destination: '/intelligence?tab=signals', permanent: true },
       { source: '/research', destination: '/intelligence?tab=research', permanent: true },

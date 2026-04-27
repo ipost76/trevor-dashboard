@@ -22,7 +22,7 @@ import { useAutoTraderStream } from "@/hooks/useAutoTraderStream";
 
 const MUTED = "#8888a0";
 
-export default function AutoTraderPanel() {
+export default function AutoTraderPage() {
   const { positions, summary, state } = useAutoTraderStream();
 
   const enabled = !!summary?.enabled;
