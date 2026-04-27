@@ -1060,4 +1060,91 @@ moving to its own route. The route-level chunks code-split as expected.
 - TREVOR (`trevor.service`) UNTOUCHED — only `trevor-dashboard.service`
   restarted at 2026-04-27 04:29:38 UTC
 
+## Multi-Bot Auto Trader Layout — 2026-04-27
+
+The `/autotrader` page is now a multi-bot hub. The existing TREVOR auto trader
+(BTC/ETH/SOL/HYPE/FARTCOIN) is wrapped in a labeled **SCALPER** section; a
+**DEGEN** UI skeleton sits below it (no backend yet — the bot service does
+not exist). A horizontal pill selector at the top scrolls Ghost between
+sections without a tab swap so both are always visible at once.
+
+### Layout (top → bottom)
+
+1. Sticky page title `AUTO TRADER` (preserved from 2026-04-27 nav promotion)
+2. **`<BotNavStrip>`** — sticky pill row: 🔪 SCALPER · active / 💀 DEGEN · coming soon. Tap → `scrollIntoView` to the section.
+3. SCALPER section (`<section id="bot-scalper">`):
+   - `<BotSectionHeader bot=SCALPER dynamicMode>` — green accent line, icon, name, LIVE/PAPER pill, ticker list, exchange + capital
+   - `<AutoTraderPage />` — **byte-identical**, the existing 7-section component (HeaderBar / Active / ActivityFeed / PerTickerCards / AnalyticsSection / TradeHistoryTable / ConfigPanel)
+4. DEGEN section (`<section id="bot-degen">`) via `<DegenSection>`:
+   - Magenta `#ff00ff` accent line + header + amber `NOT CONNECTED` pill + ticker `ALL` + description "Meme/Low-Cap Focus"
+   - **Awaiting Connection card** — dashed magenta border, `Rocket` icon in glow ring, 4 trait bullets, "Bot not deployed" status line
+   - **Static config card** — 6 read-only ViewOnly fields (Capital $50 / Mode Paper / Max Concurrent 5 / Strategy YOLO Moonshot / Risk Level MAX bar / Tickers ALL auto-scan)
+   - **Empty Recent Activity card** — same chrome as `ActivityFeed`, "No activity yet · Bot will appear here once deployed"
+
+### SCALPER mode source
+
+`useScalperMode()` hook in `src/app/autotrader/page.tsx` polls
+`/api/auto-trader/config` every 60 s, reads `AUTO_LIVE_ENABLED`, and feeds
+the section-header pill. **No second `useAutoTraderStream` EventSource** is
+opened — `AutoTraderPage` keeps the single existing SSE connection.
+
+### BotConfig registry
+
+Adding a future bot is now mechanical:
+
+1. Append a `BotConfig` entry to `src/lib/bots.ts` (id / name / icon / accentColor / status / tickers / exchange / capital / mode / scrollAnchorId / apiBasePath)
+2. Build a `<XxxSection>` component (use `DegenSection` as a template)
+3. Render it under `BotNavStrip` in `src/app/autotrader/page.tsx`
+4. (Eventually) create API routes at the `apiBasePath` value
+
+The DEGEN bot's planned API base is `/api/degen` (does not exist yet).
+
+### Files
+
+**Added:**
+- `src/lib/bots.ts` — `BotConfig` interface + `SCALPER_CONFIG` + `DEGEN_CONFIG` + `BOT_CONFIGS` array
+- `src/components/autotrader/BotNavStrip.tsx` — sticky pill selector
+- `src/components/autotrader/BotSectionHeader.tsx` — reusable header (icon / name / mode-or-status badge / tickers / exchange + capital + accent border)
+- `src/components/autotrader/DegenSection.tsx` — full DEGEN UI skeleton (3 cards)
+
+**Modified:**
+- `src/app/autotrader/page.tsx` — adds `useScalperMode` hook, `<BotNavStrip>`, wraps `<AutoTraderPage>` in SCALPER section, appends DEGEN section
+
+**Untouched:**
+- All 11 existing autotrader components (`HeaderBar` / `PositionCard` / `ConfigPanel` / `EquityCurveChart` / `AnalyticsSection` / `PerTickerCards` / `PnlByExitReasonChart` / `ScanningEmptyState` / `ActivityFeed` / `TradeHistoryTable` / `WinRateByTickerChart`)
+- All 9 `auto-trader/*` API routes
+- `useAutoTraderStream.ts`
+- Sacred files (9/9 byte-identical)
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `npm run build` | clean. `/autotrader` bundle **20.1 → 22.3 kB** (+2.2 kB net for nav strip + section header + DEGEN skeleton + bots lib) |
+| `hooks/guard_recurring_bugs.sh` | **13/13 PASS** |
+| Sacred files | **9/9 byte-identical** pre/post (`brain/{IDENTITY,BRAIN,SOUL,AGENTS}.md` + `swarms_brain.py` + `training_bridge.py` + `signal_guard.py` + `signal_cooldown.py` + `signal_cleanup.py`) |
+| Auto-close canary | CLEAN |
+| `/autotrader` authenticated | HTTP 200, 46 KB |
+| `/api/auto-trader/stream` | emits `positions` + `summary` with mode=`live`, equity $49.18, 10 trades today, stats_7d intact |
+| `/api/auto-trader/config` | `AUTO_LIVE_ENABLED=true` → SCALPER section header shows LIVE pill |
+| `trevor.service` | **UNTOUCHED** (PID 2182549, 9 h uptime) |
+| `trevor-dashboard.service` | active (running), MainPID 2255303 since 2026-04-27 12:24:54 UTC, 0 errors in journal |
+
+### Hard constraints honored
+
+- Rule 1 (NO AUTO-CLOSE) — display-only restructure
+- Rule 14 (sacred files) — 9/9 byte-identical
+- Surgical edits — only the 5 files in the "Files" block staged
+- No new npm dependencies (`Rocket` + `Activity` icons already in `lucide-react`)
+- Mobile responsive at 375 px — pill row uses `overflow-x-auto`, section headers use `flex-wrap`, DEGEN config grid collapses to 1-col
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard
+git revert <commit-hash>
+sudo systemctl restart trevor-dashboard.service
+# Restores single-bot Auto Trader (no nav strip, no SCALPER wrapper, no DEGEN section)
+```
+
 
