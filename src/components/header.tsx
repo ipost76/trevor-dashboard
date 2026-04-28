@@ -4,6 +4,7 @@ import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search, Moon, Sun } from "lucide-
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { ChangePasswordModal } from "@/components/change-password-modal";
+import { KillswitchPill } from "@/components/KillswitchPill";
 
 type StatusData = { ok: boolean; trevor: { running: boolean; pid: number }; xp: number; rank: string };
 
@@ -84,6 +85,7 @@ export function Header() {
           <span className="hidden md:inline text-[9px] text-muted-foreground font-mono">
             {status?.trevor.running ? `PID ${status.trevor.pid}` : ""}
           </span>
+          <KillswitchPill />
           <div className="h-3 w-px bg-[var(--border)]" />
           <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
         </div>
