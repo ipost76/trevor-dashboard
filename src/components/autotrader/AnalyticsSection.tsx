@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { BarChart2 } from "lucide-react";
 import { EquityCurveChart } from "./EquityCurveChart";
 import { PnlByExitReasonChart } from "./PnlByExitReasonChart";
+import { SlippageHistogram } from "./SlippageHistogram";
 import type { AutoTraderSummary } from "@/hooks/useAutoTraderStream";
 
 const GREEN = "#00ff88";
@@ -329,6 +330,13 @@ export function AnalyticsSection({
           </div>
         );
       })()}
+
+      {/* B2 (2026-04-28 / I-13): Slippage histogram. Independent of mode +
+          analytics fetch state — driven by its own /api/auto-trader/slippage
+          poll (60s). Renders an empty-state card when no fills exist yet. */}
+      <div className="mt-3">
+        <SlippageHistogram />
+      </div>
     </section>
   );
 }
