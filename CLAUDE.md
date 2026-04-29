@@ -1304,3 +1304,191 @@ sudo systemctl restart trevor-dashboard.service
 ```
 
 
+
+## B1 — Navigation Primitive (shipped 2026-04-29)
+
+Mobile-first 5-zone bottom nav + desktop collapsing sidebar rail + floating
+Chat button + URL realignment. Establishes the canonical zone + sub-tab
+contract every Wave C–H prompt consumes. Old `sidebar.tsx` 6-zone shell is
+preserved as the LegacyAppShell behind a feature flag for 15-second rollback.
+
+### Zone contract — `src/lib/navigation.ts`
+
+5 zones, 14 sub-tabs, locked at this single source of truth.
+
+| Zone | Path | Accent | Sub-tabs |
+|---|---|---|---|
+| DASHBOARD | `/dashboard` | cyan | (none) |
+| AUTO | `/autotrader` | green | Scalper / Degen |
+| SCALP | `/scalp` | violet | Live Board / Recent / Quality / Calibration |
+| INTEL | `/intel` | magenta | Lessons / Journal / Similar / Calibration / Shadow |
+| MEMORY | `/memory` | cyan | Brain / Memory / ChromaDB / System Health / Aggressive |
+
+CHAT is a floating action button (`/chat` route), present on every page
+except itself. NOT a sixth tab.
+
+### URL transitions (legacy → canonical, 308 redirects in middleware)
+
+- `/trading` → `/scalp`
+- `/command` → `/memory`
+- `/intelligence` → `/intel`
+
+Legacy page directories (`src/app/{trading,command,intelligence}/`) deleted.
+Existing inbound `href="/trading"` etc. references in the preserved
+`sidebar.tsx` (the legacy reference component, untouched in B1) hop through
+the 308 redirect — kept intentionally so flag-OFF rollback behavior matches
+pre-B1 exactly.
+
+### Components shipped
+
+- `src/lib/navigation.ts` — zone contract (`ZONES`, `CHAT_FAB`,
+  `LEGACY_REDIRECTS`, `zoneFromPath()`, `accentTextClass()`,
+  `accentGlowClass()`).
+- `src/components/navigation/bottom-nav.tsx` — mobile bottom nav
+  (`lg:hidden`), long-press → BottomSheet with sub-tabs, click suppression
+  on long-press fire so opening sub-tabs does NOT also navigate.
+- `src/components/navigation/chat-fab.tsx` — floating cyan-glow chat button,
+  bottom-right above safe-area on mobile, top-right on desktop.
+- `src/components/navigation/sidebar-rail.tsx` — desktop-only rail
+  (`hidden lg:flex`), icon-only at `lg`, expanded labels at `xl`.
+- `src/components/navigation/zone-sub-tabs.tsx` — TabBar wrapper that reads
+  `?tab=` query param and writes URL on change. Auto-hides on zones without
+  sub-tabs.
+- `src/components/app-shell-nav.tsx` — new chrome wrapper. SidebarRail +
+  Header + ZoneSubTabs + main + BottomNav + ChatFAB. `/login` bypasses chrome.
+- `src/components/app-shell-legacy.tsx` — preserves the pre-B1 38-line
+  AppShell verbatim (Sidebar + Header + PriceStrip + main + StatusBar).
+  Renamed `AppShell` → `LegacyAppShell`. Kept until I1 fully removes it.
+- `src/components/app-shell.tsx` — REWRITTEN as a server component flag
+  selector. Reads `HUB_REDESIGN_NAV` via `runPython("query_feature_flags.py")`
+  directly (NOT via `/api/feature-flags` self-fetch — middleware would
+  401-redirect that on the auth gate). Cookie override
+  `hub_redesign_override=HUB_REDESIGN_NAV=true` allows Ghost-only preview
+  without flipping the global flag. Memoized via React `cache()` so a single
+  page render hits the resolver once.
+
+### Placeholder pages shipped
+
+- `/scalp` — EmptyState card. Wave E1 fills.
+- `/memory` — EmptyState card. Wave G1+G2 fills.
+- `/intel` — EmptyState card. Wave F1–F3 fills.
+
+Each reads the `?tab=` param and renders the matching sub-tab label so
+the URL contract is testable now.
+
+### Middleware redirects (`src/middleware.ts`)
+
+Inserted BEFORE the auth gate so legacy paths redirect whether the session
+is authed or not. Single block with `legacyMap` + 308 `NextResponse.redirect`.
+
+### Feature flag
+
+`HUB_REDESIGN_NAV` row in `auto_config`. False → LegacyAppShell renders.
+True → AppShellNav renders. **15-second rollback path:**
+
+```sql
+UPDATE auto_config SET value='false', updated_at=datetime('now')
+WHERE key='HUB_REDESIGN_NAV';
+```
+
+No service restart needed — the next page request reads the new flag value
+(React `cache()` is per-request only, so the flip propagates immediately).
+
+Ghost-only preview without global flip:
+```
+Cookie: hub_redesign_override=HUB_REDESIGN_NAV%3Dtrue
+```
+
+### Verification (all PASS)
+
+- `tsc --noEmit` clean.
+- `npm run build` ✓ Compiled successfully in 42s. 0 errors / 0 warnings.
+  New routes `/scalp` 1.91 kB, `/memory` 1.89 kB, `/intel` 1.92 kB. Old
+  `/trading`, `/command`, `/intelligence` removed from build output.
+- `trevor-dashboard.service` restart healthy. MainPID 2741776 ready in 8s.
+  Pre-existing `syslogd-6afdb5d` rogue process in the OLD cgroup forced a
+  SIGKILL during stop — surfaced separately; not B1.
+- All 6 zone routes 200 (dashboard / autotrader / scalp / intel / memory /
+  chat). All 3 legacy redirects 308 with correct `Location:` headers.
+  Followed redirects land at 200.
+- Chrome diff via HTML grep on `/scalp`:
+  - Flag OFF: 31353 B, ChatFAB=0, BottomNav=0, legacy "TRADING" text=2.
+  - Cookie override: 23479 B, ChatFAB=1, SidebarRail v3=1, BottomNav=1,
+    legacy "TRADING" text=0.
+  - Flag ON globally: 23479 B, same as cookie override.
+- **Rollback trial verified:** flip OFF → /scalp HTML returns to 31353 B
+  with legacy chrome. Flip back ON → 23479 B with new chrome.
+- `guard_recurring_bugs.sh` 13/13 PASS.
+- Open positions UNCHANGED (active_trades 0/0, auto_trades 0/0 — matches
+  Phase 0 baseline).
+- `trevor.service` was already FAILED at session start
+  (`ModuleNotFoundError: No module named 'email_triage'` — file is named
+  `email_triage_v4.py`, the import in `discord_bot.py:26` is unsuffixed,
+  first crash 2026-04-29 04:07:48 UTC ~12h before B1 began). NOT a B1
+  regression. Surfaced; out of B1 scope to fix.
+
+### Files
+
+**Added:** `src/lib/navigation.ts`, `src/components/navigation/{bottom-nav,
+chat-fab,sidebar-rail,zone-sub-tabs}.tsx`, `src/components/app-shell-nav.tsx`,
+`src/components/app-shell-legacy.tsx`, `src/app/{scalp,memory,intel}/{page,
+loading}.tsx`.
+
+**Modified:** `src/components/app-shell.tsx` (REWRITTEN as server-component
+flag selector), `src/middleware.ts` (added legacy redirect map before auth gate).
+
+**Deleted:** `src/app/{trading,command,intelligence}/` (page + loading +
+panels — 12 files total).
+
+**Untouched:** `src/components/sidebar.tsx`, `src/components/{header,
+status-bar,PriceStrip}.tsx`, `src/app/autotrader/page.tsx`.
+
+### Known transitional cosmetics
+
+- `/autotrader` shows BOTH the new ZoneSubTabs strip (Scalper / Degen) and
+  the existing `BotNavStrip` in-page picker. Intentional during B1→D1
+  transition; D1 cleans up.
+- Inbound legacy `href` values in `sidebar.tsx` redirect through middleware
+  rather than going to canonical paths directly. Resolves when
+  `LegacyAppShell` + `sidebar.tsx` are deleted in I1.
+- `/brain` page route is now an orphan (no nav surface points at it).
+  Harmless until I1 cleanup.
+
+### What B1 does NOT do
+
+Does not rebuild the Topbar (B2). Does not migrate `BotNavStrip` (D1). Does
+not fill any zone content (C/D/E/F/G). Does not convert CHAT to a side-panel
+modal (H1). Does not delete `LegacyAppShell` (I1). Does not delete legacy
+`sidebar.tsx` (I1). Does not change auth middleware logic. Does not touch
+backend, Discord, or sacred files. Does not change favicon, title, or theme.
+Does not introduce dark/light toggle. Does not introduce any new dep.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restructure. Rule 14 (sacred files) —
+9/9 byte-identical; `BEHAVIOR_RULES.md` + `CLAUDE.md` modified per B1 spec
+via `--no-verify` per memory `feedback_sacred_bypass`. Rule 15 (additive DB)
+— N/A (only existing `HUB_REDESIGN_NAV` row's value UPDATEd). Rule 16
+(surgical) — only listed files staged. Rule 22 (no Discord channels). Rule
+30 (no ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 31
+(auto trader never self-pauses) — N/A (UI only). No new npm dependencies —
+`lucide-react` icons all pre-existing. Mobile-first; chrome diff confirms
+BottomNav at mobile widths, SidebarRail at lg+, ChatFAB on every page. Tap
+target floor 44×44 via `.tap-target`. No HTML `<form>`. No scoring changes.
+B1 ships in the flag-ON state (HUB_REDESIGN_NAV='true' final).
+
+### Rollback
+
+```bash
+sqlite3 /home/trevor/trevor/trevor.db "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_NAV';"
+# 15-second flag rollback. No restart required.
+
+# Full code revert (if needed):
+cd /home/trevor/trevor-dashboard
+git revert <b1-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores legacy app-shell.tsx (single 38-line client component), removes
+# the 5 navigation components + AppShellNav + LegacyAppShell, removes /scalp
+# /memory /intel placeholders, restores /trading /command /intelligence,
+# removes middleware legacy redirects, removes navigation contract.
+```

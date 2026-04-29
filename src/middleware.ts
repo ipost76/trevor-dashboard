@@ -31,6 +31,21 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // B1 — legacy nav-redesign redirects.
+  // Old route names map to new canonical paths; redirects fire whether the
+  // session is authed or not (the new path is then auth-gated normally).
+  const legacyMap: Record<string, string> = {
+    "/trading": "/scalp",
+    "/command": "/memory",
+    "/intelligence": "/intel",
+  };
+  const legacyTarget = legacyMap[pathname];
+  if (legacyTarget) {
+    const url = request.nextUrl.clone();
+    url.pathname = legacyTarget;
+    return NextResponse.redirect(url, 308);
+  }
+
   // Always allow: login page, auth API, static assets
   if (
     pathname.startsWith("/login") ||

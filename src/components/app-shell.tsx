@@ -1,38 +1,56 @@
-"use client";
-import { usePathname } from "next/navigation";
-import { Sidebar } from "@/components/sidebar";
-import { Header } from "@/components/header";
-import { StatusBar } from "@/components/status-bar";
-import PriceStrip from "@/components/PriceStrip";
+import * as React from "react";
+import { cookies } from "next/headers";
+import { cache } from "react";
+import { AppShellNav } from "./app-shell-nav";
+import { LegacyAppShell } from "./app-shell-legacy";
+import { runPython } from "@/lib/api-helpers";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const isChat = pathname === "/chat";
-
-  if (pathname === "/login") {
-    return <>{children}</>;
+/**
+ * Server component — branches between LegacyAppShell (pre-redesign chrome)
+ * and AppShellNav (B1 BottomNav + SidebarRail + ChatFAB) based on the
+ * HUB_REDESIGN_NAV flag.
+ *
+ * Resolution order (first match wins):
+ *  1. Cookie override `hub_redesign_override` containing
+ *     `HUB_REDESIGN_NAV=true` — Ghost-only preview without flipping the
+ *     global flag.
+ *  2. auto_config DB row HUB_REDESIGN_NAV (read directly via runPython
+ *     — bypasses /api/feature-flags HTTP self-fetch which would be gated
+ *     by middleware auth).
+ *  3. Default false → render LegacyAppShell.
+ *
+ * Memoized with React `cache()` so a single page render hits the flag
+ * resolver once even if multiple server-component reads occur.
+ */
+const isHubRedesignNavOn = cache(async (): Promise<boolean> => {
+  try {
+    const c = await cookies();
+    const raw = c.get("hub_redesign_override")?.value;
+    if (
+      raw &&
+      decodeURIComponent(raw)
+        .split(",")
+        .some((p) => p.trim() === "HUB_REDESIGN_NAV=true")
+    ) {
+      return true;
+    }
+  } catch {
+    // cookies() unavailable — fall through to DB read
   }
 
-  return (
-    <div
-      className={`relative z-10 flex h-screen supports-[height:100dvh]:h-[100dvh] overflow-hidden text-foreground ${isChat ? "" : "bg-background"}`}
-      style={isChat ? { backgroundColor: "#0d1117" } : undefined}
-    >
-      <Sidebar />
-      <div
-        className="flex min-w-0 flex-1 flex-col overflow-hidden w-full"
-        style={isChat ? { backgroundColor: "#0d1117" } : undefined}
-      >
-        <Header />
-        <PriceStrip />
-        <main
-          className="flex flex-1 overflow-hidden pb-20 md:pb-0 w-full max-w-full"
-          style={isChat ? { backgroundColor: "#0d1117" } : undefined}
-        >
-          {children}
-        </main>
-        <StatusBar />
-      </div>
-    </div>
-  );
+  try {
+    const stdout = runPython("query_feature_flags.py", []);
+    const data = JSON.parse(stdout) as {
+      flags?: Record<string, { value?: boolean }>;
+    };
+    return data.flags?.HUB_REDESIGN_NAV?.value === true;
+  } catch {
+    return false;
+  }
+});
+
+export async function AppShell({ children }: { children: React.ReactNode }) {
+  const useNew = await isHubRedesignNavOn();
+  if (useNew) return <AppShellNav>{children}</AppShellNav>;
+  return <LegacyAppShell>{children}</LegacyAppShell>;
 }
