@@ -20,10 +20,6 @@ conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
 cur = conn.cursor()
 active = cur.execute("SELECT COUNT(*) FROM active_trades WHERE status='open'").fetchone()[0]
 signals = cur.execute("SELECT COUNT(*) FROM trade_insights WHERE created_at > datetime('now', '-30 minutes')").fetchone()[0]
-try:
-    overdue = cur.execute("SELECT COUNT(*) FROM reminders WHERE status != 'completed' AND due_at < datetime('now')").fetchone()[0]
-except:
-    overdue = 0
 filters = []
 try:
     rows = cur.execute("SELECT id, rule_type, ticker, direction, value, reason FROM signal_filter_rules WHERE enabled = 1").fetchall()
@@ -45,7 +41,7 @@ if outcomes:
     if d == 'loss': streak = -streak
 activeDetails = [{"ticker": r[0], "direction": r[1]} for r in cur.execute("SELECT ticker, direction FROM active_trades WHERE status='open'").fetchall()]
 conn.close()
-print(json.dumps({"activeTrades": active, "recentSignals": signals, "overdueReminders": overdue, "filters": filters, "filterCount": len(filters), "streak": streak, "lastPnl": lastPnl, "activeTradeDetails": activeDetails}))
+print(json.dumps({"activeTrades": active, "recentSignals": signals, "filters": filters, "filterCount": len(filters), "streak": streak, "lastPnl": lastPnl, "activeTradeDetails": activeDetails}))
 `;
     const raw = execSync(`${PYTHON_PATH} -`, {
       input: code,
@@ -58,6 +54,6 @@ print(json.dumps({"activeTrades": active, "recentSignals": signals, "overdueRemi
     cache = { data, ts: Date.now() };
     return NextResponse.json(data);
   } catch {
-    return NextResponse.json({ activeTrades: 0, recentSignals: 0, overdueReminders: 0, filters: [], filterCount: 0 });
+    return NextResponse.json({ activeTrades: 0, recentSignals: 0, filters: [], filterCount: 0 });
   }
 }

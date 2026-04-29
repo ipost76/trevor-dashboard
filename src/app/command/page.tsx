@@ -2,7 +2,6 @@
 
 import TabContainer from "@/components/TabContainer";
 import ControlPanelPanel from "./panels/ControlPanelPanel";
-import GhostHQPanel from "./panels/GhostHQPanel";
 
 export default function CommandPage() {
   return (
@@ -11,7 +10,6 @@ export default function CommandPage() {
       defaultTab="control"
       tabs={[
         { id: "control", label: "Control Panel", content: <ControlPanelPanel /> },
-        { id: "ghosthq", label: "Ghost HQ", content: <GhostHQPanel /> },
       ]}
     />
   );

@@ -41,7 +41,6 @@ const NAV_ZONES: NavZone[] = [
     href: "/trading",
     children: [
       { label: "Trades", href: "/trading?tab=trades", tabKey: "trades" },
-      { label: "Holdings", href: "/trading?tab=holdings", tabKey: "holdings" },
     ],
   },
   {
@@ -62,7 +61,6 @@ const NAV_ZONES: NavZone[] = [
     href: "/command",
     children: [
       { label: "Control Panel", href: "/command?tab=control", tabKey: "control" },
-      { label: "Ghost HQ", href: "/command?tab=ghosthq", tabKey: "ghosthq" },
     ],
   },
   {
@@ -77,14 +75,9 @@ const NAV_ZONES: NavZone[] = [
 // Old route → zone mapping (for highlighting correct zone on legacy routes)
 const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/trades": "trading",
-  "/holdings": "trading",
   "/signals": "intelligence",
-  "/research": "intelligence",
   "/training": "intelligence",
   "/control": "command",
-  "/ghost": "command",
-  "/reminders": "command",
-  "/dev-tasks": "command",
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -151,7 +144,7 @@ function SidebarInner() {
   const activeTab = searchParams.get("tab");
   const [collapsed, setCollapsed] = useState(false);
   const [expandedZone, setExpandedZone] = useState<string | null>(null);
-  const [navBadges, setNavBadges] = useState<{ activeTrades: number; recentSignals: number; overdueReminders: number }>({ activeTrades: 0, recentSignals: 0, overdueReminders: 0 });
+  const [navBadges, setNavBadges] = useState<{ activeTrades: number; recentSignals: number }>({ activeTrades: 0, recentSignals: 0 });
   const [quickJump, setQuickJump] = useState<{ zoneId: string; x: number } | null>(null);
 
   const activeZoneId = getActiveZoneId(pathname);
@@ -172,7 +165,7 @@ function SidebarInner() {
       try {
         const res = await fetch("/api/nav-badges");
         const d = await res.json();
-        setNavBadges({ activeTrades: d.activeTrades || 0, recentSignals: d.recentSignals || 0, overdueReminders: d.overdueReminders || 0 });
+        setNavBadges({ activeTrades: d.activeTrades || 0, recentSignals: d.recentSignals || 0 });
       } catch { /* ignore */ }
     };
     fetchBadges();
@@ -243,9 +236,6 @@ function SidebarInner() {
                     )}
                     {zone.id === "intelligence" && navBadges.recentSignals > 0 && (
                       <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ffee" }} />
-                    )}
-                    {zone.id === "command" && navBadges.overdueReminders > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#ff3355" }} />
                     )}
                   </span>
                   {!collapsed && <span className="flex-1 truncate">{zone.label}</span>}
@@ -469,9 +459,6 @@ function SidebarInner() {
                   )}
                   {zone.id === "intelligence" && navBadges.recentSignals > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#00ffee" }} />
-                  )}
-                  {zone.id === "command" && navBadges.overdueReminders > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full border border-[var(--sidebar)]" style={{ background: "#ff3355" }} />
                   )}
                 </span>
                 <span style={{

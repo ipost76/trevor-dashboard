@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback, useEffect } from "react";
 import {
-  FileText, Brain, Database, Calendar, Terminal, Shield,
+  FileText, Brain, Database,
   RefreshCw, ChevronDown, ChevronRight, Lock, RefreshCcw,
   GitCommit, Search, ChevronLeft,
 } from "lucide-react";
@@ -10,20 +10,14 @@ import { safeFetch } from "@/lib/fetch";
 import { TabBar, type TabDef } from "@/components/ui/tab-bar";
 import { BrainEditor } from "@/components/control/brain-editor";
 import { ChromaBrowser } from "@/components/control/chroma-browser";
-import { ScheduleManager } from "@/components/control/schedule-manager";
-import { LogViewer } from "@/components/control/log-viewer";
-import { SecurityViewer } from "@/components/control/security-viewer";
 import { EmptyState } from "@/components/ui/empty-state";
 
-type Tab = "brain" | "memory" | "chroma" | "schedule" | "logs" | "security" | "commits";
+type Tab = "brain" | "memory" | "chroma" | "commits";
 
 const tabDefs: TabDef<Tab>[] = [
   { key: "brain", label: "Brain Files", icon: FileText },
   { key: "memory", label: "Memory", icon: Brain },
   { key: "chroma", label: "ChromaDB", icon: Database },
-  { key: "schedule", label: "Schedule", icon: Calendar },
-  { key: "logs", label: "Logs", icon: Terminal },
-  { key: "security", label: "Security", icon: Shield },
   { key: "commits", label: "Commits", icon: GitCommit },
 ];
 
@@ -56,9 +50,6 @@ export default function ControlPanelPanel() {
           {tab === "brain" && <BrainEditor />}
           {tab === "memory" && <MemoryTab />}
           {tab === "chroma" && <ChromaBrowser />}
-          {tab === "schedule" && <ScheduleManager />}
-          {tab === "logs" && <LogViewer />}
-          {tab === "security" && <SecurityViewer />}
           {tab === "commits" && <CommitsTab />}
         </div>
       </div>

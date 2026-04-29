@@ -2,7 +2,6 @@
 
 import TabContainer from "@/components/TabContainer";
 import TradesPanel from "./panels/TradesPanel";
-import HoldingsPanel from "./panels/HoldingsPanel";
 
 export default function TradingPage() {
   return (
@@ -11,7 +10,6 @@ export default function TradingPage() {
       defaultTab="trades"
       tabs={[
         { id: "trades", label: "Trades", content: <TradesPanel /> },
-        { id: "holdings", label: "Holdings", content: <HoldingsPanel /> },
       ]}
     />
   );
