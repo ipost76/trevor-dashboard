@@ -47,6 +47,59 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* ============================================================
+     A4 — DESIGN SYSTEM v1 tokens (parallel namespace, locked).
+     Coexists with legacy --background, --neon-*, --card, etc.
+     New components import these via Tailwind v4 utilities:
+        bg-bg-primary / text-fg-muted / border-border-strong /
+        text-accent-cyan / shadow-glow-cyan / rounded-pill /
+        duration-fast / animate-pulse-cyan / xs:flex / mm:grid-cols-2
+     Do NOT extend without an A4-revision prompt.
+     ============================================================ */
+  --color-bg-primary: #0a0a0f;
+  --color-bg-card: #12121a;
+  --color-bg-elevated: #1a1a28;
+  --color-bg-glass: rgba(18, 18, 26, 0.85);
+  --color-bg-sidebar: #08080d;
+  --color-bg-overlay: rgba(8, 8, 13, 0.78);
+  --color-fg-primary: #e0e0e8;
+  --color-fg-muted: #8a8a98;
+  --color-fg-dim: #4a4a58;
+  --color-fg-faint: #2a2a38;
+  --color-accent-cyan: #00f0ff;
+  --color-accent-magenta: #ff00ff;
+  --color-accent-green: #00ff88;
+  --color-accent-amber: #ffaa00;
+  --color-accent-red: #ff3366;
+  --color-accent-violet: #b478ff;
+  --color-border-subtle: rgba(0, 240, 255, 0.12);
+  --color-border-strong: rgba(0, 240, 255, 0.32);
+  --color-border-accent: rgba(0, 240, 255, 0.6);
+  --color-border-amber: rgba(255, 170, 0, 0.4);
+  --color-border-red: rgba(255, 51, 102, 0.4);
+  --shadow-glow-cyan: 0 0 16px rgba(0, 240, 255, 0.4);
+  --shadow-glow-magenta: 0 0 16px rgba(255, 0, 255, 0.4);
+  --shadow-glow-green: 0 0 16px rgba(0, 255, 136, 0.4);
+  --shadow-glow-amber: 0 0 14px rgba(255, 170, 0, 0.5);
+  --shadow-glow-red: 0 0 14px rgba(255, 51, 102, 0.45);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px rgba(0, 0, 0, 0.45);
+  --radius-xs: 0.125rem;
+  --radius-xl: 1rem;
+  --radius-pill: 9999px;
+  --duration-instant: 80ms;
+  --duration-fast: 160ms;
+  --duration-medium: 240ms;
+  --duration-slow: 400ms;
+  --breakpoint-xs: 23.4375rem;
+  --breakpoint-mm: 26.875rem;
+  --animate-pulse-cyan: pulse-cyan 2s ease-in-out infinite;
+  --animate-pulse-amber: pulse-amber 2s ease-in-out infinite;
+  --animate-pulse-green: pulse-green 2s ease-in-out infinite;
+  --animate-pulse-magenta: pulse-magenta 2s ease-in-out infinite;
+  --animate-shimmer-ds: shimmer-ds 1.6s linear infinite;
+  --animate-slide-up: slide-up var(--duration-medium) cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in var(--duration-fast) ease-out;
 }
 
 :root {
@@ -448,3 +501,56 @@ body::after {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ============================================================
+   A4 — DESIGN SYSTEM v1 (typography, motion, helpers)
+   Appended 2026-04-29. Consumed by src/components/ui/* primitives.
+   ============================================================ */
+
+/* Typography scale */
+.text-display { font-size: 2rem;     line-height: 2.5rem;   font-weight: 700; letter-spacing: -0.02em; }
+.text-h1      { font-size: 1.5rem;   line-height: 2rem;     font-weight: 700; letter-spacing: -0.01em; }
+.text-h2      { font-size: 1.25rem;  line-height: 1.75rem;  font-weight: 600; }
+.text-h3      { font-size: 1rem;     line-height: 1.5rem;   font-weight: 600; }
+.text-body    { font-size: 0.875rem; line-height: 1.25rem;  font-weight: 400; }
+.text-caption { font-size: 0.75rem;  line-height: 1rem;     font-weight: 400; }
+.text-micro   { font-size: 0.625rem; line-height: 0.875rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Motion keyframes (design system v1) */
+@keyframes pulse-cyan {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 240, 255, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(0, 240, 255, 0); }
+}
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 170, 0, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(255, 170, 0, 0); }
+}
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(0, 255, 136, 0); }
+}
+@keyframes pulse-magenta {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 0, 255, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(255, 0, 255, 0); }
+}
+@keyframes shimmer-ds {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* iOS safe-area helpers */
+.safe-pt { padding-top: env(safe-area-inset-top, 0); }
+.safe-pb { padding-bottom: env(safe-area-inset-bottom, 0); }
+.safe-pl { padding-left: env(safe-area-inset-left, 0); }
+.safe-pr { padding-right: env(safe-area-inset-right, 0); }
+
+/* Tap-target floor — iOS HIG 44x44 minimum (overrides legacy 36px floor on .tap-target) */
+.tap-target { min-width: 44px; min-height: 44px; }
