@@ -1,0 +1,133 @@
+"use client";
+import { useEffect, useState } from "react";
+import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search, Moon, Sun } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { safeFetch } from "@/lib/fetch";
+import { ChangePasswordModal } from "@/components/change-password-modal";
+import { KillswitchPill } from "@/components/KillswitchPill";
+
+type StatusData = { ok: boolean; trevor: { running: boolean; pid: number }; xp: number; rank: string };
+
+export function LegacyHeader() {
+  const [status, setStatus] = useState<StatusData | null>(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [time, setTime] = useState("");
+  const [oled, setOled] = useState(false);
+
+  // OLED mode: read from localStorage on mount
+  useEffect(() => {
+    const saved = typeof window !== "undefined" && localStorage.getItem("oled") === "true";
+    setOled(saved);
+    if (saved) document.documentElement.classList.add("oled");
+  }, []);
+
+  const toggleOled = () => {
+    const next = !oled;
+    setOled(next);
+    if (next) {
+      document.documentElement.classList.add("oled");
+      localStorage.setItem("oled", "true");
+    } else {
+      document.documentElement.classList.remove("oled");
+      localStorage.setItem("oled", "false");
+    }
+  };
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setTime(now.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    };
+    updateTime();
+    const t = setInterval(updateTime, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const fetchStatus = () => {
+      safeFetch<StatusData | null>("/api/status", null).then(setStatus);
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLogout = async () => {
+    await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    });
+    window.location.href = "/login";
+  };
+
+  return (
+    <>
+      <header className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--panel-header)] px-3">
+        {/* Left: Status */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            {status?.trevor.running ? (
+              <div className="relative">
+                <Wifi className="h-3 w-3 text-[var(--neon-green)]" />
+                <div className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--neon-green)] pulse-live" />
+              </div>
+            ) : (
+              <WifiOff className="h-3 w-3 text-[var(--neon-red)]" />
+            )}
+            <span className={cn(
+              "text-[10px] font-bold tracking-[0.1em] uppercase",
+              status?.trevor.running ? "neon-green" : "neon-red"
+            )}>
+              {status ? (status.trevor.running ? "LIVE" : "OFFLINE") : "..."}
+            </span>
+          </div>
+          <span className="hidden md:inline text-[9px] text-muted-foreground font-mono">
+            {status?.trevor.running ? `PID ${status.trevor.pid}` : ""}
+          </span>
+          <KillswitchPill />
+          <div className="h-3 w-px bg-[var(--border)]" />
+          <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
+        </div>
+
+        {/* Right: XP + Controls */}
+        <div className="flex items-center gap-2 md:gap-3">
+          {status && (
+            <div className="flex items-center gap-1 md:gap-1.5 rounded bg-[rgba(0,240,255,0.06)] border border-[rgba(0,240,255,0.12)] px-1.5 md:px-2 py-0.5">
+              <Zap className="h-2.5 w-2.5 text-[var(--neon-cyan)]" />
+              <span className="text-[10px] font-bold text-[var(--neon-cyan)]">{status.xp}</span>
+              <span className="hidden md:inline text-[9px] text-muted-foreground">{status.rank}</span>
+            </div>
+          )}
+          <div className="hidden md:block h-3 w-px bg-[var(--border)]" />
+          <button
+            onClick={() => setShowChangePassword(true)}
+            className="hidden md:flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
+            title="Change password"
+          >
+            <KeyRound className="h-3 w-3" />
+          </button>
+          <button
+            onClick={toggleOled}
+            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
+            title={oled ? "Standard mode" : "OLED mode"}
+          >
+            {oled ? <Sun className="h-3.5 w-3.5 md:h-3 md:w-3" /> : <Moon className="h-3.5 w-3.5 md:h-3 md:w-3" />}
+          </button>
+          <button
+            onClick={handleLogout}
+            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(255,51,102,0.1)] hover:text-[var(--neon-red)] transition-colors"
+            title="Log out"
+          >
+            <LogOut className="h-3.5 w-3.5 md:h-3 md:w-3" />
+          </button>
+        </div>
+      </header>
+
+      <ChangePasswordModal
+        open={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
+    </>
+  );
+}

@@ -1,133 +1,184 @@
 "use client";
-import { useEffect, useState } from "react";
-import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search, Moon, Sun } from "lucide-react";
+import * as React from "react";
+import { LogOut, Sun, Moon } from "lucide-react";
+import { useTheme } from "next-themes";
+import { useRouter, usePathname } from "next/navigation";
+import { LivePulse, KillswitchPill, Pill } from "@/components/ui";
+import PriceStrip from "@/components/PriceStrip";
+import { useScrollDirection } from "@/hooks/useScrollDirection";
 import { cn } from "@/lib/utils";
-import { safeFetch } from "@/lib/fetch";
-import { ChangePasswordModal } from "@/components/change-password-modal";
-import { KillswitchPill } from "@/components/KillswitchPill";
 
-type StatusData = { ok: boolean; trevor: { running: boolean; pid: number }; xp: number; rank: string };
+interface StatusData {
+  ok: boolean;
+  trevor: { running: boolean; pid: number };
+  xp: number;
+  rank: string;
+}
 
+/**
+ * Post-redesign topbar (B2). NO STOP button anywhere — Discord !killswitch
+ * is the single project-wide pause per Rule 32.
+ *
+ * Composes: LivePulse (cyan/red — derived from /api/status trevor.running) +
+ * clock + PriceStrip (row 1 desktop / row 2 mobile) + KillswitchPill (visible
+ * only when on) + XP badge + theme toggle (next-themes) + logout.
+ *
+ * Mobile: collapses on scroll-down, restores on scroll-up.
+ * Desktop: always visible.
+ *
+ * /chat route renders a minimal back-button + title variant.
+ */
 export function Header() {
-  const [status, setStatus] = useState<StatusData | null>(null);
-  const [showChangePassword, setShowChangePassword] = useState(false);
-  const [time, setTime] = useState("");
-  const [oled, setOled] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [status, setStatus] = React.useState<StatusData | null>(null);
+  const [now, setNow] = React.useState<string>("");
+  const scrollDir = useScrollDirection();
 
-  // OLED mode: read from localStorage on mount
-  useEffect(() => {
-    const saved = typeof window !== "undefined" && localStorage.getItem("oled") === "true";
-    setOled(saved);
-    if (saved) document.documentElement.classList.add("oled");
-  }, []);
-
-  const toggleOled = () => {
-    const next = !oled;
-    setOled(next);
-    if (next) {
-      document.documentElement.classList.add("oled");
-      localStorage.setItem("oled", "true");
-    } else {
-      document.documentElement.classList.remove("oled");
-      localStorage.setItem("oled", "false");
-    }
-  };
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setTime(now.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  // Single status poll — replaces /api/system-health + /api/admin/current-state
+  // per Phase 0 audit (those endpoints don't return the shape the prompt assumed;
+  // /api/status has the right shape and is the existing well-tested choice).
+  React.useEffect(() => {
+    let alive = true;
+    const tickStatus = async () => {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as StatusData;
+          if (alive) setStatus(data);
+        }
+      } catch {
+        // graceful: keep last known state
+      }
     };
-    updateTime();
-    const t = setInterval(updateTime, 1000);
-    return () => clearInterval(t);
+    tickStatus();
+    const id = setInterval(tickStatus, 30000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, []);
 
-  useEffect(() => {
-    const fetchStatus = () => {
-      safeFetch<StatusData | null>("/api/status", null).then(setStatus);
+  // Clock — 1s tick, HH:MM:SS
+  React.useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      setNow(`${hh}:${mm}:${ss}`);
     };
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
   }, []);
+
+  // LivePulse tone: red when bot offline, cyan otherwise
+  // (drops amber DEGRADED tier per Phase 0 audit deviation #2 —
+  // /api/status doesn't expose a separate scanner_ok signal)
+  const liveTone: "cyan" | "red" =
+    status?.trevor.running === false ? "red" : "cyan";
+  const liveLabel = liveTone === "red" ? "OFFLINE" : "LIVE";
+
+  // /chat minimal variant detection
+  const isChat = pathname === "/chat";
+
+  // Hide on scroll-down, show on scroll-up (mobile only; desktop always visible)
+  const hidden = scrollDir === "down";
 
   const handleLogout = async () => {
-    await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "logout" }),
-    });
-    window.location.href = "/login";
+    try {
+      // POST body — /api/auth route reads body.action, not URL query
+      // (verified Phase 0 audit deviation #3)
+      await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "logout" }),
+      });
+    } catch {
+      // graceful: still navigate to /login
+    }
+    router.push("/login");
   };
 
-  return (
-    <>
-      <header className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--panel-header)] px-3">
-        {/* Left: Status */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            {status?.trevor.running ? (
-              <div className="relative">
-                <Wifi className="h-3 w-3 text-[var(--neon-green)]" />
-                <div className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--neon-green)] pulse-live" />
-              </div>
-            ) : (
-              <WifiOff className="h-3 w-3 text-[var(--neon-red)]" />
-            )}
-            <span className={cn(
-              "text-[10px] font-bold tracking-[0.1em] uppercase",
-              status?.trevor.running ? "neon-green" : "neon-red"
-            )}>
-              {status ? (status.trevor.running ? "LIVE" : "OFFLINE") : "..."}
-            </span>
-          </div>
-          <span className="hidden md:inline text-[9px] text-muted-foreground font-mono">
-            {status?.trevor.running ? `PID ${status.trevor.pid}` : ""}
-          </span>
-          <KillswitchPill />
-          <div className="h-3 w-px bg-[var(--border)]" />
-          <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
-        </div>
+  const toggleTheme = () =>
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
 
-        {/* Right: XP + Controls */}
-        <div className="flex items-center gap-2 md:gap-3">
-          {status && (
-            <div className="flex items-center gap-1 md:gap-1.5 rounded bg-[rgba(0,240,255,0.06)] border border-[rgba(0,240,255,0.12)] px-1.5 md:px-2 py-0.5">
-              <Zap className="h-2.5 w-2.5 text-[var(--neon-cyan)]" />
-              <span className="text-[10px] font-bold text-[var(--neon-cyan)]">{status.xp}</span>
-              <span className="hidden md:inline text-[9px] text-muted-foreground">{status.rank}</span>
-            </div>
-          )}
-          <div className="hidden md:block h-3 w-px bg-[var(--border)]" />
-          <button
-            onClick={() => setShowChangePassword(true)}
-            className="hidden md:flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
-            title="Change password"
-          >
-            <KeyRound className="h-3 w-3" />
-          </button>
-          <button
-            onClick={toggleOled}
-            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(0,240,255,0.06)] hover:text-foreground transition-colors"
-            title={oled ? "Standard mode" : "OLED mode"}
-          >
-            {oled ? <Sun className="h-3.5 w-3.5 md:h-3 md:w-3" /> : <Moon className="h-3.5 w-3.5 md:h-3 md:w-3" />}
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex h-7 w-7 md:h-6 md:w-6 items-center justify-center rounded text-muted-foreground hover:bg-[rgba(255,51,102,0.1)] hover:text-[var(--neon-red)] transition-colors"
-            title="Log out"
-          >
-            <LogOut className="h-3.5 w-3.5 md:h-3 md:w-3" />
-          </button>
-        </div>
+  // Per-zone variant: /chat renders minimal topbar
+  if (isChat) {
+    return (
+      <header className="safe-pt sticky top-0 z-30 flex items-center gap-3 border-b border-border-subtle bg-bg-sidebar/95 px-4 py-2 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => router.back()}
+          aria-label="Back"
+          className="tap-target rounded-md p-2 text-fg-muted hover:text-fg-primary"
+        >
+          ←
+        </button>
+        <span className="text-h3 tracking-wide">TREVOR CHAT</span>
+        <span className="ml-auto">
+          <LivePulse tone={liveTone} label="" />
+        </span>
       </header>
+    );
+  }
 
-      <ChangePasswordModal
-        open={showChangePassword}
-        onClose={() => setShowChangePassword(false)}
-      />
-    </>
+  return (
+    <header
+      className={cn(
+        "safe-pt sticky top-0 z-30 flex flex-col gap-1 border-b border-border-subtle bg-bg-sidebar/95 backdrop-blur",
+        "transition-transform duration-medium",
+        hidden ? "-translate-y-full md:translate-y-0" : "translate-y-0"
+      )}
+    >
+      {/* Row 1: pulse + clock + ticker (desktop) + identity controls */}
+      <div className="flex items-center gap-3 px-4 py-2">
+        <LivePulse tone={liveTone} label={liveLabel} />
+        <span className="text-caption tabular-nums text-fg-muted">{now}</span>
+
+        {/* Desktop ticker strip — hidden on mobile (mobile gets row 2) */}
+        <div className="hidden lg:block flex-1 min-w-0">
+          <PriceStrip />
+        </div>
+
+        {/* Spacer for mobile so identity controls right-align */}
+        <div className="flex-1 lg:hidden" />
+
+        {/* Killswitch pill — KillswitchPill renders nothing when killswitch is OFF */}
+        <KillswitchPill />
+
+        {/* XP badge */}
+        <Pill tone="cyan" size="sm" title={status?.rank ?? "—"}>
+          {(status?.xp ?? 0).toLocaleString()}⚡
+        </Pill>
+
+        {/* Theme toggle (next-themes) */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label="Toggle theme"
+          className="tap-target rounded-md p-2 text-fg-muted hover:text-fg-primary"
+        >
+          {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+
+        {/* Logout */}
+        <button
+          type="button"
+          onClick={handleLogout}
+          aria-label="Logout"
+          className="tap-target rounded-md p-2 text-fg-muted hover:text-accent-red"
+        >
+          <LogOut size={16} />
+        </button>
+      </div>
+
+      {/* Row 2: mobile-only ticker strip */}
+      <div className="lg:hidden border-t border-border-subtle px-4 py-1">
+        <PriceStrip />
+      </div>
+    </header>
   );
 }

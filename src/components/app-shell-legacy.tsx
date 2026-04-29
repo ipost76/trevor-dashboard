@@ -1,7 +1,7 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
-import { Header } from "@/components/header";
+import { LegacyHeader } from "@/components/header-legacy";
 import { StatusBar } from "@/components/status-bar";
 import PriceStrip from "@/components/PriceStrip";
 
@@ -31,7 +31,7 @@ export function LegacyAppShell({ children }: { children: React.ReactNode }) {
         className="flex min-w-0 flex-1 flex-col overflow-hidden w-full"
         style={isChat ? { backgroundColor: "#0d1117" } : undefined}
       >
-        <Header />
+        <LegacyHeader />
         <PriceStrip />
         <main
           className="flex flex-1 overflow-hidden pb-20 md:pb-0 w-full max-w-full"

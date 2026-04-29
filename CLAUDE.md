@@ -1492,3 +1492,143 @@ sudo systemctl restart trevor-dashboard.service
 # /memory /intel placeholders, restores /trading /command /intelligence,
 # removes middleware legacy redirects, removes navigation contract.
 ```
+
+## B2 — Topbar Rebuild (shipped 2026-04-29)
+
+Mobile-first post-redesign topbar replaces the legacy 133-line `header.tsx` (custom OLED toggle, ChangePasswordModal, Wifi/WifiOff status icons, `/api/status` fetch with `safeFetch`). New 184-line `header.tsx` composes A4 design-system primitives (`LivePulse` + `Pill` + `KillswitchPill` from `@/components/ui` barrel) + new `useScrollDirection` hook for mobile collapse-on-scroll. **NO STOP / Kill / Halt / Pause button anywhere — Discord `!killswitch` is the single project-wide pause per Rule 32 (codified A2).** Same `HUB_REDESIGN_NAV` flag from B1 controls both nav AND topbar — 15-second SQL flip rolls back together.
+
+### 5 Phase 0 audit deviations from prompt (Ghost-approved)
+
+1. **API endpoint shape mismatch** — prompt specified `/api/system-health` (`{scanner_ok, bot_active, ...}`) + `/api/admin/current-state` (`{xp, level}`). Neither endpoint returns those fields. `/api/system-health` actually returns `{scanner: {last_signal_at, status}, signals: {...}, api: {hyperliquid: {...}}, kill_switch: {...}}` and `/api/admin/current-state` returns `{currentCapital, pnlCutoffDate}`. Switched to existing well-tested `/api/status` (`{ok, trevor: {running, pid}, xp, rank, signals: {...}}`) — single endpoint with the right shape, matches legacy header pattern.
+2. **`liveTone` simplification** — dropped amber DEGRADED tier (no `scanner_ok` field exists in `/api/status` either; would always evaluate true). New tone: red when `status?.trevor.running === false`, cyan otherwise.
+3. **Logout via POST body, not URL query** — `/api/auth/route.ts:47` reads `body.action` from POST body. Prompt's `fetch("/api/auth?action=logout", { method: "POST" })` would default to `"login"` with empty body and fail with 401. Used existing legacy header pattern: POST body `{action: "logout"}`.
+4. **`PriceStrip` is default export** — `export default function PriceStrip()`. Prompt's `import { PriceStrip } from "@/components/PriceStrip"` (named) would fail build. Used `import PriceStrip from "@/components/PriceStrip"` (default).
+5. **next-themes for theme toggle** — legacy header had custom localStorage `oled` class on documentElement. Switched to `useTheme()` from next-themes (already installed v0.4.6, ThemeProvider mounted at `layout.tsx:19`). Toggle now flips `html.dark` instead of `html.oled` — existing `globals.css:141 html.oled {...}` CSS becomes unreachable from this toggle. `ChangePasswordModal` orphaned (deferred to future Settings page).
+
+### Architecture
+
+```
+src/components/header.tsx (NEW, 184 lines) — main topbar
+  ├─ /api/status poll (30s) — single source for LIVE/OFFLINE + XP + rank
+  ├─ Clock 1s tick (HH:MM:SS, 24-hour)
+  ├─ useScrollDirection (rAF-throttled, mobile collapse-on-scroll)
+  ├─ useTheme() from next-themes (Sun/Moon toggle)
+  ├─ usePathname() — minimal /chat variant detection
+  ├─ usePathname() === "/chat" early-return for minimal back-button variant
+  ├─ Composes from @/components/ui barrel:
+  │   - LivePulse  (cyan/red, label LIVE/OFFLINE)
+  │   - KillswitchPill (renders null when killswitch off; STANDBY pill when on)
+  │   - Pill tone="cyan" — XP badge with rank tooltip
+  └─ Imports default PriceStrip from @/components/PriceStrip
+
+src/hooks/useScrollDirection.ts (NEW, ~50 lines)
+  └─ rAF-throttled scroll tracker, returns "up"|"down"|null
+     Threshold default 8px, SSR-safe (returns null when window undefined)
+
+src/components/header-legacy.tsx (RENAMED from header.tsx via git mv, 133 lines)
+  └─ exports `LegacyHeader` (was `Header`); preserved verbatim for I1 rollback
+
+src/components/app-shell-legacy.tsx (UPDATED, 2 line edits)
+  └─ import { LegacyHeader } from "@/components/header-legacy"
+     <LegacyHeader /> in legacy chrome wrapper
+
+src/components/app-shell-nav.tsx (UPDATED for build hygiene, +3 lines)
+  └─ <Suspense fallback={null}><ZoneSubTabs /></Suspense>
+     Required by Next.js 15 strict-mode static prerender of /_not-found
+     (latent B1 issue surfaced by my fresh `rm -rf .next && npm run build`;
+     fix matches sidebar.tsx pattern). NOT a B2-introduced bug — ZoneSubTabs
+     uses useSearchParams since B1 (commit bd16d5f); B1's build cache may
+     have skipped /_not-found prerender.
+```
+
+### Layout contract
+
+**Mobile (< lg / 1024px)** — 2 rows, collapses on scroll-down via `-translate-y-full`:
+```
+┌──────────────────────────────────────────────────────┐
+│ ●LIVE  21:35:01            [STANDBY]?  214⚡  ☀  ↗ │  Row 1
+│ BTC $76,724 · ETH $2,284 · SOL $83.99 · …           │  Row 2 (lg:hidden)
+└──────────────────────────────────────────────────────┘
+```
+
+**Desktop (≥ lg / 1024px)** — single row, always visible (`md:translate-y-0` overrides hide):
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ ●LIVE  21:35:01     BTC $76,724 · ETH $2,284 · …    [STANDBY]?  214⚡  ☀  ↗ │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**`/chat` route** — minimal variant (back button + title + LivePulse, no PriceStrip/XP/Theme/Logout):
+```
+┌──────────────────────────────────────────────────────┐
+│ ←  TREVOR CHAT                                  ●LIVE │
+└──────────────────────────────────────────────────────┘
+```
+
+`safe-pt` utility class respected for iPhone notch + Dynamic Island. `tap-target` 44×44 floor on every interactive element. `transition-transform duration-medium` for smooth collapse-on-scroll.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, 43s, all routes `ƒ Dynamic` server-rendered on demand |
+| `hooks/guard_recurring_bugs.sh` (trevor side) | 13/13 PASS |
+| Sacred files 12/12 (trevor side) | byte-identical via `sha256sum -c .sacred_manifest.sha256` |
+| `signal_filter_rules` (trevor side) | UNCHANGED (1 inert `REGIME_THRESHOLD_CAP enabled=0` reseed row per Rule 30 known residual) |
+| 6 canaries (trevor side) | CLEAN |
+| Login + 6 zone URLs | All HTTP 200 (`/dashboard`, `/autotrader`, `/scalp`, `/intel`, `/memory`, `/chat`) |
+| New header HTML markers | flag ON: `bg-bg-sidebar=1`, `border-border-subtle=1`, `tap-target=1`, `text-fg-muted=1`, `safe-pt=1`, `duration-medium=1`, `Toggle theme=1`, `aria-label="Logout"=1` |
+| Legacy header HTML markers | flag ON: all=0; flag OFF: `panel-header=1`, `Change password=1`, `OLED toggle=1`, `lucide-wifi=1` |
+| Killswitch smoke (API) | `/api/killswitch` returns `{enabled:true, lastToggle, lastAuthor, lastReason}` after DB flip; cleanup restores `enabled:false` |
+| Killswitch sentinels | `[KILLSWITCH-ON]` + `[KILLSWITCH-OFF]` WARNING lines in journalctl via `main.py:27` filter |
+| Bot health invariant | trevor.service active (PID 2752692, untouched), 0/0 open positions matches Phase 0 baseline |
+| Rollback verified | flag flip OFF → 30089B legacy chrome (4 legacy markers + 0 new); flip back ON → 23113B byte-identical to first ON |
+
+### Deploy
+
+| Field | Value |
+|---|---|
+| Pre-restart Hub MainPID | 2741776 (B1 generation) |
+| Restart time | 2026-04-29 21:35:18 UTC |
+| Post-restart Hub MainPID | **2760604**, NRestarts=0 |
+| First `[HUB] TREVOR Hub ready` | 21:35:20 UTC (~3s cold-start) |
+| Pattern 2 readiness gate | READY at 21:35:20 UTC, completed in <90s |
+| Pattern 1 dashboard error watch (15min wrapped) | 0 qualifying emits |
+| Pattern 6 trevor recurring-bug canary (15min wrapped) | 0 emits |
+| trevor.service | UNTOUCHED — PID 2752692, ActiveEnterTimestamp 20:33:21 UTC unchanged |
+
+### What B2 does NOT do
+
+- Does NOT delete `header-legacy.tsx` (kept for emergency rollback; final removal in I1)
+- Does NOT change `/api/kill-switch` route file (kept for backward-compat per A2)
+- Does NOT modify the auth flow
+- Does NOT introduce dark/light theme toggle logic (uses existing `next-themes`)
+- Does NOT refactor `PriceStrip.tsx` (kept tested, preserved as default-export)
+- Does NOT delete `status-bar.tsx` (still mounted by `LegacyAppShell`; deletion deferred to I1)
+- Does NOT touch backend, Discord, or sacred files
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores BOTH nav and topbar to legacy chrome)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_NAV';"
+# No restart required (React cache() is per-request)
+
+# Full code revert
+cd /home/trevor/trevor-dashboard && git revert <hub-commit>
+sudo systemctl restart trevor-dashboard.service
+```
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only, zero trade-closing code. Rule 14
+(sacred files) — 12/12 byte-identical (trevor side). Rule 15 (additive DB)
+— N/A no schema changes. Rule 16 (surgical) — only listed files staged.
+Rule 22 (no Discord channels touched). Rule 30 (no ticker/direction blocks)
+— `signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses)
+— N/A UI only. Rule 32 (KILLSWITCH IS THE ONLY PROJECT-WIDE PAUSE; UI Stop
+buttons banned) — ENFORCED. New topbar has zero kill affordance. No new
+npm dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.

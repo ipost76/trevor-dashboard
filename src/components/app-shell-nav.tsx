@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BottomNav } from "@/components/navigation/bottom-nav";
@@ -31,7 +32,9 @@ export function AppShellNav({ children }: { children: React.ReactNode }) {
       <SidebarRail />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <ZoneSubTabs />
+        <Suspense fallback={null}>
+          <ZoneSubTabs />
+        </Suspense>
         <main
           className={cn(
             "flex-1 pb-[88px] lg:pb-0",
