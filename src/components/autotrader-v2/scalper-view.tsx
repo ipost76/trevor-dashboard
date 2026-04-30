@@ -6,7 +6,7 @@ import { ActivePositionCard } from "./active-position-card";
 import { RecentTradesCard } from "./recent-trades-card";
 import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
-import { DegenSection } from "@/components/autotrader/DegenSection";
+import { DegenSection } from "./degen-section";
 
 interface ScalperViewProps {
   subtab?: string;
