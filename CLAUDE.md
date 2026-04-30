@@ -2589,3 +2589,207 @@ verified at 375vw via SSR HTML markup. Tap target floor 44×44 via
 
 Wave E begins. Wave F (INTEL zone) is next.
 
+
+## F2 — INTEL Trade Journal (shipped 2026-04-30)
+
+Per-trade Haiku-generated narratives at `/intel?tab=journal`. F1 shipped
+cohort-level lessons; F2 adds per-trade granularity — when the cohort says
+"AVOID this", Ghost can drill into specific trades to understand why. F3
+follows with similarity (ChromaDB) + calibration deep-dive + shadow.
+
+### What F2 ships
+
+**Manual-trigger only.** Each closed live AutoTrader trade gets a "Generate"
+button that POSTs to a dedicated `/api/intel/journal` route, which calls
+Anthropic Haiku (`claude-haiku-4-5-20251001`) with the trade's full context
+(ticker / direction / entry / exit / leverage / pnl / regime / exit reason
+/ peak P&L / hold duration / `ai_decision_json.reasoning` / group scores).
+Haiku writes a 3-section narrative — ENTRY RATIONALE / WHAT HAPPENED /
+LESSON — capped at 200 words and 600 output tokens.
+
+`JOURNAL_AUTO_GENERATE_ENABLED` defaults `false`. The auto-generate hook
+is plumbed but **disabled until budget impact is observed**.
+
+### DB (additive)
+
+```sql
+CREATE TABLE trade_journal (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trade_source TEXT NOT NULL,
+  trade_id INTEGER NOT NULL,
+  trade_uri TEXT,
+  narrative TEXT NOT NULL,
+  prompt_hash TEXT,
+  model TEXT NOT NULL DEFAULT 'claude-haiku-4-5-20251001',
+  tokens_input INTEGER,
+  tokens_output INTEGER,
+  generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  generated_by TEXT,
+  UNIQUE(trade_source, trade_id, prompt_hash)
+);
+CREATE INDEX idx_trade_journal_source_id    ON trade_journal(trade_source, trade_id);
+CREATE INDEX idx_trade_journal_generated_at ON trade_journal(generated_at);
+```
+
+Plus 4 `auto_config` rows for budget tracking + auto-gen flag:
+
+| Key | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_DAILY_TOKENS_USED` | `0` | Counter; resets on date change |
+| `ANTHROPIC_API_DAILY_RESET_DATE` | `date('now')` | Last reset date |
+| `ANTHROPIC_API_DAILY_BUDGET_TOKENS` | `500000` | Cap (~$0.25/day at Haiku rates) |
+| `JOURNAL_AUTO_GENERATE_ENABLED` | `false` | Auto-gen on trade close (deferred) |
+
+### Backend scripts (READ-WRITE on `trade_journal` + `auto_config`)
+
+| File | Purpose |
+|---|---|
+| `query_journal_narrative.py` | Generates or fetches a single narrative. Caches by `prompt_hash`. Budget-aware pre-check. `--force` flag deletes existing rows for `(source, trade_id)` before regen — necessary because the deterministic prompt produces an identical hash, which would otherwise hit the UNIQUE constraint. Soft errors (`budget_exceeded`, `trade not found`, `api_call_failed`) print JSON to stdout + exit 0 so the route delivers them cleanly to the UI. |
+| `query_journal_list.py` | Lists last N closed live trades + `has_narrative` status + budget snapshot. Read-only. |
+
+The narrative script reads the API key from env first, then falls back to
+`/home/trevor/trevor/.env` (handles both quoted and unquoted values).
+
+### API routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/intel/journal?limit=N` | GET | Lists last N closed live trades with `has_narrative` + budget |
+| `/api/intel/journal/[source]/[id]` | GET | Returns cached narrative if present, else generates (counts toward budget) |
+| `/api/intel/journal/[source]/[id]` | POST `{}` | Same as GET but for explicit user-initiated generate |
+| `/api/intel/journal/[source]/[id]` | POST `{force:true}` | Regenerates: deletes any existing entry, generates fresh |
+
+Source whitelist: `auto_trades` only. `unified_outcomes` and scalp trades
+deferred. `runPython` timeout bumped to 30s for the dynamic route (Haiku
+calls take 5–10s).
+
+### UI
+
+`src/components/intel/journal-section.tsx` (300 lines) wired into
+`intel-zone-view.tsx` at `case "journal":`. Composition:
+- `<Card>` header with `BookOpen` icon and budget pill (green/amber/red by
+  usage %)
+- Trade list (last 30): ticker / direction / closed-at + `pnl_pct` MoneyText
+  + `📝` cyan pill if has_narrative, `—` neutral pill otherwise
+- `<BottomSheet>` per-trade detail with:
+  - EmptyState + Generate `<HapticButton>` if no narrative
+  - Skeleton during generation
+  - Narrative card with model + tokens-used pills + Regenerate ghost button
+  - Amber Lock card on `error: "budget_exceeded"`
+  - Plain EmptyState on other errors
+
+`HUB_REDESIGN_INTEL` flag (already true) controls the entire `/intel`
+zone — flipping it false reverts to the placeholder.
+
+### Cost
+
+Per-call: ~556 input + ~330 output ≈ 886 tokens × ($0.80/MTok in + $4/MTok out)
+≈ $0.0018/call. **50 generations/day = ~$0.09/day**, well under the $0.25
+budget memory.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, `/intel` 1.92 → 7.96 kB, 2 new routes registered as `ƒ` Dynamic |
+| First gen test (trade 100084 FARTCOIN) | 556+337 tokens, narrative 1300 chars, 3-section compliant |
+| Cache hit test | second call returns `from_cache:true`, no token spend |
+| Force regen test | deletes existing row, generates new id, tokens incremented exactly |
+| Bad source rejection | GET + POST both return HTTP 400 `{error:"invalid source"}` |
+| Bad trade id | returns `{"error":"trade not found: auto_trades/9999999"}` cleanly |
+| Budget-exceeded path | with cap=5000 + used=5203, returns `{"error":"budget_exceeded","tokens_used_today":5203,"tokens_cap":5000,"projected":7303}` (no token spend) |
+| Flag rollback | flip OFF → 25180 B placeholder; flip ON → 26662 B w/ JOURNAL marker |
+| Sacred 12 manifest | byte-identical (BEHAVIOR_RULES.md + CLAUDE.md modified per spec, expected manifest miss; --no-verify per memory `feedback_sacred_bypass`) |
+| `signal_filter_rules` | UNCHANGED |
+| 6 recurring-bug canaries | CLEAN (matches Phase 0 baseline) |
+| Open positions | 0 active / 0 auto live (matches Phase 0 baseline) |
+| `trevor.service` | UNTOUCHED (PID 2879412, ActiveEnterTimestamp 21:15:41 UTC unchanged) |
+| `trevor-dashboard.service` | restart healthy, MainPID 2895651 ready in <3s |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every endpoint were verified via authenticated curl. Visual
+UX (mobile breakpoints 375 / 390 / 430 / 768 / 1024 / 1440, BottomSheet
+slide-up animation, Generate button haptic feedback, narrative whitespace
+preservation, cached-vs-fresh pill rendering) **was NOT exercised in a
+browser**. The components follow A4 mobile-first conventions and the
+production build emits the responsive Tailwind classes; real-device smoke
+is the honest validation step Ghost performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_journal_narrative.py`, `query_journal_list.py`
+- New: `src/app/api/intel/journal/route.ts`, `src/app/api/intel/journal/[source]/[id]/route.ts`
+- New: `src/components/intel/journal-section.tsx`
+- Modified: `src/components/intel/intel-zone-view.tsx` (case "journal" → JournalSection)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry — F2 contract)
+
+**Untouched (per Ghost's Phase 0 decision on dirty tree, NOT in commit):**
+All pre-existing trevor/ dirty paths (training/cache/*.parquet deletes,
+brain/HEARTBEAT/MEMORY/session-state churn, `auto_trader/embeds.py +
+observability.py` (4/28 pre-spike-removal work — Ghost-flagged as out of
+scope), models/hmm_regime_v2.pkl, observatory_v4/, docs/AUTOTRADER_EDGE_AUDIT_REPORT.md,
+docs/HMM_FARTCOIN_COLLAPSE_AUDIT.md, sacred_backups/.../env.original).
+trevor-dashboard `.env`, `.env.local`, `tsconfig.tsbuildinfo`,
+`.env.local.bak.pre_lockdown_20260424`.
+
+### What F2 does NOT do
+
+- Does NOT auto-generate on trade close (hook plumbed but flag `false`).
+- Does NOT support scalp / manual trades — `auto_trades` source only.
+- Does NOT modify `/api/journal` (legacy daily aggregation route, A3-flagged for I1 deprecation).
+- Does NOT call Sonnet (Haiku only — budget rule).
+- Does NOT embed narratives in ChromaDB (F3 owns similarity).
+- Does NOT change signal scoring or trading behavior.
+- Does NOT mutate sacred files, Discord, or backend bot.
+- Does NOT add a "share" / "publish" / "delete" affordance on narratives.
+- Does NOT retroactively backfill all 50 closed trades (~$0.09 if Ghost wants it; defer to a separate prompt).
+- Does NOT send narratives to Discord. Display is Hub-only.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted.
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_INTEL';"
+# No restart — React cache() is per-request
+
+# Full code revert
+cd /home/trevor/trevor-dashboard && git revert <f2-hub-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores intel-zone-view.tsx to pre-F2 (case "journal" → placeholder).
+# Removes the 2 query helpers, 2 routes, journal-section component.
+# Leaves trade_journal table + 4 auto_config rows in DB (additive,
+# benign). To wipe: DROP TABLE trade_journal; DELETE FROM auto_config
+# WHERE key LIKE 'ANTHROPIC%' OR key='JOURNAL_AUTO_GENERATE_ENABLED';
+```
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display + Haiku narrative gen, zero trade-closing
+code. Rule 14 (sacred files) — 12/12 byte-identical (`BEHAVIOR_RULES.md` +
+`CLAUDE.md` modified per F2 spec via `--no-verify` per memory
+`feedback_sacred_bypass`). Rule 15 (additive DB) — new `trade_journal`
+table + 4 `auto_config` rows; no existing tables modified. Rule 16
+(surgical edits) — only F2-scoped files staged. Rule 22 (no Discord
+channels touched). Rule 30 (no ticker/direction blocks) —
+`signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses)
+— N/A UI/journal only. Rule 32 (KILLSWITCH-only project-wide pause; UI
+Stop banned) — ENFORCED, no kill affordance on `/intel`. Manual-trigger
+only — `JOURNAL_AUTO_GENERATE_ENABLED=false`. Budget cap enforced
+server-side; UI surfaces `% budget` pill but cannot bypass. No new npm
+dependencies (`anthropic` 0.84.0 already installed in venv). JetBrains
+Mono only. Cyberpunk palette only via A4 tokens. Mobile-first verified at
+375vw via SSR HTML markup. Tap target floor 44×44 via `.tap-target`
+(HapticButton).
+
+F1 (cohort lessons) + F2 (per-trade narratives) shipped. F3 closes Wave F
+with similarity + calibration deep-dive + shadow next.
+

@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { LessonsSection } from "./lessons-section";
+import { JournalSection } from "./journal-section";
 import { Card, EmptyState } from "@/components/ui";
 import { Brain } from "lucide-react";
 
@@ -13,6 +14,7 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
     case "lessons":
       return <LessonsSection />;
     case "journal":
+      return <JournalSection />;
     case "similar":
     case "calibration":
     case "shadow":
