@@ -1632,3 +1632,196 @@ Rule 22 (no Discord channels touched). Rule 30 (no ticker/direction blocks)
 — N/A UI only. Rule 32 (KILLSWITCH IS THE ONLY PROJECT-WIDE PAUSE; UI Stop
 buttons banned) — ENFORCED. New topbar has zero kill affordance. No new
 npm dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
+
+
+## C2 — Dashboard Supporting Widgets (shipped 2026-04-30)
+
+Completes the Wave C dashboard composition started in C1. Three new
+supporting widgets — Quick Stats Strip, Edge Analysis, Calibration Quick
+Tile — three new dashboard-scoped API routes, three new READ-ONLY query
+helpers, plus pull-to-refresh wired into `<DashboardView>`. Final dashboard
+order locked: Hero → Active → Quick Stats → Edge → Calibration. The legacy
+`dashboard-placeholder.tsx` is DELETED; the flag-OFF rollback path now
+renders a small inline disabled message inside `dashboard/page.tsx`.
+
+### Phase 0 audit findings (Ghost-approved schema deviations from prompt)
+
+The C2 prompt assumed a `signals` table, a `direction` column, a
+`calibration_cache` table, an `auto_config.LIFETIME_XP` row, and a 5-bucket
+calibration distribution. Phase 0 audit found **none of those exist**:
+
+| Prompt assumed | Real schema |
+|---|---|
+| `signals` table | doesn't exist — `trade_insights` is the equivalent |
+| `direction` column | doesn't exist on `trade_insights` — `signal_type` (LONG/SHORT) |
+| `confidence` 0-100 | `trade_insights.confidence` is **0-1**; multiply by 100 for display |
+| `auto_config.LIFETIME_XP` | doesn't exist — read `xp_ledger.total_after` (latest row) |
+| `calibration_cache` table | doesn't exist — calibration is computed dynamically from `unified_outcomes` (the same path `query_quality.py cmd_by_confidence` already uses for `/api/quality?scope=by_confidence`) |
+| 5 buckets `35-44 / 45-54 / 55-64 / 65-74 / 75+` | actually 6: `30-40 / 40-50 / 50-60 / 60-70 / 70-80 / 80+`, `unified_outcomes.confidence` is on **0-100 scale** (range 35.05–86.05 in current data) |
+| `?include_calibration=1` on `/api/quality` | not implemented; actual scope is `?scope=by_confidence`. Picked Option B from §5.2 — new dedicated `/api/dashboard/calibration` route — instead of extending the shared `/api/quality` endpoint. |
+
+`unified_outcomes` is a VIEW (paper + backfill + live UNION ALL) — confirmed
+via `SELECT type FROM sqlite_master`. 941 closed trades available in last
+90d window for Edge Analysis (paper=0, backfill=867, live=74). Edge
+script reads from this VIEW; sample size is plenty.
+
+### New READ-ONLY Python helpers
+
+| File | Purpose | Source |
+|---|---|---|
+| `query_dashboard_edge.py` | Aggregate expectancy, W/L ratio, avg win/loss, best, worst, asymmetric flag (90d window). Sample-floor 5; emits empty-state shape below floor. | `unified_outcomes` VIEW |
+| `query_dashboard_quick_stats.py` | 24h signal count, avg confidence (×100 for display), L/S split, lifetime XP. | `trade_insights` (24h) + `xp_ledger.total_after` (latest) |
+| `query_dashboard_calibration.py` | 6 calibration buckets with WR + sample size + sweet/dead-zone selection (n≥5 floor). Emits `win_rate` already in 0-100 percent for direct render. | `unified_outcomes` (mirrors `query_quality.py cmd_by_confidence` bucket logic) |
+
+All three open SQLite read-only via `file:...?mode=ro`. Same convention as
+the C1 helpers (`query_dashboard_pnl.py`, `query_dashboard_active.py`).
+
+### New API routes (auth-gated by middleware)
+
+| Route | Refresh cadence (component) |
+|---|---|
+| `/api/dashboard/edge` | 120 s polling in EdgeAnalysisCard |
+| `/api/dashboard/quick-stats` | 60 s polling in QuickStatsStrip |
+| `/api/dashboard/calibration` | 5 min polling in CalibrationQuickTile |
+
+All wrap their helper via the existing `runPython` (synchronous spawnSync)
+in `src/lib/api-helpers.ts`. Error path returns the empty shape with
+HTTP 200 + `data_available: false` so the widget can render a real
+empty-state instead of crashing.
+
+### New widget components
+
+| File | Notes |
+|---|---|
+| `src/components/dashboard/edge-analysis-card.tsx` | Card with 4-tile grid (Expectancy / W/L Ratio / Best / Worst). Asymmetric badge tone: green if asymmetric, amber if symmetric. Avg-win / avg-loss / 90d-window footer. Empty state when `sample_n < 5`. |
+| `src/components/dashboard/quick-stats-strip.tsx` | 4 mini-tiles: Today / Avg Confidence / Bias (L/S split, amber when |Δ| > 30) / Lifetime XP. Mobile: horizontal `snap-x snap-mandatory` carousel with the page's `-mx-4 px-4` bleed; desktop: `md:grid md:grid-cols-4`. |
+| `src/components/dashboard/calibration-quick-tile.tsx` | Two-column sweet/dead-zone summary; tap-target wraps the entire card and links to `/intel?tab=calibration`. **Honesty rule (Ghost-approved)**: only buckets with WR ≥ 55 earn the green pill; 45–54 (incl. exactly 50.0) = amber + "fragile edge" sublabel; <45 = red + "below breakeven". Dead zone is always red. |
+
+The "fragile edge" treatment was added because Phase 0 audit revealed every
+real bucket is currently ≤ 50% WR (sweet=70-80 at exactly 50.0%, dead=80+
+at 37.5%). A green "sweet" pill would have been dishonest.
+
+### Composition (final, locked)
+
+```tsx
+<DashboardView>
+  <HeroPnLCard />          {/* C1 */}
+  <ActivePositionsCard />  {/* C1 */}
+  <QuickStatsStrip />      {/* C2 */}
+  <EdgeAnalysisCard />     {/* C2 */}
+  <CalibrationQuickTile /> {/* C2 */}
+</DashboardView>
+```
+
+Pull-to-refresh wired via `usePullToRefresh` hook from A4 (`threshold=64`,
+mobile-only; `lg:hidden` indicator). On release-past-threshold the
+DashboardView bumps a `refreshKey` state, which re-mounts every child via
+React's reconciler; each child's mount-effect refetches its endpoint. The
+indicator copy is "Pull to refresh" → "Release to refresh" → "Refreshing…".
+
+`animate-fade-in` (token registered in A4 `globals.css:102`,
+`var(--duration-fast) ease-out`) is applied to the children container so
+the whole grid fades in on mount AND on refresh-key bumps.
+
+### `dashboard-placeholder.tsx` DELETED
+
+The former flag-OFF fallback (under-reconstruction stub) is gone. The
+flag-OFF path now renders a small inline `<DashboardDisabled>` card
+inside `src/app/dashboard/page.tsx` with the explicit instruction
+`HUB_REDESIGN_DASHBOARD=true` in `auto_config`. This keeps the rollback
+path as a small in-file render rather than a separate component file.
+
+The flag-resolution logic in `dashboard/page.tsx` is unchanged from C1:
+cookie override `hub_redesign_override=HUB_REDESIGN_DASHBOARD=true` →
+`auto_config.HUB_REDESIGN_DASHBOARD` row → default false. Memoized via
+React `cache()`.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, 49s, 3 new `/api/dashboard/*` routes registered, `/dashboard` 12.9 kB / 225 kB First Load |
+| `/api/dashboard/edge` | HTTP 200, `sample_n=941` matches `SELECT COUNT(*) FROM unified_outcomes WHERE pnl_pct IS NOT NULL AND outcome_timestamp >= datetime('now','-90 days')` |
+| `/api/dashboard/quick-stats` | HTTP 200, `today_signals=12` matches `SELECT COUNT(*) FROM trade_insights WHERE created_at >= datetime('now','-1 day')`; `lifetime_xp=214` matches `xp_ledger.total_after` |
+| `/api/dashboard/calibration` | HTTP 200, 6 buckets matching `query_quality.py by_confidence` exactly; sweet=70-80 (50.0%), dead=80+ (37.5%) |
+| `/dashboard` flag ON | HTTP 200, 31111 B, EDGE ANALYSIS=1, CALIBRATION=1 |
+| `/dashboard` flag OFF | HTTP 200, 23770 B, "Temporarily Disabled" inline message; "Under Reconstruction" placeholder gone |
+| Rollback flag flip both ways | PASS — flip OFF→ON→OFF cleanly switches DashboardView ↔ DashboardDisabled |
+| 6/6 recurring-bug canaries POST-deploy | CLEAN (matches Phase 0 baseline exactly) |
+| Open positions invariant | 0/0 active_trades + 0/0 auto_trades live (matches Phase 0 baseline) |
+| Sacred 12/12 manifest | byte-identical (the 9 protected Python files + 3 brain `.md` files; `BEHAVIOR_RULES.md`+`CLAUDE.md` modified per spec, `--no-verify` per `feedback_sacred_bypass` memory) |
+| `signal_filter_rules` | UNCHANGED |
+| `EMERGENCY_KILLSWITCH` | unchanged false |
+| `trevor.service` PID 2752692 | UNTOUCHED through whole C2 |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. API
+endpoints + SSR HTML markers were verified. Visual UX (mobile carousel
+swipe, pull-to-refresh gesture, fade-in transition smoothness, tap-to-
+navigate calibration tile, exact mobile breakpoint widths 375 / 390 / 430
+/ 768 / 1024 / 1440) **was NOT exercised in a browser**. The responsive
+Tailwind classes are emitted by the production build and the components
+follow A4 mobile-first conventions, but a real-device smoke is the
+honest validation step Ghost will perform after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_dashboard_edge.py`, `query_dashboard_quick_stats.py`, `query_dashboard_calibration.py`
+- New: `src/app/api/dashboard/edge/route.ts`, `src/app/api/dashboard/quick-stats/route.ts`, `src/app/api/dashboard/calibration/route.ts`
+- New: `src/components/dashboard/edge-analysis-card.tsx`, `src/components/dashboard/quick-stats-strip.tsx`, `src/components/dashboard/calibration-quick-tile.tsx`
+- Modified: `src/components/dashboard/dashboard-view.tsx` (composition + pull-to-refresh wiring)
+- Modified: `src/app/dashboard/page.tsx` (inline `<DashboardDisabled>` replaces `<DashboardPlaceholder>` flag-OFF branch)
+- Deleted: `src/components/dashboard-placeholder.tsx`
+
+**Trevor repo (sibling commit):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry — Wave C complete)
+
+**Untouched (NOT in commit, per Ghost's additive-only decision on dirty tree):**
+- `.env`, `.env.local`, `tsconfig.tsbuildinfo`, `.env.local.bak.pre_lockdown_20260424` — pre-existing local files
+- All pre-existing dirty trevor/ files (training/cache parquet deletes, brain/HEARTBEAT churn, observatory_v4/, embeds.py / observability.py mods, etc.) — out of C2 scope
+
+### What C2 does NOT do
+
+- Does NOT modify the C1 widgets (Hero PnL, Active Positions).
+- Does NOT modify `/api/quality` or `/api/analytics/confidence-tiers` (kept; deprecation candidates for Wave I if zero non-dashboard callers).
+- Does NOT touch `/api/admin/current-state` or `/api/trade-stats`.
+- Does NOT add the Reset Capital / Aggressive Mode / Kill UI on `/dashboard` (E1 / G2 own those).
+- Does NOT implement `/intel?tab=calibration` (F3 owns that — the tile only links to it).
+- Does NOT add framer-motion or any new dependency.
+- Does NOT touch backend, Discord, sacred Python files, or `signal_filter_rules`.
+- Does NOT change confidence weights or thresholds.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (twice: once after Phase 7 build, once after Phase 8 placeholder delete + page rewrite).
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only widgets. Rule 14 (sacred files) —
+12/12 byte-identical. Rule 15 (additive DB) — N/A no schema changes.
+Rule 16 (surgical) — only listed files staged. Rule 22 (no Discord
+channels touched). Rule 30 (no ticker/direction blocks) —
+`signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses) —
+N/A UI only. Rule 32 (KILLSWITCH-only project-wide pause; UI Stop banned)
+— ENFORCED, no kill affordance on `/dashboard`. No new npm dependencies.
+Honesty Protocol — sweet zone shows real `WR.toFixed(1)%` numbers with
+honest tone (only ≥55 earns green); below floor renders empty state with
+explicit "Need ≥5 trades" message; calibration empty bucket renders honest
+"No calibration data" rather than invented placeholder. JetBrains Mono only.
+Cyberpunk palette only via A4 tokens.
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores DashboardDisabled inline message)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_DASHBOARD';"
+# No restart required (React cache() is per-request)
+
+# Full code revert
+cd /home/trevor/trevor-dashboard && git revert <c2-hub-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores dashboard-placeholder.tsx and the C1 2-widget DashboardView.
+```
+
+Wave C is complete. Wave D rebuilds the AUTO zone next.
