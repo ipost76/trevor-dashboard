@@ -3,23 +3,23 @@ import * as React from "react";
 import { Card, LivePulse, KillswitchPill } from "@/components/ui";
 import { Bot } from "lucide-react";
 
-interface RootSnapshot {
-  enabled: boolean;
-  config?: Record<string, string>;
+interface AutoState {
+  auto_enabled: boolean;
+  live_enabled: boolean;
 }
 
 type Tone = "green" | "amber" | "red";
 
 export function ScalperHeader() {
-  const [data, setData] = React.useState<RootSnapshot | null>(null);
+  const [data, setData] = React.useState<AutoState | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
     const fetchState = async () => {
       try {
-        const res = await fetch("/api/auto-trader", { cache: "no-store" });
+        const res = await fetch("/api/auto/state", { cache: "no-store" });
         if (!res.ok || cancelled) return;
-        const j = (await res.json()) as RootSnapshot;
+        const j = (await res.json()) as AutoState;
         if (!cancelled) setData(j);
       } catch {
         /* keep last good state */
@@ -33,9 +33,8 @@ export function ScalperHeader() {
     };
   }, []);
 
-  const enabled = data?.enabled === true;
-  const liveEnabled =
-    (data?.config?.AUTO_LIVE_ENABLED ?? "false").toLowerCase() === "true";
+  const enabled = data?.auto_enabled === true;
+  const liveEnabled = data?.live_enabled === true;
 
   let tone: Tone;
   let label: string;

@@ -2145,3 +2145,210 @@ UI Stop buttons banned) — ENFORCED, no kill affordance on `/autotrader`.
 No new npm dependencies. JetBrains Mono only. Cyberpunk palette only via
 A4 tokens. Mobile-first verified at 375vw via SSR HTML markup.
 
+
+## D3 — AUTO API Consolidation + Legacy Cleanup (shipped 2026-04-30)
+
+Collapsed the `/api/auto-trader/*` route surface from 11 routes (10 sub-paths
++ base) into 3 consolidated `/api/auto/*` endpoints. Migrated D1 components,
+deleted the legacy `src/components/autotrader/` directory + 6 orphaned
+helpers + 2 orphaned hook/lib files. Wave D complete: AUTO zone end-to-end
+redesigned (D1 frontend, D2 DEGEN slot, D3 backend).
+
+### Phase 0 audit deviations from prompt (Ghost-approved)
+
+The D3 prompt was written against a route inventory that did not match the
+real codebase (it assumed `/api/auto-trader/{capital,settings,active-positions,
+state,circuit-breaker,capital-cap,system-health}` — none of which exist).
+The actual surface was 10 sub-routes + a `/api/auto-trader` (base). Phase 0
+audit re-mapped to reality:
+
+1. **Real consolidation map** — `/api/auto-trader` (base) → `/api/auto/state`;
+   `/api/auto-trader/history` → `/api/auto/trades?type=closed&limit=10`;
+   `/api/auto-trader/per-ticker-thresholds` → `/api/auto/config`. The other 8
+   routes (`config`, `equity-curve`, `activity`, `analytics`, `per-ticker`,
+   `scan-status`, `slippage`, `stream`) were consumed only by the legacy
+   `src/components/autotrader/` directory and had ZERO consumers after §5
+   delete — so they were deleted outright instead of redirected.
+2. **Hardcoded thresholds replaced with runtime import** — the prompt's draft
+   `query_auto_config.py` hardcoded BTC/ETH/SOL/HYPE/FARTCOIN values; instead
+   the new helper does `import ticker_thresholds` at runtime, matching the
+   pattern from `query_auto_per_ticker_thresholds.py`. Single source of
+   truth, no drift.
+3. **Dropped `scanner_active`** from `/api/auto/state` — no real source
+   exists (`/home/trevor/trevor/state/system_health.json` doesn't exist),
+   prompt's fallback would have always returned `True`. Honesty over
+   placeholder.
+4. **`/api/auto/config` is READ-ONLY** — the legacy `/api/auto-trader/config`
+   was CRUD with PUT for 9 whitelisted keys; D3 drops the writer with the
+   legacy directory delete. Codifies the existing rule that AUTO config
+   changes happen via `auto_trader/config.py` or direct `auto_config` writes,
+   never via Hub UI.
+5. **Redirect mechanism: `next.config.ts` `redirects()` not route-handler 308**
+   — `NextResponse.redirect(new URL(..., req.url))` and
+   `req.nextUrl.clone()` both emitted `localhost:3000` Locations under our
+   port-3333 custom server. The framework-level `next.config.ts redirects()`
+   emits relative-path Location headers, which curl follows correctly to
+   200. Confirmed bidirectional smoke.
+6. **Single deploy** — Ghost approved skipping the prompt's two-step ("ship
+   real handlers → smoke → flip to redirects"). Wrote new routes + config
+   redirects + deletes in one pass, smoked once.
+7. **Repo cleanliness** — Ghost approved option (i): only stage D3-specific
+   files in the dashboard commit; the dirty trevor/ training/cache parquet
+   churn stays out of scope (handled separately by Ghost).
+
+### New endpoints (3)
+
+| Route | Purpose | Helper |
+|---|---|---|
+| `/api/auto/state` | capital, equity, today's P&L (live), trades_today, open_positions_count, auto/live/killswitch flags, per_ticker_thresholds_enabled | `query_auto_state.py` |
+| `/api/auto/trades?type=open\|closed&limit=N` | open positions OR last N closed (live mode only); limit clamped to 1..200, default 10 | `query_auto_trades.py` |
+| `/api/auto/config` | capital_cap_usd, live_per_trade_usd, confidence_floor, max_leverage, per_ticker_thresholds_enabled, per_ticker_thresholds[] | `query_auto_config.py` (runtime import from `ticker_thresholds.py`) |
+
+All three open SQLite read-only via `file:...?mode=ro`. Routes use `runPython`
+helper from `@/lib/api-helpers` (5s timeout). Fail-safe error path returns
+the empty shape with HTTP 200 + `data_available: false`.
+
+### Legacy → consolidated map (308 redirects in `next.config.ts`)
+
+```
+/api/auto-trader                       → /api/auto/state                    (308)
+/api/auto-trader/history               → /api/auto/trades?type=closed&limit=10 (308)
+/api/auto-trader/per-ticker-thresholds → /api/auto/config                   (308)
+```
+
+### Deleted outright (legacy-only consumers, gone with src/components/autotrader/)
+
+- `/api/auto-trader/config` (was CRUD; PUT consumer was legacy ConfigPanel)
+- `/api/auto-trader/equity-curve` (was legacy HeaderBar + AnalyticsSection)
+- `/api/auto-trader/activity` (was legacy ActivityFeed)
+- `/api/auto-trader/analytics` (was legacy AnalyticsSection)
+- `/api/auto-trader/per-ticker` (was legacy PerTickerCards)
+- `/api/auto-trader/scan-status` (was legacy ScanningEmptyState)
+- `/api/auto-trader/slippage` (was legacy SlippageHistogram)
+- `/api/auto-trader/stream` (SSE; was legacy AutoTraderPage via useAutoTraderStream hook)
+
+Plus 9 orphaned Python helpers: `query_auto_trader.py`,
+`query_auto_trader_history.py`, `query_auto_trader_activity.py`,
+`query_auto_trader_per_ticker.py`, `query_auto_trader_scan_status.py`,
+`query_auto_trader_slippage.py`, `query_auto_per_ticker_thresholds.py`,
+`query_auto_trader_live.py`, `query_auto_trader_config.py`.
+
+Plus orphaned frontend: entire `src/components/autotrader/` directory
+(16 files), `src/hooks/useAutoTraderStream.ts`, `src/lib/bots.ts`.
+
+### Component migration
+
+All 6 D1 `autotrader-v2/` components now read from the new endpoints:
+
+| Component | Old fetch | New fetch |
+|---|---|---|
+| `scalper-header.tsx` | `/api/auto-trader` (base) | `/api/auto/state` |
+| `capital-hero.tsx` | `/api/auto-trader` (base) | `/api/auto/state` |
+| `config-card.tsx` | `/api/auto-trader` (base) + `/api/auto-trader/per-ticker-thresholds` | `/api/auto/config` (single fetch) |
+| `active-position-card.tsx` | `/api/auto-trader` (base) → `j.open_positions` | `/api/auto/trades?type=open&limit=10` → `j.positions` |
+| `recent-trades-card.tsx` | `/api/auto-trader/history?limit=10` → `j.trades` | `/api/auto/trades?type=closed&limit=10` → `j.trades` |
+| `watchlist-grid.tsx` | `/api/auto-trader/per-ticker-thresholds` → `j.thresholds` | `/api/auto/config` → `j.per_ticker_thresholds` |
+
+`config-card.tsx` collapsed from 2 fetches to 1. `capital-hero.tsx` no
+longer filters `recent_trades` client-side for "today" — it reads
+server-computed `pnl_today_usd` + `pnl_today_pct` + `trades_today` directly.
+
+### `src/app/autotrader/page.tsx` simplified
+
+Dropped the flag-resolution logic (cookies override + `query_feature_flags.py`
+lookup + `LegacyAutotraderView` fallback). Page is now a 12-line server
+component that always renders `<ScalperViewV2 subtab={tab ?? "scalper"} />`.
+Rollback path is `git revert <D3-commit>` (the legacy components are gone;
+flag-flip rollback no longer applies).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npm run build` | clean, 0 errors / 0 warnings |
+| `/api/auto/state` | HTTP 200; SQL cross-check: `pnl_today_usd=-1.5323` matches SQL exactly, `trades_today=20` matches, `open_positions_count=0` matches, `equity=35.3435` matches `50 + SUM(pnl_usd)` |
+| `/api/auto/trades?type=open&limit=10` | HTTP 200, returns `{type:"open", count:0, positions:[]}` |
+| `/api/auto/trades?type=closed&limit=10` | HTTP 200, returns 10 trades with all expected columns (id, ticker, direction, pnl_pct, pnl_usd, hold_duration_minutes, closed_at, exit_reason, trade_mode) |
+| `/api/auto/config` | HTTP 200, all 5 tickers present (BTC 34/37/40, ETH 36/39/42, SOL 38/41/44, HYPE 39/42/45, FARTCOIN 42/45/48), `per_ticker_thresholds_enabled=true` |
+| 3 redirect routes | HTTP 308 with relative `Location:`; following redirect lands on 200 |
+| 8 deleted routes | HTTP 404 |
+| `/autotrader` flag ON | HTTP 200; HTML markers: Auto Capital=1, AutoTrader · 5 tickers=1, Watchlist=1, FARTCOIN=1; STOP/Kill audit empty |
+| `/autotrader?tab=degen` | HTTP 200 |
+| All other zones (`/dashboard`, `/scalp`, `/intel`, `/memory`, `/chat`) | HTTP 200 |
+| Open positions baseline | unchanged: 0 (matches Phase 0 baseline) |
+| `signal_filter_rules` | UNCHANGED |
+| 6/6 recurring-bug canaries POST-deploy | CLEAN (C1 portfolio_manager.py allowlisted; C2 `safe_delete.py`/`message_tracker.py`/`signal_confidence_monitor.py` are benign — last is a `threshold` regex match; C6 `discord_bot.py:9272` is the legitimate Rule-8 sentinel auto-delete pattern) |
+| `trevor.service` | UNTOUCHED — PID 2752692, ActiveEnterTimestamp 2026-04-29 20:33:21 UTC unchanged |
+| `trevor-dashboard.service` | restart healthy (PID → 2863622, NRestarts=0); 0 error events in journal |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every endpoint + redirect chain were verified via
+authenticated curl. Visual UX (mobile breakpoints 375 / 390 / 430 / 768 /
+1024 / 1440, fade-in animation smoothness, pull-to-refresh, exact pixel
+positioning) **was NOT exercised in a browser**. The components follow
+A4 mobile-first conventions and the production build emits the responsive
+Tailwind classes; real-device smoke is the honest validation step Ghost
+performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_auto_state.py`, `query_auto_trades.py`, `query_auto_config.py`
+- New: `src/app/api/auto/state/route.ts`, `src/app/api/auto/trades/route.ts`, `src/app/api/auto/config/route.ts`
+- Modified: `next.config.ts` (added 3 D3 redirect entries)
+- Modified: `src/app/autotrader/page.tsx` (simplified to 12-line server component)
+- Modified: `src/components/autotrader-v2/{scalper-header,capital-hero,config-card,active-position-card,recent-trades-card,watchlist-grid}.tsx` (endpoint migration + envelope updates)
+- Modified: `CLAUDE.md` (this section)
+- Deleted: `src/app/api/auto-trader/{route.ts,history/,per-ticker-thresholds/,config/,equity-curve/,activity/,analytics/,per-ticker/,scan-status/,slippage/,stream/}`
+- Deleted: `query_auto_trader.py`, `query_auto_trader_history.py`, `query_auto_trader_activity.py`, `query_auto_trader_per_ticker.py`, `query_auto_trader_scan_status.py`, `query_auto_trader_slippage.py`, `query_auto_per_ticker_thresholds.py`, `query_auto_trader_live.py`, `query_auto_trader_config.py`
+- Deleted: `src/components/autotrader/` (entire directory: ActivityFeed, AnalyticsSection, AutoTraderPage, BotSectionHeader, ConfigPanel, DegenSection, EquityCurveChart, HeaderBar, PerTickerCards, PnlByExitReasonChart, PositionCard, ScanningEmptyState, SlippageHistogram, TradeHistoryTable, WinRateByTickerChart, legacy-autotrader-view)
+- Deleted: `src/hooks/useAutoTraderStream.ts`, `src/lib/bots.ts`
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry + new AUTO API contract block)
+
+`HUB_REDESIGN_AUTO_API` flag flipped to `'true'` in `auto_config` for
+documentation; the new routes are unconditionally live (no flag gating —
+rollback is `git revert`).
+
+### What D3 does NOT do
+
+- Does NOT modify the AUTO frontend layout (D1).
+- Does NOT redesign DEGEN slot (D2).
+- Does NOT change confidence weights, calibration, thresholds.
+- Does NOT touch sacred files, Discord, backend bot.
+- Does NOT add POST/PUT/DELETE to any new route (`/api/auto/config` is GET-only).
+- Does NOT deploy DEGEN bot (Wave J).
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (twice during phase 4 + once final).
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — backend consolidation only, zero trade-closing
+code touched. Rule 14 (sacred files) — 12/12 byte-identical (`CLAUDE.md`
++ `BEHAVIOR_RULES.md` modified per D3 spec via `--no-verify` per memory
+`feedback_sacred_bypass`). Rule 15 (additive DB) — only existing
+`HUB_REDESIGN_AUTO_API` row's value UPDATEd. Rule 16 (surgical edits) —
+only D3-scoped files staged (parquet/observatory/embeds.py drift in trevor/
+intentionally NOT staged per Ghost's option (i)). Rule 22 (no Discord
+channels touched). Rule 30 (no ticker/direction blocks) —
+`signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses)
+— N/A backend only. Rule 32 (KILLSWITCH-only project-wide pause; UI Stop
+banned) — ENFORCED, no kill affordance added; D1's `/autotrader` STOP
+audit empty. No new npm dependencies. Open positions invariant: 0 → 0
+unchanged through entire D3.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard
+git revert <D3-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores 9 deleted query helpers, 8 deleted route handlers, 16 legacy
+# components, useAutoTraderStream hook, bots.ts lib, page.tsx flag-checker.
+# trevor.service untouched either way.
+```
+
+Wave D is complete. Wave E (SCALP zone) is next.
+

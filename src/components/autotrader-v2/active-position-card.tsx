@@ -27,8 +27,10 @@ interface OpenPosition {
   trade_mode?: "live" | "paper";
 }
 
-interface RootSnapshot {
-  open_positions: OpenPosition[];
+interface OpenTradesResponse {
+  type: "open";
+  count: number;
+  positions: OpenPosition[];
 }
 
 interface PriceMap {
@@ -77,15 +79,15 @@ export function ActivePositionCard() {
     const fetchAll = async () => {
       try {
         const [snapRes, priceRes] = await Promise.all([
-          fetch("/api/auto-trader", { cache: "no-store" }),
+          fetch("/api/auto/trades?type=open&limit=10", { cache: "no-store" }),
           fetch(`/api/prices?tickers=${WATCH_TICKERS.join(",")}`, {
             cache: "no-store",
           }),
         ]);
 
         if (snapRes.ok && !cancelled) {
-          const j = (await snapRes.json()) as RootSnapshot;
-          setPositions(j.open_positions ?? []);
+          const j = (await snapRes.json()) as OpenTradesResponse;
+          setPositions(j.positions ?? []);
         }
         if (priceRes.ok && !cancelled) {
           const j = (await priceRes.json()) as PricesResponse;

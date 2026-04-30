@@ -3,33 +3,26 @@ import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, MetricTile, Skeleton } from "@/components/ui";
 import { Settings } from "lucide-react";
 
-interface RootSnapshot {
-  config?: Record<string, string>;
-}
-
-interface PerTickerThresholdsResponse {
-  enabled: boolean;
-}
-
-function num(v: string | undefined, fallback: number): number {
-  if (v == null) return fallback;
-  const n = parseFloat(v);
-  return Number.isFinite(n) ? n : fallback;
+interface AutoConfig {
+  capital_cap_usd: number;
+  live_per_trade_usd: number;
+  confidence_floor: number;
+  max_leverage: number;
+  per_ticker_thresholds_enabled: boolean;
+  data_available: boolean;
 }
 
 export function ConfigCard() {
-  const [data, setData] = React.useState<RootSnapshot | null>(null);
-  const [perTickerOn, setPerTickerOn] = React.useState<boolean>(true);
+  const [data, setData] = React.useState<AutoConfig | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
-
     const fetchConfig = async () => {
       try {
-        const res = await fetch("/api/auto-trader", { cache: "no-store" });
+        const res = await fetch("/api/auto/config", { cache: "no-store" });
         if (!res.ok || cancelled) return;
-        const j = (await res.json()) as RootSnapshot;
+        const j = (await res.json()) as AutoConfig;
         if (!cancelled) setData(j);
       } catch {
         /* keep last good state */
@@ -37,37 +30,19 @@ export function ConfigCard() {
         if (!cancelled) setLoading(false);
       }
     };
-
-    const fetchPerTicker = async () => {
-      try {
-        const res = await fetch("/api/auto-trader/per-ticker-thresholds", {
-          cache: "no-store",
-        });
-        if (!res.ok || cancelled) return;
-        const j = (await res.json()) as PerTickerThresholdsResponse;
-        if (!cancelled && typeof j.enabled === "boolean") setPerTickerOn(j.enabled);
-      } catch {
-        /* endpoint may not exist yet — keep default */
-      }
-    };
-
     fetchConfig();
-    fetchPerTicker();
-    const id = setInterval(() => {
-      fetchConfig();
-      fetchPerTicker();
-    }, 60_000);
+    const id = setInterval(fetchConfig, 60_000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
   }, []);
 
-  const cfg = data?.config ?? {};
-  const capitalCap = num(cfg.LIVE_HARD_CAPITAL_CAP_USD, 50);
-  const perTrade = num(cfg.LIVE_PER_TRADE_USD, 10);
-  const confFloor = num(cfg.AGGRESSIVE_THRESHOLD, 35);
-  const maxLev = num(cfg.LIVE_LEVERAGE_DEFAULT, 5);
+  const capitalCap = data?.capital_cap_usd ?? 50;
+  const perTrade = data?.live_per_trade_usd ?? 10;
+  const confFloor = data?.confidence_floor ?? 35;
+  const maxLev = data?.max_leverage ?? 5;
+  const perTickerOn = data?.per_ticker_thresholds_enabled === true;
 
   return (
     <Card padding="md">

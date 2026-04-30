@@ -23,9 +23,10 @@ interface ClosedTrade {
   exit_reason?: string | null;
 }
 
-interface HistoryResponse {
+interface ClosedTradesResponse {
+  type: "closed";
+  count: number;
   trades: ClosedTrade[];
-  total: number;
 }
 
 function fmtHold(min: number | null | undefined): string {
@@ -45,11 +46,11 @@ export function RecentTradesCard() {
     let cancelled = false;
     const fetchTrades = async () => {
       try {
-        const res = await fetch("/api/auto-trader/history?limit=10", {
+        const res = await fetch("/api/auto/trades?type=closed&limit=10", {
           cache: "no-store",
         });
         if (!res.ok || cancelled) return;
-        const j = (await res.json()) as HistoryResponse;
+        const j = (await res.json()) as ClosedTradesResponse;
         if (!cancelled) setTrades(j.trades ?? []);
       } catch {
         /* keep last good state */

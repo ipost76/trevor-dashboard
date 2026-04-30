@@ -13,9 +13,10 @@ interface Threshold {
   active: number;
 }
 
-interface ThresholdsResponse {
-  enabled: boolean;
-  thresholds: Threshold[];
+interface AutoConfigResponse {
+  per_ticker_thresholds_enabled: boolean;
+  per_ticker_thresholds: Threshold[];
+  data_available: boolean;
 }
 
 interface PriceMap {
@@ -50,17 +51,15 @@ export function WatchlistGrid() {
     const fetchAll = async () => {
       try {
         const [tRes, pRes] = await Promise.all([
-          fetch("/api/auto-trader/per-ticker-thresholds", {
-            cache: "no-store",
-          }),
+          fetch("/api/auto/config", { cache: "no-store" }),
           fetch(`/api/prices?tickers=${WATCH_TICKERS.join(",")}`, {
             cache: "no-store",
           }),
         ]);
 
         if (tRes.ok && !cancelled) {
-          const j = (await tRes.json()) as ThresholdsResponse;
-          setThresholds(j.thresholds ?? []);
+          const j = (await tRes.json()) as AutoConfigResponse;
+          setThresholds(j.per_ticker_thresholds ?? []);
         }
         if (pRes.ok && !cancelled) {
           const j = (await pRes.json()) as PricesResponse;

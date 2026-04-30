@@ -3,41 +3,28 @@ import * as React from "react";
 import { Card, MetricTile, Pill, Skeleton, MoneyText } from "@/components/ui";
 import { TrendingUp } from "lucide-react";
 
-interface ClosedTrade {
-  pnl_usd: number;
-  closed_at: string;
-  trade_mode?: string;
-}
-
-interface RootSnapshot {
-  enabled: boolean;
+interface AutoState {
+  capital_usd: number;
+  live_capital_usd: number;
   equity: number;
-  open_positions: Array<unknown>;
-  recent_trades: ClosedTrade[];
-  stats_7d?: { total_pnl: number; total_trades: number };
-  config?: Record<string, string>;
-}
-
-function parseUTC(ts: string): Date {
-  // SQLite datetime('now') stores UTC without Z. Append T + Z if missing so
-  // Date() doesn't interpret as local time.
-  if (!ts) return new Date(NaN);
-  let s = ts.includes("T") ? ts : ts.replace(" ", "T");
-  if (!/Z$|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
-  return new Date(s);
+  pnl_today_usd: number;
+  pnl_today_pct: number;
+  trades_today: number;
+  open_positions_count: number;
+  data_available: boolean;
 }
 
 export function CapitalHero() {
-  const [data, setData] = React.useState<RootSnapshot | null>(null);
+  const [data, setData] = React.useState<AutoState | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
     const fetchState = async () => {
       try {
-        const res = await fetch("/api/auto-trader", { cache: "no-store" });
+        const res = await fetch("/api/auto/state", { cache: "no-store" });
         if (!res.ok || cancelled) return;
-        const j = (await res.json()) as RootSnapshot;
+        const j = (await res.json()) as AutoState;
         if (!cancelled) setData(j);
       } catch {
         /* keep last good state */
@@ -54,19 +41,11 @@ export function CapitalHero() {
   }, []);
 
   const equity = data?.equity ?? 0;
-  const liveCap = parseFloat(
-    data?.config?.LIVE_CAPITAL_USD ?? data?.config?.CAPITAL_USD ?? "0",
-  );
-
-  // "Today" = last 24h, matches audit's `closed_at >= datetime('now','-1 day')`
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const todayTrades = (data?.recent_trades ?? []).filter((t) => {
-    const ts = parseUTC(t.closed_at);
-    return Number.isFinite(ts.getTime()) && ts.getTime() >= cutoff;
-  });
-  const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0);
-  const todayPct = liveCap > 0 ? (todayPnl / liveCap) * 100 : 0;
-  const openCount = data?.open_positions?.length ?? 0;
+  const liveCap = data?.live_capital_usd ?? data?.capital_usd ?? 0;
+  const todayPnl = data?.pnl_today_usd ?? 0;
+  const todayPct = data?.pnl_today_pct ?? 0;
+  const todayCount = data?.trades_today ?? 0;
+  const openCount = data?.open_positions_count ?? 0;
 
   return (
     <Card padding="lg" glow="cyan" className="space-y-4">
@@ -122,7 +101,7 @@ export function CapitalHero() {
             />
             <MetricTile
               label="Trades"
-              value={String(todayTrades.length)}
+              value={String(todayCount)}
               sub="today"
             />
             <MetricTile
