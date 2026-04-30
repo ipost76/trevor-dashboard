@@ -37,7 +37,21 @@ export async function POST(request: NextRequest) {
       String(direction).toUpperCase(),
       String(price),
     ]);
-    const data = safeJsonParse(raw, { error: "Failed to parse response" });
+    const data = safeJsonParse<{
+      error?: string;
+      blocked?: boolean;
+      ok?: boolean;
+      command_id?: number | null;
+      trade_id?: string;
+      message?: string;
+    }>(raw, { error: "Failed to parse response" });
+
+    // E1: forward 423 Locked when killswitch blocks the entry (server-side gate
+    // in query_live_board.py:enter_trade). Distinct from validation errors so the
+    // UI can render the "killswitch on" amber banner separately.
+    if (data.blocked === true) {
+      return NextResponse.json(data, { status: 423 });
+    }
 
     if (data.error) {
       return NextResponse.json(data, { status: 400 });

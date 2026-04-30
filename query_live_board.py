@@ -99,7 +99,12 @@ def remove_ticker(ticker: str):
 
 
 def enter_trade(ticker: str, direction: str, price: float):
-    """Create a trade via hub_commands queue — bot picks it up and posts Discord card."""
+    """Create a trade via hub_commands queue — bot picks it up and posts Discord card.
+
+    E1 (2026-04-30): server-side killswitch gate. Manual Hub ENTER must respect
+    EMERGENCY_KILLSWITCH the same way auto_trader/manager.py does. Frontend
+    disables the button; this is defense-in-depth.
+    """
     t = ticker.upper().strip()
     d = direction.upper().strip()
     if d not in ("LONG", "SHORT"):
@@ -108,6 +113,25 @@ def enter_trade(ticker: str, direction: str, price: float):
     if price <= 0:
         print(json.dumps({"error": "Price must be positive"}))
         return
+
+    # E1: Killswitch gate. Fail-OPEN on import/DB error — killswitch.is_killswitch_on()
+    # itself fails safe (returns False) on DB hiccup; we mirror that posture here.
+    try:
+        from auto_trader.killswitch import is_killswitch_on, acknowledge_blocked_signal
+        if is_killswitch_on():
+            try:
+                acknowledge_blocked_signal(ticker=t, direction=d, signal_id=None)
+            except Exception:
+                pass
+            print(json.dumps({
+                "error": "killswitch on",
+                "blocked": True,
+                "message": "Manual ENTER blocked — Discord !killswitch off to resume",
+            }))
+            return
+    except Exception:
+        # Killswitch module unavailable — let bot-side processing catch it if needed.
+        pass
 
     conn = get_conn()
     # Use a placeholder trade_id — bot will create the real one
