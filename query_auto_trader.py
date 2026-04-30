@@ -84,7 +84,8 @@ def _open_positions(conn: sqlite3.Connection) -> list[dict]:
     try:
         cur = conn.execute(
             "SELECT id, ticker, direction, entry_price, stop_price, "
-            "target_price, leverage, confidence, notional_usd, opened_at "
+            "target_price, leverage, confidence, notional_usd, opened_at, "
+            "peak_pnl_pct, exit_signals_log, trade_mode "
             "FROM auto_trades WHERE status = 'open' "
             "ORDER BY opened_at DESC"
         )

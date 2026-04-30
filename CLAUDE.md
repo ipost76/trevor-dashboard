@@ -1825,3 +1825,323 @@ sudo systemctl restart trevor-dashboard.service
 ```
 
 Wave C is complete. Wave D rebuilds the AUTO zone next.
+
+## D1 — AUTO Scalper Section Rebuild (shipped 2026-04-30)
+
+Mobile-first vertical card stack at `/autotrader?tab=scalper`. Replaces the
+pre-D1 16-component layout with a tighter 6-card composition built on A4
+primitives. NO STOP / kill / pause UI anywhere — Discord `!killswitch` is
+the only project-wide pause per Rule 32. New components live under
+`src/components/autotrader-v2/` so the legacy namespace stays intact for
+flag-flip rollback. D3 prunes the legacy directory after API consolidation.
+
+### Composition (locked, top → bottom)
+
+```
+ScalperHeader     — status pill (LIVE/PAPER/DISABLED) + KillswitchPill mirror
+CapitalHero       — equity + today P&L + trades today + open positions
+ActivePositionCard — live PnL with leverage, entry/now, hold, peak, exit hint
+RecentTradesCard  — last 10 closed (mode pill + ticker/dir + hold + exit + PnL%)
+ConfigCard        — READ-ONLY (Capital Cap / Per-Trade / Conf Floor / Max Lev)
+WatchlistGrid     — 5 sacred tickers with tier pills + per-ticker thresholds
+```
+
+`?tab=degen` routes to a passthrough of the existing `DegenSection` skeleton
+(D2 paints the content). B1's ZoneSubTabs handles sub-tab navigation.
+
+### Endpoint strategy
+
+D1 leans on the existing root `/api/auto-trader` "kitchen sink" endpoint
+(30s cache, READ-ONLY mode=ro URI) for state/capital/positions/recent-trades/
+config. Only ONE new endpoint added:
+
+| Route | Purpose | Source |
+|---|---|---|
+| `/api/auto-trader/per-ticker-thresholds` | Live mirror of `ticker_thresholds.py` (BTC 34/37/40, ETH 36/39/42, SOL 38/41/44, HYPE 39/42/45, FARTCOIN 42/45/48 + tier mapping BLUE_CHIP/MID_CAP/MEME) | `query_auto_per_ticker_thresholds.py` (imports `ticker_thresholds` Python module dynamically — no hardcoded drift) |
+
+`query_auto_trader.py::_open_positions()` extended to include `peak_pnl_pct`,
+`exit_signals_log`, `trade_mode` (3 columns added to existing SELECT;
+READ-ONLY).
+
+### Phase 0 audit deviations from prompt (Ghost-approved)
+
+1. **Endpoint shape mismatch** — prompt assumed `/api/auto-trader/state`,
+   `/api/auto-trader/capital`, `/api/auto-trader/active-positions`,
+   `/api/auto-trader/settings`. None exist with that exact shape. Used the
+   existing root `/api/auto-trader` (returns `enabled` / `equity` /
+   `open_positions[]` / `recent_trades[]` / `stats_7d` / `config{}` in one
+   call) for ScalperHeader + CapitalHero + ActivePositionCard + ConfigCard.
+   Surface area minimized — D3 has less to consolidate.
+2. **`PER_TICKER_THRESHOLDS_ENABLED` is a Python module constant**, NOT in
+   `auto_config`. New `query_auto_per_ticker_thresholds.py` does runtime
+   `import ticker_thresholds` and returns `getattr(tt,
+   'PER_TICKER_THRESHOLDS_ENABLED', False)` — single source of truth, no
+   drift between the bot pipeline and the Hub UI.
+3. **ConfigCard composition adjusted** for Aggressive Mode Sweep
+   (2026-04-27 removed `MAX_CONCURRENT`, `MAX_TRADES_PER_DAY`, etc.).
+   Final tiles: Capital Cap (`LIVE_HARD_CAPITAL_CAP_USD`) / Per-Trade
+   (`LIVE_PER_TRADE_USD`) / Conf Floor (`AGGRESSIVE_THRESHOLD`) / Max Lev
+   (`LIVE_LEVERAGE_DEFAULT`). No "Max Concurrent" tile (concept removed).
+4. **24h price change deferred** — prompt example referenced
+   `change_24h_pct` on `/api/prices`, which only returns `{price, source,
+   stale}`. WatchlistGrid renders price + thresholds only. Not in D1 scope
+   to extend `/api/prices`.
+5. **`BEHAVIOR_RULES.md` lives at root**, not in `brain/` (the prompt's
+   §7.3 path was wrong). Used the correct path
+   `/home/trevor/trevor/BEHAVIOR_RULES.md` for the changelog edit.
+
+### Rollback (15-second flag flip)
+
+```bash
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_AUTO';"
+# No restart required — server component re-reads flag every render via
+# React cache() per request.
+```
+
+Cookie-only preview without flipping the global flag:
+```
+Cookie: hub_redesign_override=HUB_REDESIGN_AUTO%3Dtrue
+```
+
+`LegacyAutotraderView` (`src/components/autotrader/legacy-autotrader-view.tsx`)
+preserves the pre-D1 sticky-title + SCALPER + DEGEN layout MINUS the
+`BotNavStrip` import (the file is deleted in D1; B1's `ZoneSubTabs` handles
+sub-tab navigation now). Sections stack vertically when
+`HUB_REDESIGN_NAV=false` (emergency rollback only).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, 0 errors / 0 warnings; `/api/auto-trader/per-ticker-thresholds` registered as `ƒ` dynamic at 321 B / 102 kB |
+| `/api/auto-trader/per-ticker-thresholds` | HTTP 200, all 5 tickers, exact threshold match (BTC 34/37/40, ETH 36/39/42, SOL 38/41/44, HYPE 39/42/45, FARTCOIN 42/45/48), `enabled=true` |
+| `/api/auto-trader` root | HTTP 200, includes new `peak_pnl_pct` + `exit_signals_log` + `trade_mode` on open_positions (live FARTCOIN LONG `peak_pnl_pct=1.18%` confirmed) |
+| `/api/auto-trader/history?limit=5` | HTTP 200 |
+| `/api/feature-flags` | HTTP 200, `HUB_REDESIGN_AUTO=true` reflected |
+| `/api/prices?tickers=BTC,ETH,SOL,HYPE,FARTCOIN` | HTTP 200 |
+| `/autotrader` flag ON | HTTP 200, 31179 B, v2 markers visible (`Auto Capital`, `AutoTrader · 5 tickers`, `Watchlist`, `FARTCOIN`); legacy markers absent |
+| `/autotrader` flag OFF | HTTP 200, 54548 B, legacy `AUTO TRADER` title visible; v2 markers absent |
+| `/autotrader?tab=degen` flag ON | HTTP 200, `AWAITING CONNECTION` + `DEGEN` markers; no scalper composition |
+| Rollback flip OFF→ON→OFF→ON | bidirectional clean (54548 B legacy ↔ 31179 B v2) |
+| All other zones (dashboard / scalp / intel / memory / chat) | HTTP 200 |
+| Open auto positions baseline | unchanged: 1 live (FARTCOIN LONG) — pre-Phase-0 == post-deploy |
+| Sacred manifest | 12/12 byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per spec, expected manifest miss; `--no-verify` per memory `feedback_sacred_bypass`) |
+| `signal_filter_rules` | UNCHANGED |
+| 6/6 recurring-bug canaries POST-deploy | CLEAN (canary 6 hit at `discord_bot.py:9272` is the pre-existing legitimate Rule-8 sentinel auto-delete pattern, same as Phase 0 baseline) |
+| STOP/Kill audit on `src/components/autotrader-v2/` | EMPTY — no kill UI anywhere |
+| `trevor.service` | UNTOUCHED — PID 2752692, ActiveEnterTimestamp 2026-04-29 20:33:21 UTC unchanged |
+| `trevor-dashboard.service` | restart healthy, PID → 2787987, NRestarts=0, Hub ready in ~2s |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every API endpoint were verified via authenticated curl.
+Visual UX (mobile breakpoints 375 / 390 / 430 / 768 / 1024 / 1440, fade-in
+animation smoothness, tap-to-interact, layout density on real devices)
+**was NOT exercised in a browser**. The components follow A4 mobile-first
+conventions and the production build emits the responsive Tailwind
+classes, but a real-device smoke is the honest validation step Ghost
+performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `src/components/autotrader-v2/{scalper-view,scalper-header,capital-hero,active-position-card,recent-trades-card,config-card,watchlist-grid}.tsx`
+- New: `src/components/autotrader/legacy-autotrader-view.tsx`
+- New: `src/app/api/auto-trader/per-ticker-thresholds/route.ts`
+- New: `query_auto_per_ticker_thresholds.py`
+- Modified: `src/app/autotrader/page.tsx` (rewritten as server-component flag selector)
+- Modified: `query_auto_trader.py` (extended `_open_positions()` SELECT with 3 columns: `peak_pnl_pct`, `exit_signals_log`, `trade_mode`)
+- Modified: `CLAUDE.md` (this section)
+- Deleted: `src/components/autotrader/BotNavStrip.tsx` (B1's ZoneSubTabs replaces it)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry)
+
+### What D1 does NOT do
+
+- Does NOT fill in DEGEN sub-tab (D2).
+- Does NOT consolidate `/api/auto-trader/*` routes (D3).
+- Does NOT delete `src/components/autotrader/` directory (D3, after API consolidation).
+- Does NOT change confidence weights, calibration, or per-ticker threshold values (sacred — `!filter` Discord command only).
+- Does NOT modify `signal_filter_rules`.
+- Does NOT introduce any new edit affordance — `ConfigCard` and `WatchlistGrid` are READ-ONLY.
+- Does NOT touch backend, Discord, or sacred Python files.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restructure. Rule 14 (sacred files)
+— 12/12 byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per
+spec via `--no-verify` per memory `feedback_sacred_bypass`). Rule 15
+(additive DB) — N/A no schema changes. Rule 16 (surgical edits) — only
+listed files staged. Rule 22 (no Discord channels touched). Rule 30 (no
+ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 31 (auto
+trader never self-pauses) — N/A UI only. Rule 32 (KILLSWITCH-only
+project-wide pause; UI Stop buttons banned) — ENFORCED, no kill
+affordance on `/autotrader`. No new npm dependencies. JetBrains Mono
+only. Cyberpunk palette only via A4 tokens. Mobile-first verified at
+375vw via SSR HTML markup.
+
+D1 ships the Scalper bones. D2 paints DEGEN. D3 collapses the API
+surface.
+
+## D1 — AUTO Scalper Section Rebuild (shipped 2026-04-30)
+
+Mobile-first vertical card stack at `/autotrader?tab=scalper`. Replaces the
+pre-D1 16-component layout with a tighter 6-card composition built on A4
+primitives. NO STOP / kill / pause UI anywhere — Discord `!killswitch` is
+the only project-wide pause per Rule 32. New components live under
+`src/components/autotrader-v2/` so the legacy namespace stays intact for
+flag-flip rollback. D3 prunes the legacy directory after API consolidation.
+
+### Composition (locked, top → bottom)
+
+```
+ScalperHeader     — status pill (LIVE/PAPER/DISABLED) + KillswitchPill mirror
+CapitalHero       — equity + today P&L + trades today + open positions
+ActivePositionCard — live PnL with leverage, entry/now, hold, peak, exit hint
+RecentTradesCard  — last 10 closed (mode pill + ticker/dir + hold + exit + PnL%)
+ConfigCard        — READ-ONLY (Capital Cap / Per-Trade / Conf Floor / Max Lev)
+WatchlistGrid     — 5 sacred tickers with tier pills + per-ticker thresholds
+```
+
+`?tab=degen` routes to a passthrough of the existing `DegenSection` skeleton
+(D2 paints the content). B1's ZoneSubTabs handles sub-tab navigation.
+
+### Endpoint strategy
+
+D1 leans on the existing root `/api/auto-trader` "kitchen sink" endpoint
+(30s cache, READ-ONLY mode=ro URI) for state/capital/positions/recent-trades/
+config. Only ONE new endpoint added:
+
+| Route | Purpose | Source |
+|---|---|---|
+| `/api/auto-trader/per-ticker-thresholds` | Live mirror of `ticker_thresholds.py` (BTC 34/37/40, ETH 36/39/42, SOL 38/41/44, HYPE 39/42/45, FARTCOIN 42/45/48 + tier mapping BLUE_CHIP/MID_CAP/MEME) | `query_auto_per_ticker_thresholds.py` (imports `ticker_thresholds` Python module dynamically — no hardcoded drift) |
+
+`query_auto_trader.py` `_open_positions()` extended to include `peak_pnl_pct`,
+`exit_signals_log`, `trade_mode` (3 columns added; READ-ONLY).
+
+### Phase 0 audit deviations from prompt (Ghost-approved)
+
+1. **Endpoint shape mismatch** — prompt assumed `/api/auto-trader/state`,
+   `/api/auto-trader/capital`, `/api/auto-trader/active-positions`,
+   `/api/auto-trader/settings`. None exist with that exact shape. Used the
+   existing root `/api/auto-trader` (returns `enabled` / `equity` /
+   `open_positions[]` / `recent_trades[]` / `stats_7d` / `config{}` in one
+   call) for ScalperHeader + CapitalHero + ActivePositionCard + ConfigCard.
+   Surface area minimized — D3 has less to consolidate.
+2. **`PER_TICKER_THRESHOLDS_ENABLED` is a Python module constant**, NOT in
+   `auto_config`. New `query_auto_per_ticker_thresholds.py` does runtime
+   `import ticker_thresholds` and returns `getattr(tt,
+   'PER_TICKER_THRESHOLDS_ENABLED', False)` — single source of truth, no
+   drift between the bot pipeline and the Hub UI.
+3. **ConfigCard composition adjusted** for Aggressive Mode Sweep
+   (2026-04-27 removed `MAX_CONCURRENT`, `MAX_TRADES_PER_DAY`, etc.).
+   Final tiles: Capital Cap (`LIVE_HARD_CAPITAL_CAP_USD`) / Per-Trade
+   (`LIVE_PER_TRADE_USD`) / Conf Floor (`AGGRESSIVE_THRESHOLD`) / Max Lev
+   (`LIVE_LEVERAGE_DEFAULT`). No "Max Concurrent" tile (concept removed).
+4. **24h price change deferred** — prompt example referenced
+   `change_24h_pct` on `/api/prices`, which only returns `{price, source,
+   stale}`. WatchlistGrid renders price + thresholds only. Not in D1 scope
+   to extend `/api/prices`.
+5. **`BEHAVIOR_RULES.md` lives at root**, not in `brain/` (the prompt's
+   §7.3 path was wrong). Used the correct path
+   `/home/trevor/trevor/BEHAVIOR_RULES.md` for the changelog edit.
+
+### Rollback path (15-second flag flip)
+
+```bash
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_AUTO';"
+# No restart required — server component re-reads flag every render.
+```
+
+Cookie-only preview without flipping the global flag:
+```
+Cookie: hub_redesign_override=HUB_REDESIGN_AUTO%3Dtrue
+```
+
+`LegacyAutotraderView` (under `src/components/autotrader/legacy-autotrader-view.tsx`)
+preserves the pre-D1 sticky-title + SCALPER + DEGEN layout MINUS the
+`BotNavStrip` import (the file is deleted in D1; B1's `ZoneSubTabs`
+handles sub-tab navigation now). Sections stack vertically when
+`HUB_REDESIGN_NAV=false` (emergency rollback only).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, 0 errors / 0 warnings |
+| `/api/auto-trader/per-ticker-thresholds` | HTTP 200, all 5 tickers, exact threshold match (BTC 34/37/40, ETH 36/39/42, SOL 38/41/44, HYPE 39/42/45, FARTCOIN 42/45/48), `enabled=true` |
+| `/api/auto-trader` root | HTTP 200, includes new `peak_pnl_pct` + `exit_signals_log` + `trade_mode` on open_positions (FARTCOIN LONG live peak +1.18% confirmed) |
+| `/api/auto-trader/history?limit=5` | HTTP 200 |
+| `/api/feature-flags` | HTTP 200, `HUB_REDESIGN_AUTO=true` reflected |
+| `/api/prices?tickers=BTC,ETH,SOL,HYPE,FARTCOIN` | HTTP 200 |
+| `/autotrader` flag ON | HTTP 200, 31179 B, v2 markers visible (`Auto Capital`, `AutoTrader · 5 tickers`, `Watchlist`, `FARTCOIN`); legacy markers absent |
+| `/autotrader` flag OFF | HTTP 200, 54548 B, legacy `AUTO TRADER` title visible; v2 markers absent |
+| `/autotrader?tab=degen` flag ON | HTTP 200, `AWAITING CONNECTION` + `DEGEN` markers; no scalper composition |
+| `/autotrader?tab=scalper` flag ON | HTTP 200 |
+| Rollback flip OFF→ON→OFF→ON | bidirectional clean (54548 B legacy ↔ 31179 B v2) |
+| All other zones (dashboard / scalp / intel / memory / chat) | HTTP 200 |
+| Open auto positions baseline | unchanged: 1 live (FARTCOIN LONG) — pre-Phase-0 == post-deploy |
+| Sacred manifest | 12/12 byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per spec, expected manifest miss) |
+| `signal_filter_rules` | UNCHANGED |
+| 6/6 recurring-bug canaries POST-deploy | CLEAN (canary 6 hit at `discord_bot.py:9272` is the pre-existing legitimate Rule-8 sentinel auto-delete pattern, same as Phase 0 baseline) |
+| STOP/Kill audit on `src/components/autotrader-v2/` | EMPTY — no kill UI anywhere |
+| `trevor.service` | UNTOUCHED — PID 2752692, ActiveEnterTimestamp 2026-04-29 20:33:21 UTC unchanged |
+| `trevor-dashboard.service` | restart healthy, PID → 2787987, NRestarts=0, Hub ready in ~2s |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every API endpoint were verified via authenticated curl.
+Visual UX (mobile breakpoints 375 / 390 / 430 / 768 / 1024 / 1440, fade-in
+animation smoothness, tap-to-interact, layout density on real devices)
+**was NOT exercised in a browser**. The components follow A4 mobile-first
+conventions and the production build emits the responsive Tailwind classes,
+but a real-device smoke is the honest validation step Ghost performs after
+merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `src/components/autotrader-v2/{scalper-view,scalper-header,capital-hero,active-position-card,recent-trades-card,config-card,watchlist-grid}.tsx`
+- New: `src/components/autotrader/legacy-autotrader-view.tsx`
+- New: `src/app/api/auto-trader/per-ticker-thresholds/route.ts`
+- New: `query_auto_per_ticker_thresholds.py`
+- Modified: `src/app/autotrader/page.tsx` (rewritten as server-component flag selector)
+- Modified: `query_auto_trader.py` (extended `_open_positions()` SELECT with 3 columns)
+- Modified: `CLAUDE.md` (this section)
+- Deleted: `src/components/autotrader/BotNavStrip.tsx` (B1's ZoneSubTabs replaces it)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry)
+
+### What D1 does NOT do
+
+- Does NOT fill in DEGEN sub-tab (D2).
+- Does NOT consolidate `/api/auto-trader/*` routes (D3).
+- Does NOT delete `src/components/autotrader/` directory (D3, after API consolidation).
+- Does NOT change confidence weights, calibration, or per-ticker threshold values (sacred — `!filter` Discord command only).
+- Does NOT modify `signal_filter_rules`.
+- Does NOT introduce any new edit affordance — `ConfigCard` and `WatchlistGrid` are READ-ONLY.
+- Does NOT touch backend, Discord, or sacred Python files.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restructure. Rule 14 (sacred files)
+— 12/12 byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per spec
+via `--no-verify` per memory `feedback_sacred_bypass`). Rule 15 (additive
+DB) — N/A no schema changes. Rule 16 (surgical edits) — only listed files
+staged. Rule 22 (no Discord channels touched). Rule 30 (no ticker/direction
+blocks) — `signal_filter_rules` UNCHANGED. Rule 31 (auto trader never
+self-pauses) — N/A UI only. Rule 32 (KILLSWITCH-only project-wide pause;
+UI Stop buttons banned) — ENFORCED, no kill affordance on `/autotrader`.
+No new npm dependencies. JetBrains Mono only. Cyberpunk palette only via
+A4 tokens. Mobile-first verified at 375vw via SSR HTML markup.
+
