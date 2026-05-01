@@ -2793,3 +2793,199 @@ Mono only. Cyberpunk palette only via A4 tokens. Mobile-first verified at
 F1 (cohort lessons) + F2 (per-trade narratives) shipped. F3 closes Wave F
 with similarity + calibration deep-dive + shadow next.
 
+## F3 — INTEL Similar / Calibration deep-dive / Shadow + Optuna A/B (shipped 2026-05-01)
+
+Closes the INTEL zone — last 3 sub-tabs filled. `/intel?tab=similar` for
+ChromaDB-or-feature-vector top-K cosine similarity off any closed live
+AutoTrader trade. `/intel?tab=calibration` for per-bucket × regime ×
+ticker WR breakdown. `/intel?tab=shadow` for shadow scoring readiness +
+the **real** Optuna A/B comparison window (pivot from prompt's fictional
+dormant timer). All five INTEL sub-tabs from the B1 navigation contract
+are now populated.
+
+### Phase 0 audit deviations from prompt (5 Ghost-approved)
+
+The prompt was written against a schema that didn't match this instance.
+Phase 0 surfaced 5 mismatches:
+
+1. **`auto_signal_log` table doesn't exist.** Prompt's
+   `query_similar_trades.py` joined to it for `confidence_at_entry` /
+   `regime_at_entry`. Reality: `auto_trades` already has `confidence`,
+   `adjusted_confidence`, and `regime_at_entry` directly. Dropped the
+   join; read straight from `auto_trades`. Prefer `adjusted_confidence`
+   when present, else `confidence`.
+2. **`unified_outcomes` view columns mismatch.** Prompt selected
+   `confidence_at_entry` + `regime_at_entry` from this VIEW. Real columns
+   are `confidence` and `regime` (no `_at_entry` suffix). 941 total rows;
+   867 with both `pnl_pct` + `confidence` non-null.
+3. **`shadow_scoring` column name.** Prompt read `scored_at`; real column
+   is `timestamp`. 10,852 rows, last-write 2026-05-01 — way past the
+   200-row FUTURE_01 readiness threshold.
+4. **No classic Optuna study tables.** Prompt assumed `OPTUNA_RUNNING` /
+   `OPTUNA_LAST_FINISHED_AT` keys in `auto_config` (none exist), an
+   `optuna*` systemd timer (none), and a "monthly timer dormant" mental
+   model. Reality: `optuna_shadow_config` is a **live A/B comparison
+   window** (`enabled=1`, `started_at=2026-04-11`, `total_comparisons=
+   1170`, `prod_fires=920` vs `optuna_fires=1008`, `disagreements=250`,
+   params snapshot from `optimized_params.json` with n_trials=50,
+   sharpe=0.9791). Surfaced THIS state instead of inventing a dormant
+   timer per Honesty Protocol §8.2. Renders REVIEW OVERDUE pill at
+   started_at + 14d (currently 20d ago).
+5. **`BEHAVIOR_RULES.md` is at repo root**, not `brain/BEHAVIOR_RULES.md`
+   as prompt §6.2 stated. Used `/home/trevor/trevor/BEHAVIOR_RULES.md`.
+
+ChromaDB has **no `trade_embeddings` collection** (prompt assumed one).
+The script tries `CHROMA_TRADE_COLLECTION="trade_embeddings"`, gracefully
+misses, and falls through to `feature_vector` cosine — which is the
+honest primary path for this instance. The `learned-outcomes` collection
+DOES contain auto-trade-keyed ids (`learned-autotrader-auto_<id>`) but
+wiring that custom id-transform path was deferred per Ghost — keeps F3
+small, the fallback is plenty of signal until ChromaDB grows real
+embeddings.
+
+### Backend (3 READ-ONLY Python helpers, 3 API routes)
+
+| Helper | Route | Purpose |
+|---|---|---|
+| `query_similar_trades.py` | `/api/intel/similar/[source]/[id]` | Top-8 cosine over `auto_trades` (`confidence|adjusted_confidence` + `direction` + `leverage` + ticker one-hot + regime one-hot). Method honestly reported. |
+| `query_calibration_deep.py` | `/api/intel/calibration` | 5-bucket WR (35-44 / 45-54 / 55-64 / 65-74 / 75+) globally + by `regime` + by `ticker`. Mirrors F1 boundaries. |
+| `query_shadow_status.py` | `/api/intel/shadow` | shadow_scoring rollup + `optuna_shadow_config` A/B window state (started_at, comparisons, prod/optuna fire counts, disagreement rate, params snapshot, REVIEW OVERDUE flag at +14d). |
+
+All three open SQLite via `file:...?mode=ro`. Top-K capped at 8 for mobile
+sanity. Source whitelist: `auto_trades` only. ChromaDB calls never write.
+
+### UI (3 sections + zone view wire)
+
+- `src/components/intel/similar-trades-section.tsx` — base-trade picker
+  (last 30 closed live, horizontal carousel) + cosine result list with
+  ticker / direction / similarity % pill / closed-at / pnl%. Method pill
+  in card header (cyan for `chromadb`, neutral for `feature_vector`).
+- `src/components/intel/calibration-section.tsx` — Global / By Regime /
+  By Ticker `<SegmentedToggle>` + bar-chart layout per slice with bucket
+  pills tone-coded (green ≥55, cyan 40-54, amber 30-39, red <30, neutral
+  when n<5). Total-rows counter in card header.
+- `src/components/intel/shadow-section.tsx` — two cards:
+  - SHADOW SCORING: method / rows / ready? / last-score + progress bar
+    against the 200-row threshold.
+  - OPTUNA A/B WINDOW: comparisons / disagreements / started / params
+    generated-at + 4 snapshot stats (Conf Floor, Train WR, Sharpe, Train
+    PnL) + last_reason callout + amber `REVIEW OVERDUE` banner once
+    started_at is 14d+ in the past.
+
+`intel-zone-view.tsx` switch wired all 5 sub-tabs:
+`lessons → LessonsSection`, `journal → JournalSection`, `similar →
+SimilarTradesSection`, `calibration → CalibrationSection`, `shadow →
+ShadowSection`. Default falls through to lessons.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, `/intel` 7.96 → 10.7 kB, 3 new `/api/intel/*` routes registered as `ƒ` Dynamic |
+| `/api/intel/similar/auto_trades/100086` | HTTP 200, 8 similar returned, method=feature_vector, base.confidence_at_entry=59.5 |
+| `/api/intel/calibration` | HTTP 200, total_rows=867 matches SQL exactly, 5 global buckets + 3 regimes + 5 tickers |
+| `/api/intel/shadow` | HTTP 200, shadow.rows=10852 + optuna_ab.total_comparisons=1170 both match SQL |
+| Bad source on `/api/intel/similar` | HTTP 400 |
+| Invalid trade id | HTTP 400 |
+| Nonexistent trade id | HTTP 200 + clean `{error: "trade ... not found"}` (soft-error pattern matching F2) |
+| Unauth on all 3 routes | 401 |
+| All 5 `/intel?tab=*` pages | 200/200/200/200/200 |
+| All 5 other zones (`/dashboard`, `/autotrader`, `/scalp`, `/memory`, `/chat`) | 200 |
+| Flag rollback OFF→ON cycle | bidirectional clean (25180 B placeholder ↔ 25996+ B with section markers) |
+| 6/6 recurring-bug canaries POST-deploy | CLEAN (matches Phase 0 baseline) |
+| Sacred 9 Python+`brain/` files | byte-identical (sizes match Phase 0) |
+| `signal_filter_rules` | UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0 reseed) |
+| Open positions invariant | 0 active / 0 auto live throughout F3 (matches Phase 0 baseline) |
+| `trevor.service` | UNTOUCHED (PID 2879412, ActiveEnterTimestamp 2026-04-30 21:15:41 UTC unchanged) |
+| `trevor-dashboard.service` | restart healthy, MainPID → 2911347 after final shadow-section refactor build |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every endpoint were verified via authenticated curl
+(SHADOW SCORING + OPTUNA A/B WINDOW + SIMILAR TRADES + CALIBRATION
+DEEP-DIVE titles all confirmed in SSR HTML). Visual UX (mobile
+breakpoints 375 / 390 / 430 / 768 / 1024 / 1440, picker carousel
+horizontal scroll snap, slice-toggle smoothness, bucket bar-chart
+animation, REVIEW OVERDUE amber banner rendering) **was NOT exercised in
+a browser**. Real-device smoke is the honest validation step Ghost
+performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_similar_trades.py`, `query_calibration_deep.py`, `query_shadow_status.py`
+- New: `src/app/api/intel/similar/[source]/[id]/route.ts`, `src/app/api/intel/calibration/route.ts`, `src/app/api/intel/shadow/route.ts`
+- New: `src/components/intel/similar-trades-section.tsx`, `src/components/intel/calibration-section.tsx`, `src/components/intel/shadow-section.tsx`
+- Modified: `src/components/intel/intel-zone-view.tsx` (5-way switch wired)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 changelog entry — F3 contract; Wave F closed)
+
+**Untouched (per Ghost's Phase 0 ruling on dirty trees, NOT staged):**
+All pre-existing trevor/ dirty paths (training/cache parquet deletes,
+brain/HEARTBEAT/MEMORY/session-state churn, embeds.py / observability.py
+mods, models/hmm_regime_v2.pkl, observatory_v4/, docs/AUTOTRADER_EDGE_AUDIT_REPORT.md,
+docs/HMM_FARTCOIN_COLLAPSE_AUDIT.md, sacred_backups/.../env.original).
+trevor-dashboard `.env`, `.env.local`, `tsconfig.tsbuildinfo`,
+`.env.local.bak.pre_lockdown_20260424`.
+
+### What F3 does NOT do
+
+- Does NOT write to ChromaDB. Read-only queries.
+- Does NOT call Anthropic. F2 owns Haiku.
+- Does NOT trigger Optuna runs or shadow retraining. Both surfaces are
+  read-only — no "force retrain" / "freeze A/B" / "promote optuna params"
+  affordances. Those flow happens via `auto_trader.shadow_scoring`
+  retrain or direct `auto_config` writes, never via Hub UI.
+- Does NOT modify `unified_outcomes`, `auto_trades`, `shadow_scoring`,
+  or `optuna_shadow_config`. Pure read.
+- Does NOT add a "deep search" affordance crossing zones.
+- Does NOT surface Hyperliquid orderbook or live signals (those live in
+  SCALP).
+- Does NOT touch sacred files, Discord, or backend bot.
+- Does NOT add new flags. Same `HUB_REDESIGN_INTEL` from F1.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service`
+  restarted (twice during build).
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — pure read-only display. Rule 14 (sacred files)
+— 9/9 byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per F3
+spec via `--no-verify` per memory `feedback_sacred_bypass`). Rule 15
+(additive DB) — N/A no schema changes (no INSERTs anywhere). Rule 16
+(surgical edits) — only F3-scoped files staged. Rule 22 (no Discord
+channels touched). Rule 30 (no ticker/direction blocks) —
+`signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses)
+— N/A backend not touched. Rule 32 (KILLSWITCH-only project-wide pause;
+UI Stop banned) — ENFORCED, no kill affordance on `/intel`. No new npm
+dependencies. Cyberpunk palette only via A4 tokens. Mobile-first
+verified at 375vw via SSR HTML markup. Tap target floor 44×44 via
+`.tap-target` (picker buttons). Top-K capped at 8 for mobile. Calibration
+buckets identical to F1 (35-44 / 45-54 / 55-64 / 65-74 / 75+). Shadow
+ready_for_analysis only flips to YES at n≥200 (currently 10852, so
+honestly green). REVIEW OVERDUE pill fires at started_at + 14d
+(currently 20d). Method honesty — `feature_vector` fallback labeled
+clearly when ChromaDB has no matching collection.
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores B1 placeholder /intel page)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_INTEL';"
+# No restart required (React cache() is per-request)
+
+# Full code revert
+cd /home/trevor/trevor-dashboard && git revert <f3-hub-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores intel-zone-view.tsx to F2 state (similar/calibration/shadow
+# fall through to placeholder). Removes 3 query helpers, 3 routes, 3
+# section components.
+```
+
+INTEL zone is end-to-end populated: lessons / journal / similar /
+calibration / shadow. Wave F closed.
+
