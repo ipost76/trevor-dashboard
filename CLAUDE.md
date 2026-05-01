@@ -3418,3 +3418,165 @@ Wave H closes. Next: Wave I (verify_deploy.sh + sister-infra hardening
 + post-redesign GCS snapshot + RECOVERY.md fixes) per the H1 prompt's
 §9 closer.
 
+## G2 — System Health + Aggressive Mode + Memory Centering (shipped 2026-05-01)
+
+Closes the MEMORY zone. Two new sub-tabs (`/memory?tab=health`, `/memory?tab=aggressive`) replace G1 placeholders + centering wrapper added on the MemoryZoneView dispatcher. Wave G complete (5/5 sub-tabs shipped). Bot service `trevor.service` UNTOUCHED. Sacred 12/12 byte-identical pre/post. Filter rules UNCHANGED. Schema UNCHANGED for existing tables (only additive `auto_config` flag seeded). `aggressive_mode_history` reused as audit table per the delegated approach (see Phase 0 reconciliation in trevor CLAUDE.md G2 section).
+
+### Phase 1 — Memory zone centering
+
+`src/components/memory/memory-zone-view.tsx` rewritten as IIFE that wraps every sub-tab's component output in `<div className="mx-auto w-full max-w-screen-2xl">`. All 5 cases (brain / memory / chromadb / health / aggressive) inherit identical centering on desktop while preserving the inner section wrappers' `space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in` padding. Default fall-through routes to BrainSection (was placeholder EmptyState pre-G2). Mobile width unaffected because the wrapper renders 100% by default and only caps at `max-w-screen-2xl` (1536px) on desktop+.
+
+### Phase 2 — System Health backend
+
+**`query_system_health.py`** (top-level dashboard helper, ~290 lines, mode=ro URI). Self-probe collector script returning `{snapshot_at, killswitch_enabled, services[3], collectors[11], sentinels[≤10], source, stale_seconds}` JSON.
+
+**11 collectors** (all defensively-wrapped — every collector catches its own exceptions and returns a degraded entry instead of raising):
+- **cpu** — `/proc/loadavg` + `/proc/cpuinfo`; tone green<70% / amber70-90% / red>90%
+- **memory** — `/proc/meminfo` MemTotal vs MemAvailable
+- **disk** — `os.statvfs("/")` total/free/used
+- **network** — `subprocess.run(["ping","-c1","-W1","1.1.1.1"])`, 3s timeout
+- **db_size** — `os.path.getsize` on `trevor.db` + `-wal` companion
+- **db_writability** — read-only PRAGMA `journal_mode` + `SELECT 1` (NOT a real write probe — G2 doesn't introduce any write paths)
+- **vectordb_size** — `os.walk("/home/trevor/trevor/vectordb")` total bytes
+- **litestream** — `systemctl is-active litestream.service`
+- **ghost_qa_heartbeat** — `systemctl is-active ghost-qa.service`
+- **scanner_lag** — last `loop_heartbeat WHERE loop_name='scalp_scan_loop'` row vs current time, tone green if <2× cadence, amber 2-5×, red >5×
+- **autotrader_pulse** — reads `auto_config.AUTO_LIVE_ENABLED` (NOT `KILLSWITCH_ENABLED` — that key doesn't exist; killswitch lives at `EMERGENCY_KILLSWITCH`)
+
+**3 services** (traffic-lit): `trevor.service`, `trevor-dashboard.service`, `ghost-qa.service` via `systemctl is-active` (active=green, activating/reloading=amber, otherwise=red).
+
+**Sentinels** — tail last 64KB of `/home/trevor/trevor/logs/trevor.log`, filter for `| WARNING |` / `| ERROR |` / `| CRITICAL |`, return last 10 with `{ts, level, tag, message[≤240]}`. Tag extracted via regex `\[([A-Z][A-Z0-9_-]*)\]`. Drops the leading possibly-truncated line because `seek(size-64KB)` may land mid-line. **Prompt's hardcoded tag list (`KILLSWITCH-ON/OFF`, `BACKFILL_DONE`, `OPTUNA_FINISHED`, `REGRESSION`) had ZERO matches in production logs** — actual production tags are `[CB] [SCAN-DUR] [LIVE-EXEC] [AUTO-TRADER] [AUTO-JUDGMENT] [LOOP-HEALTH] [AUTO-MONITOR] [ALT-DATA] [BETA] [THEORETICAL]`. Helper extracts whatever tag appears, doesn't filter to a predefined list.
+
+**Killswitch** — reads `auto_config.EMERGENCY_KILLSWITCH` (correct key per A2 deployment).
+
+**`/api/memory/health/route.ts`** — GET only, no caching (30s client-side polling). Returns HTTP 200 with degraded shape on any error so UI handles failure gracefully (per prompt §2.2).
+
+### Phase 3 — Aggressive Mode backend (DELEGATED architecture)
+
+**Critical Phase 0 finding**: prompt's design (auto_config.AGGRESSIVE_MODE + new `aggressive_mode_audit` table) was incompatible with the bot's existing infrastructure. The bot reads `aggressive_mode_config` (NOT auto_config), and `query_aggressive_mode.py` already shipped 2026-04-10 with full enable/disable/extend handlers writing to `hub_commands` queue. Ghost approved the **delegated approach** at THOUGHTS gate: build new G2 surface that DELEGATES to existing infrastructure + adds the `HUB_AGGRESSIVE_TOGGLE_ENABLED` flag gate.
+
+**`query_aggressive.py`** (top-level dashboard helper, ~120 lines, mode=ro URI). Returns:
+```json
+{
+  "enabled": bool,                  // from aggressive_mode_config.enabled
+  "threshold_delta": int,
+  "enabled_at": str,
+  "revert_at": str,
+  "enabled_by": str,
+  "reason": str,
+  "total_signals_fired": int,
+  "minutes_until_revert": int,      // computed if revert_at non-null
+  "toggle_enabled": bool,           // HUB_AGGRESSIVE_TOGGLE_ENABLED — NEW G2 gate
+  "killswitch_enabled": bool,       // EMERGENCY_KILLSWITCH — informational
+  "audit": [...]                    // last 5 from aggressive_mode_history
+}
+```
+
+**`set_aggressive.py`** (top-level dashboard helper, ~150 lines, RW connection). Args: `<true|false> <author>`. Behavior:
+1. Refuse if `HUB_AGGRESSIVE_TOGGLE_ENABLED != 'true'` → exit 3 with `{ok:false, gate_locked:true}`
+2. Read current `aggressive_mode_config.enabled`. Idempotent: if matches requested → exit 0 with `{ok:true, no_change:true}` (no audit row, no queue)
+3. Otherwise, in single transaction:
+   - INSERT `hub_commands` row (`AGGRESSIVE_ON` / `AGGRESSIVE_OFF`) — bot's `hub_close_poll_loop` applies within ~10s
+   - INSERT `aggressive_mode_history` row (`event_type=enable|disable, actor=<author>, reason='g2_hub_toggle:<author>'`)
+4. Print `{ok:true, no_change:false, prev_value, new_value, command_id, audit_id, queued, note}` + exit 0
+
+Defaults `DELTA=-5`, `HOURS=48` for ON; OFF passes `reason` only. Exit codes: `0` success, `1` usage, `2` DB error, `3` gate locked.
+
+**`/api/memory/aggressive/route.ts`** — GET via `runPython("query_aggressive.py")`, POST via `spawnSync` directly (NOT `runPython`) so we can capture stdout regardless of exit code. Maps Python exit codes:
+- `0` → HTTP 200
+- `3` → **HTTP 423 (Locked)** with `{gate_locked:true}` payload
+- `1` → HTTP 400
+- else → HTTP 500
+
+**Why spawnSync not runPython**: `runPython` throws on non-zero exit and discards stdout. Set_aggressive.py exits 3 on gate-lock and we need to surface the JSON payload to the caller (per prompt §3.4). Inline `spawnSync` reads both stdout + status cleanly.
+
+**HUB_AGGRESSIVE_TOGGLE_ENABLED seeded** to `'false'` in `auto_config` via additive INSERT OR IGNORE per Rule 15 (no schema change, no new columns).
+
+### Phase 4 — UI Components
+
+**`<HealthSection>`** (`src/components/memory/health-section.tsx`, ~280 lines, A4 primitives only):
+- Killswitch banner — `<Card glow={engaged?"red":"none"}>` + `ShieldOff` icon, `<Pill tone={"red"|"neutral"} pulse={engaged}>` showing `EMERGENCY_KILLSWITCH`
+- Services grid — 1col mobile / 3col tablet+, each entry: traffic-light dot + name + status text
+- Collectors grid — 2col / 3col / 4col responsive, `<MetricTile>` per collector with green/warn/negative tone mapping
+- Sentinels list — last 10 in `<ul>`, each row has `<Pill tone>` for level (amber=WARNING, red=ERROR, magenta=CRITICAL) + cyan `<Pill>` for tag + ts + message
+- 30-second `setInterval` polling, cleanup on unmount, `refreshing` state shown in footer
+- EmptyState fallbacks for empty services / collectors / sentinels
+
+**`<AggressiveModeSection>`** (`src/components/memory/aggressive-section.tsx`, ~340 lines):
+- Hero card — `<Card padding="lg" glow={enabled?"magenta":"none"}>` with `Zap` icon, ENGAGED/Off label, Δ + revert ETA when enabled, last enabled_at + enabled_by
+- Description card — explains aggressive mode (lower threshold, removes scoring brakes for 48h, auto-reverts, respects killswitch + $50 cap, does NOT auto-close)
+- Killswitch advisory — only renders when `killswitch_enabled=true`; amber `<Card>` warning that toggle still permitted but no execution will occur
+- Toggle controls — `<HapticButton variant="primary">` Set ON / `<HapticButton variant="secondary">` Set OFF in 2-col grid; both disabled when `toggle_enabled=false` (locked state shows amber `<Card>` with `<Lock>` icon explaining how to unlock); current state's button also disabled (can't set ON when ON)
+- Result feedback — green/red banner inline after toggle attempt
+- Recent toggles list — last 5 audit rows with `<Pill>` per event_type (enable=magenta, auto_revert=amber, disable=neutral) + Δ/duration/timestamp + `by {actor}` + reason
+- **2-tap BottomSheet confirmation** — `<BottomSheet>` opens on toggle button tap; sheet body has warning text + author=ghost note + audit-row info + Cancel / Confirm row. Second tap on Confirm POSTs to `/api/memory/aggressive`. Submit state disables Cancel + closes on success.
+
+**`<MemoryZoneView>`** wired to dispatch all 5 cases to real components (no placeholders). Imports from `./brain-section`, `./memory-section`, `./chroma-section`, `./health-section`, `./aggressive-section`.
+
+**`/api/aggressive/route.ts` (LEGACY) updated**: defense-in-depth flag gate. New `isToggleEnabled()` helper calls `query_aggressive.py` and reads `toggle_enabled` field. POST handler short-circuits to HTTP 423 when flag is off. GET path unchanged (read access for live-board / chat-empty-state / lesson-card displays). Single contract: any aggressive write surface gates behind `HUB_AGGRESSIVE_TOGGLE_ENABLED`.
+
+**Navigation labels** (`src/lib/navigation.ts:111-115`) already had correct G1-shipped labels: `Brain / Memory / ChromaDB / System Health / Aggressive`. No edits needed.
+
+### Phase 5 — Verification
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, /memory bundle 7.86 kB / 120 kB First Load |
+| `query_system_health.py` smoke | 11 collectors / 3 services / 10 sentinels, killswitch=false |
+| `/api/memory/health` | HTTP 200, 11 collectors / 3 services / 10 sentinels |
+| `query_aggressive.py` smoke | full payload, toggle_enabled=false, killswitch=false, audit list with 5 entries |
+| `/api/memory/aggressive` GET | HTTP 200, full state |
+| `/api/memory/aggressive` POST flag off | **HTTP 423**, `{gate_locked:true}` |
+| `/api/aggressive` POST flag off (legacy) | **HTTP 423** (defense-in-depth) |
+| Round-trip with flag on | POST true → 200 (audit_id #10, command_id #9), bot applies AGGRESSIVE_ON in 15s (config.enabled=1, threshold_delta=-5), POST false → 200 (audit_id #12), bot applies AGGRESSIVE_OFF in 15s (config.enabled=0). Final: 4 history rows (enable/hub-bot, disable/hub-bot, enable/smoke-hub, disable/smoke-hub). Restored to PRE state. |
+| `/memory?tab=*` × 5 sub-tabs + 4 other zones | 9/9 HTTP 200 |
+| Rollback rehearsal (`HUB_REDESIGN_MEMORY=false`) | shows "Temporarily Disabled" placeholder; flag-back-on returns 200 |
+| Open positions baseline | Auto=0, Active=73 (matches Phase 0 baseline) |
+| Sacred files 12/12 | byte-identical (only the pre-existing 1-line "improperly formatted" warning per `project_sacred_manifest_paths.md`) |
+| 6 canaries POST-deploy | CLEAN (C1=2 pre-existing legitimate `auto_close_time` field-name string refs, C5=2 pre-existing `_is_duplicate_signal`/`_dedup_alert_lines` text helpers, all others 0) |
+| `signal_filter_rules` | UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0 row per Rule 30) |
+
+### Bot artifacts (every audit row visible in Discord journalctl per existing infrastructure)
+
+When G2 toggle queues an `AGGRESSIVE_ON` command, the bot's `hub_close_poll_loop` picks it up within ~10s and processes via the existing `aggressive_mode.enable()` singleton at `aggressive_mode.py`. That code path:
+1. Calls `circuit_breaker.CircuitBreakerSystem().get_status().get("overall_status")` — refuses to engage on non-GREEN CB (pre-G2 behavior preserved)
+2. Sets `aggressive_mode_config.enabled=1`, `threshold_delta=-5`, `enabled_at=now`, `revert_at=now+48h`, `enabled_by='hub'`, `reason=<G2 toggle reason>`
+3. Writes its own `aggressive_mode_history` row (event_type=enable, actor='hub', reason=<same as G2 toggle reason>)
+4. Emits `[AGGRESSIVE] ENABLED delta=-5 duration=48.0h revert_at=...` at WARNING
+
+So every G2 toggle produces TWO audit rows: one from the Hub helper (actor=author from POST body, captures Ghost intent) + one from the bot side (actor='hub', captures bot acknowledgment). This is the actual delegated audit trail and is the design Ghost approved at the THOUGHTS gate.
+
+### Files (Hub repo)
+
+- `query_system_health.py` (new, ~290 lines, executable)
+- `query_aggressive.py` (new, ~120 lines, executable)
+- `set_aggressive.py` (new, ~150 lines, executable)
+- `src/app/api/memory/health/route.ts` (new)
+- `src/app/api/memory/aggressive/route.ts` (new)
+- `src/components/memory/health-section.tsx` (new, ~280 lines)
+- `src/components/memory/aggressive-section.tsx` (new, ~340 lines)
+- `src/components/memory/memory-zone-view.tsx` (rewritten — IIFE dispatcher + `mx-auto max-w-screen-2xl` wrapper)
+- `src/app/api/aggressive/route.ts` (+13 lines — flag-gate POST handler, GET unchanged)
+
+### What G2 does NOT do
+
+- Does NOT modify `aggressive_mode.py` (sacred path — bot side untouched)
+- Does NOT modify `aggressive_mode_config` table schema (existing 9-col schema reused as-is)
+- Does NOT create a new `aggressive_mode_audit` table — `aggressive_mode_history` already serves the audit role
+- Does NOT call Anthropic API
+- Does NOT send Discord messages from Hub side (helpers only write to DB; bot's `hub_close_poll_loop` handles Discord)
+- Does NOT modify killswitch (purely informational read in both `health` and `aggressive` views)
+- Does NOT auto-close any position (Rule 1 preserved end-to-end)
+- Does NOT bypass $50 cap or per-ticker thresholds
+- Does NOT touch any sacred file
+- Does NOT modify `trevor.service` (only `trevor-dashboard.service` restarted)
+
+### Sentinel
+
+```
+G2_COMPLETE: subtabs_shipped=5/5 collectors=11/11 services=3/3 centering_fixed=YES aggressive_round_trip=PASS aggressive_restored=YES sacred_manifest_verified=YES build=PASS hub_restart=OK rollback_verified=YES open_positions_unchanged=YES canaries=CLEAN dashboard_commit=<TBD> trevor_commit=<TBD> wave_g=CLOSED runtime_min=~50
+```
+
+Wave G closes. Wave I (sister-infra hardening + verify scripts + RECOVERY.md) shipped 2026-05-01 ahead of G2 (out-of-order due to sprint sequencing). All 5 MEMORY sub-tabs live; entire MEMORY zone redesign complete.
+

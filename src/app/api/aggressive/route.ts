@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { execSync } from "child_process";
 
-// /api/aggressive — Aggressive Mode toggle + status
+// /api/aggressive — Aggressive Mode toggle + status (legacy GET, flag-gated POST)
 //
-// GET  → 15s in-memory cache, calls query_aggressive_mode.py status
-// POST → writes AGGRESSIVE_ON / AGGRESSIVE_OFF / AGGRESSIVE_EXTEND to hub_commands
-//        Bot's hub_close_poll_loop picks up the queued command (~10s latency)
+// GET  → 15s in-memory cache, calls query_aggressive_mode.py status (read-only,
+//        used by live-board / chat-empty-state / lesson-card displays)
+// POST → writes AGGRESSIVE_ON / AGGRESSIVE_OFF / AGGRESSIVE_EXTEND to hub_commands.
+//        G2 (2026-05-01): now gated by HUB_AGGRESSIVE_TOGGLE_ENABLED — same
+//        flag enforced by /api/memory/aggressive. Single contract for any
+//        aggressive write surface.
 //
 // Auth: middleware enforces session cookie on all /api/* (except /api/auth, /api/health)
 
@@ -13,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 const PY = "/home/trevor/trevor/venv/bin/python";
 const HELPER = "/home/trevor/trevor-dashboard/query_aggressive_mode.py";
+const GATE_HELPER = "/home/trevor/trevor-dashboard/query_aggressive.py";
 
 let _cache: { data: unknown; ts: number } | null = null;
 const CACHE_TTL = 15_000; // 15s — matches /api/circuit-breaker
@@ -20,6 +24,16 @@ const CACHE_TTL = 15_000; // 15s — matches /api/circuit-breaker
 function shellQuote(s: string): string {
   // Escape single quotes for safe inclusion in single-quoted shell strings
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+function isToggleEnabled(): boolean {
+  try {
+    const raw = execSync(`${PY} ${GATE_HELPER}`, { timeout: 5000, encoding: "utf-8" });
+    const data = JSON.parse(raw) as { toggle_enabled?: boolean };
+    return data.toggle_enabled === true;
+  } catch {
+    return false;
+  }
 }
 
 export async function GET() {
@@ -44,6 +58,18 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // G2 flag gate — single contract across all aggressive write surfaces.
+  if (!isToggleEnabled()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        gate_locked: true,
+        error:
+          "HUB_AGGRESSIVE_TOGGLE_ENABLED is false. Toggle it in auto_config to allow writes.",
+      },
+      { status: 423 },
+    );
+  }
   // Invalidate cache immediately on any POST
   _cache = null;
   try {
