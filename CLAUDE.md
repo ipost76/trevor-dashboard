@@ -2989,3 +2989,151 @@ sudo systemctl restart trevor-dashboard.service
 INTEL zone is end-to-end populated: lessons / journal / similar /
 calibration / shadow. Wave F closed.
 
+## G1 — MEMORY Layout — Brain / Memory journal / ChromaDB (shipped 2026-05-01)
+
+Replaces the B1 placeholder at `/memory` with the MEMORY zone first 3 sub-tabs (Brain / Memory / ChromaDB). G2 follows with System Health + Aggressive Mode.
+
+### Phase 0 audit deviations from prompt (Ghost-approved at THOUGHTS gate)
+
+The G1 prompt was written against a schema/architecture that didn't fully match reality. Phase 0 audit surfaced 5 mismatches:
+
+1. **`memory_journal` SQLite table doesn't exist.** Reality: TREVOR's persistent memory artifact is `brain/memory/*.md` daily session checkpoints (50 files at audit time, format `# Session Checkpoint — <ts>\n## Last 5 Exchanges\n## State\n...`). Phase 2 pivoted from "SQLite reader" to "daily-markdown reader" — same JSON shape (`entries[]` with id/ts/tag/content), but reads files via `pathlib.Path.glob`. Honest data source over invented schema.
+2. **`runPythonWithStdin` already exists implicitly** — `runPython(script, args, { input })` in `lib/api-helpers.ts` already supports stdin via spawnSync's `input` option (lines 22-43). Skipped adding the duplicate helper.
+3. **Repos NOT clean at start** — TREVOR repo had ~250 uncommitted parquet deletions + `auto_trader/embeds.py + observability.py` mods + `models/hmm_regime_v2.pkl` churn. Per Ghost decision (b): stashed both repos before G1 started. Restored after Phase 6 commits land.
+4. **Brain file listing scope** — `brain/` contains 4 sacred (IDENTITY/BRAIN/SOUL/AGENTS) + 4 non-sacred (HEARTBEAT/LEARNINGS/MEMORY/session-state) + 11 `MEMORY.md.backup.YYYYMMDD` clutter + 2 subdirs (backups/, memory/). `query_brain_files.py` filters to top-level `*.md` excluding `.backup*` patterns. Result: 8 files (4 sacred + 4 non-sacred), no backup noise.
+5. **`BEHAVIOR_RULES.md` lives at trevor repo root** (`/home/trevor/trevor/BEHAVIOR_RULES.md`, 719 KB), NOT `brain/BEHAVIOR_RULES.md`. Doc edits target the root file.
+
+### Architecture
+
+**3 backend Python helpers** (top-level dashboard scripts, executable, mode=ro SQLite):
+- `query_brain_files.py` (~70 lines): lists top-level `brain/*.md` with `.backup*` excluded, returns `{files[], edit_enabled, sacred_count, non_sacred_count}`. Sacred status flag from frozenset {IDENTITY/BRAIN/SOUL/AGENTS.md}.
+- `query_brain_read.py` (~55 lines): reads single file by basename, validates `.md` ext + no `..`/`/`/.backup, max 256 KB. Returns `{name, content, is_sacred, size_bytes, modified_at, lines}` or `{error}`.
+- `write_brain_file.py` (~120 lines): atomic write with .bak backup + brain_edit_audit row. Hard rejects sacred names (exit 3). Hard rejects when `HUB_BRAIN_EDIT_ENABLED=false` (exit 3). Validates basename + 256 KB cap. Skips on no-change (sha-equal).
+
+**Memory journal reader** (`query_memory_entries.py`, ~75 lines): reads `brain/memory/YYYY-MM-DD.md` files, parses optional embedded ISO timestamp from `# Session Checkpoint — ` header, supports limit + substring search. Honest empty state when dir missing.
+
+**ChromaDB browser** (`query_chroma_browse.py`, ~120 lines): list/peek/search modes via `chromadb.PersistentClient`. Limit capped at 25, no embeddings returned. Each mode has its own JSON shape (`mode: list|peek|search` + tagged data).
+
+**4 API routes**:
+- `/api/memory/brain` (GET) — file list
+- `/api/memory/brain/[name]` (GET/POST) — read or write single file. POST has API-layer sacred guard (HTTP 423 immediate, before the script call) + flag check via script (HTTP 423 on Python exit 3) + content/author validation (HTTP 400)
+- `/api/memory/journal` (GET) — daily checkpoints with `?limit=&q=`
+- `/api/memory/chroma` (GET) — list/peek/search with collection name validation `/^[a-zA-Z0-9_-]+$/` and 60s in-memory cache for `list` mode (PersistentClient cold-start is 30-40s on this VM; warm <1s). 60s timeout on the Python call.
+
+**4 React UI sections**:
+- `BrainSection` — file list with Lock/Edit/FileText icons; BottomSheet for read+optional-edit. Edit affordance gated on `data.edit_enabled && !content.is_sacred`. Save POST shows result + reload list. Sacred files render Lock icon + SACRED pill, never editable.
+- `MemorySection` — search box (350ms debounce) + entry list with Card per entry; expand-to-full button at >600 char preview.
+- `ChromaSection` — collection grid (2/3/4 cols responsive) + select → peek/search panel. Tooltip-style metadata stripe at bottom of each item.
+- `MemoryZoneView` — pure dispatcher. Maps `subtab → section`; `health`/`aggressive` → "Coming next in Wave G2" empty state.
+
+**Page rewrite**: `/memory/page.tsx` is a server component flag selector (cookie override → `runPython("query_feature_flags.py")` → DashboardDisabled-style fallback). Same pattern as `/intel/page.tsx`.
+
+### Three-layer sacred rejection (proof in §5.5)
+
+Sacred file write rejection enforced at 3 independent layers — any one rejects unconditionally:
+
+| Layer | Mechanism | Test result (HUB_BRAIN_EDIT_ENABLED=true, attempting IDENTITY.md/BRAIN.md/SOUL.md/AGENTS.md) |
+|---|---|---|
+| 1. UI | `is_editable=false` for all 4 sacred entries; Edit button never rendered | Visual; `data.is_editable` field |
+| 2. API route | POST handler checks `name in SACRED_NAMES` → HTTP 423 Locked before script call | All 4 returned `HTTP 423 {"error":"sacred file — write rejected: NAME.md"}` |
+| 3. Python script | `name in SACRED_NAMES` → exit 3 unconditionally | Verified directly via Python smoke (exit code 3 on each) |
+
+`IDENTITY.md` SHA-256 byte-identical pre/post all 4 hostile POSTs. Manifest 12/12 OK after the test.
+
+### Verification gates (all PASS)
+
+- `npx tsc --noEmit` — clean
+- `npm run build` — clean, **47s**, 4 new `/api/memory/*` routes registered as `ƒ` Dynamic, `/memory` route 4.55 kB / 117 kB First Load
+- API endpoints (post-restart, with auth cookie):
+  - `GET /api/memory/brain` → 200, 8 files, edit_enabled=false (default)
+  - `GET /api/memory/brain/IDENTITY.md` → 200, lines=64, is_sacred=true
+  - `GET /api/memory/journal?limit=3` → 200, total=50, returned=3
+  - `GET /api/memory/chroma?mode=list` → 200, 20 collections (cache MISS on first call ~7s, HIT <100ms thereafter)
+  - `GET /api/memory/chroma?mode=peek&collection=conversations&limit=2` → 200, 2 sample docs
+  - `GET /api/memory/chroma?mode=peek&collection=../etc&limit=2` → 400 invalid collection name
+- Sub-tab routes `/memory?tab={brain,memory,chromadb,health,aggressive}` all → 200
+- **Sacred rejection (`HUB_BRAIN_EDIT_ENABLED=true`)**: 4/4 sacred POSTs → HTTP 423; all 4 SHA-256 hashes byte-identical pre/post; manifest 12/12 OK
+- **Non-sacred no-change roundtrip** (`HUB_BRAIN_EDIT_ENABLED=true`, LEARNINGS.md POST same content back): `{"ok":true,"no_change":true}`, file SHA-256 unchanged, audit table NOT created (no real edit)
+- Flag rollback `/memory` `OFF→Temporarily Disabled→ON→BRAIN FILES` cycle clean
+- Sacred files **12/12 byte-identical** to baseline via `sha256sum -c .sacred_manifest.sha256`
+- Open positions baseline preserved (active=0, auto_live=1)
+- All 6 recurring-bug canaries CLEAN POST-deploy
+- `signal_filter_rules` UNCHANGED (1 inert `REGIME_THRESHOLD_CAP enabled=0` reseed row per Rule 30 known residual)
+
+### Cache notes
+
+The Chroma `list` endpoint has a 5-minute in-memory server-side cache because `chromadb.PersistentClient(path=...)` cold-start is ~30-40 seconds on this VM (CPU-bound, single-vCPU). Cache invalidates on Hub restart. Peek and search are uncached because they're user-driven targeted queries.
+
+### Sacred files UNTOUCHED (12/12)
+
+Sacred files byte-identical pre/post via `sha256sum -c`: `IDENTITY.md` `27762ab8…`, `BRAIN.md` `470f5852…`, `SOUL.md` `858bc12a…`, `AGENTS.md` `5fbacb83…`, `swarms_brain.py` `ed6b8291…`, `training_bridge.py` `318571fb…`, `signal_cleanup.py` `7723516d…`, `signal_guard.py` `28f28689…`, `signal_cooldown.py` `bee3f929…`, `portfolio_pulse.py` `49101b6b…`, `test_signal_deletion.py` `6784dec3…`, `format_utils.py` `e1e5efed…`. The pre-existing `BEHAVIOR_RULES.md` FAILED line in the manifest is a tracked-non-sacred drift unrelated to this prompt; G1 doesn't refresh manifest.
+
+Filter rules UNCHANGED. Signal pipeline scoring UNCHANGED. Schema additive-only — `brain_edit_audit` table created lazily on first non-sacred write (no rows yet, table doesn't exist until then). No `config.py` / `.env` / systemd / service-config touched. `trevor.service` UNTOUCHED — only `trevor-dashboard.service` restarted.
+
+### What G1 does NOT do
+
+- Does NOT ship System Health sub-tab (G2)
+- Does NOT ship Aggressive Mode toggle (G2)
+- Does NOT modify any sacred file under any circumstance
+- Does NOT add ChromaDB write affordances (READ-ONLY)
+- Does NOT add memory journal write affordance (READ-ONLY search)
+- Does NOT modify scoring, calibration, or thresholds
+- Does NOT call Anthropic
+- Does NOT touch Discord or backend bot
+- Does NOT delete `/api/knowledge` or legacy `/api/memory` (kept; eventually I1 deprecates if zero callers)
+- Does NOT change `swarms_brain.py` / `training_bridge.py` / signal modules
+
+### Files (Hub repo)
+
+- `query_brain_files.py` (new, ~70 lines, executable)
+- `query_brain_read.py` (new, ~55 lines, executable)
+- `write_brain_file.py` (new, ~120 lines, executable)
+- `query_memory_entries.py` (new, ~75 lines, executable)
+- `query_chroma_browse.py` (new, ~120 lines, executable)
+- `src/app/api/memory/brain/route.ts` (new)
+- `src/app/api/memory/brain/[name]/route.ts` (new, GET+POST with 3-layer sacred guard)
+- `src/app/api/memory/journal/route.ts` (new)
+- `src/app/api/memory/chroma/route.ts` (new, with 5-min in-memory cache + 60s timeout)
+- `src/components/memory/brain-section.tsx` (new)
+- `src/components/memory/memory-section.tsx` (new)
+- `src/components/memory/chroma-section.tsx` (new)
+- `src/components/memory/memory-zone-view.tsx` (new dispatcher)
+- `src/app/memory/page.tsx` (rewritten — server component flag selector)
+
+### Files (trevor repo)
+
+- `CLAUDE.md` (this section)
+- `BEHAVIOR_RULES.md` (Section 3 changelog entry)
+- `auto_config` table (`HUB_BRAIN_EDIT_ENABLED='false'` row added)
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores Temporarily Disabled inline message)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_REDESIGN_MEMORY'"
+# No restart required — React cache() is per-request
+
+# Full code revert (Hub side)
+cd /home/trevor/trevor-dashboard && git revert <hub-commit>
+sudo systemctl restart trevor-dashboard.service
+
+# Bot side documentation revert
+git revert <trevor-commit>
+
+# brain_edit_audit table cleanup (only relevant if any non-sacred writes happened):
+# sqlite3 trevor.db "DROP TABLE IF EXISTS brain_edit_audit"
+```
+
+The `HUB_BRAIN_EDIT_ENABLED` flag remains in `auto_config` after revert — harmless (Rule 15 additive-only). To remove: `DELETE FROM auto_config WHERE key='HUB_BRAIN_EDIT_ENABLED'`.
+
+### Sentinel
+
+```
+G1_COMPLETE: subtabs_shipped=3/5 sacred_rejection_test=PASS sacred_manifest_verified=YES brain_files=8 memory_data_available=true chroma_collections=20 build=PASS hub_restart=OK rollback_verified=YES open_positions_unchanged=YES canaries=CLEAN dashboard_commit=<TBD> trevor_commit=<TBD>
+```
+
+### Next
+
+G2 — System Health sub-tab + Aggressive Mode toggle. Closes Wave G with the 2 deferred sub-tabs.
+
