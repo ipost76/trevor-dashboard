@@ -53,6 +53,7 @@ def main() -> int:
         "pnl_today_usd": 0.0,
         "pnl_today_pct": 0.0,
         "trades_today": 0,
+        "trades_total": 0,
         "open_positions_count": 0,
         "auto_enabled": False,
         "live_enabled": False,
@@ -112,6 +113,10 @@ def main() -> int:
                 "SELECT COUNT(*) AS n FROM auto_trades WHERE status='open'"
             ).fetchone()
 
+            total_count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM auto_trades WHERE status='closed'"
+            ).fetchone()
+
         pnl_today = round(float(today_row["pnl_usd"] or 0), 4)
         pnl_today_pct = round((pnl_today / live_cap) * 100.0, 4) if live_cap > 0 else 0.0
 
@@ -122,6 +127,7 @@ def main() -> int:
             "pnl_today_usd": pnl_today,
             "pnl_today_pct": pnl_today_pct,
             "trades_today": int(today_row["n"] or 0),
+            "trades_total": int(total_count_row["n"] or 0),
             "open_positions_count": int(open_count_row["n"] or 0),
             "auto_enabled":  str(cfg.get("AUTO_TRADER_ENABLED", "false")).lower() == "true",
             "live_enabled":  str(cfg.get("AUTO_LIVE_ENABLED", "false")).lower() == "true",

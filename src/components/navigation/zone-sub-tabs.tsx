@@ -26,16 +26,18 @@ export function ZoneSubTabs() {
   }));
 
   return (
-    <TabBar
-      items={items}
-      active={activeFromQuery}
-      onChange={(next) => {
-        const params = new URLSearchParams(searchParams?.toString() ?? "");
-        params.set("tab", next);
-        router.push(`${zone.href}?${params.toString()}`);
-      }}
-      className="px-4"
-    />
+    <div className="sticky top-0 z-20 bg-bg-sidebar/95 backdrop-blur">
+      <TabBar
+        items={items}
+        active={activeFromQuery}
+        onChange={(next) => {
+          const params = new URLSearchParams(searchParams?.toString() ?? "");
+          params.set("tab", next);
+          router.push(`${zone.href}?${params.toString()}`);
+        }}
+        className="px-4"
+      />
+    </div>
   );
 }
 

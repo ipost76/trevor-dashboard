@@ -10,6 +10,7 @@ interface AutoState {
   pnl_today_usd: number;
   pnl_today_pct: number;
   trades_today: number;
+  trades_total: number;
   open_positions_count: number;
   data_available: boolean;
 }
@@ -45,6 +46,7 @@ export function CapitalHero() {
   const todayPnl = data?.pnl_today_usd ?? 0;
   const todayPct = data?.pnl_today_pct ?? 0;
   const todayCount = data?.trades_today ?? 0;
+  const totalCount = data?.trades_total ?? 0;
   const openCount = data?.open_positions_count ?? 0;
 
   return (
@@ -102,7 +104,7 @@ export function CapitalHero() {
             <MetricTile
               label="Trades"
               value={String(todayCount)}
-              sub="today"
+              sub={`today · ${totalCount.toLocaleString()} total`}
             />
             <MetricTile
               label="Open"
