@@ -90,6 +90,7 @@
 5. **gcloud SSH segfaults** — intermittent `Exit code 139` on SSH. Commands still complete; ignore the segfault.
 6. **Credentials live in `.env.local`** — `DASHBOARD_USER=trevor`, `DASHBOARD_PASS=trevor2026`. The `/api/auth` route reads this file directly at `process.cwd()`. `.env` contains only `DISCORD_BOT_TOKEN` (separate concern).
 7. **Auth requires `username` AND `password`** fields in login POST body.
+8. **`npm run build` requires service restart** — Next.js production server caches the app-build manifest in memory at startup. Rebuilding while the service is running deletes the old fingerprinted CSS/JS files but leaves the running process serving HTML that still references them, returning 400/404 on every static asset and rendering pages as raw unstyled HTML. **Always run `sudo systemctl restart trevor-dashboard.service` after any rebuild.** Symptom: served HTML's `_next/static/css/<hash>.css` link does not match the file on disk in `.next/static/css/`. Diagnosed 2026-05-01.
 
 ### Fonts
 - **Body/Data**: IBM Plex Mono (`--font-mono`)
