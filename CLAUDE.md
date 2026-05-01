@@ -3137,3 +3137,283 @@ G1_COMPLETE: subtabs_shipped=3/5 sacred_rejection_test=PASS sacred_manifest_veri
 
 G2 — System Health sub-tab + Aggressive Mode toggle. Closes Wave G with the 2 deferred sub-tabs.
 
+## H1 — TREVOR Chat Polish (shipped 2026-05-01)
+
+Replaces the legacy `/chat` route page with a slide-up modal triggered by
+`ChatFAB` (B1) on every Hub page. Token-by-token Haiku streaming via
+`@anthropic-ai/sdk` 0.92 over Server-Sent Events. Shared daily Anthropic
+budget pool with F2 (Trade Journal). 6-of-6 TREVOR-aware suggested
+prompts on the empty state. Mobile-first 100dvh bottom-sheet, lg+
+right-rail panel @ 480px.
+
+### Phase 0 audit deviations from prompt (5 Ghost-approved)
+
+The H1 prompt was written against assumptions that didn't fully match
+the live schema/architecture. Phase 0 surfaced 5 mismatches; Ghost
+approved each before Phase 1.
+
+1. **ChatFAB path**: prompt said `src/components/chat-fab.tsx` OR
+   `src/components/nav/chat-fab.tsx` — both wrong. Real path is
+   `src/components/navigation/chat-fab.tsx` (B1).
+2. **Suggestion script schema** — `signals_log`, `closed_trades`,
+   `KILLSWITCH_ENABLED`, `AGGRESSIVE_MODE` keys/tables don't exist on
+   this instance. Rewrote `query_chat_suggestions.py` to use
+   `trade_insights` (no direction col, signal_type LONG/SHORT/HOLD,
+   confidence 0–1 multiplied by 100), `unified_outcomes` view (per C2
+   convention), `EMERGENCY_KILLSWITCH` key, and `AGGRESSIVE_THRESHOLD`
+   numeric comparison (< 40 surfaces the prompt). 6/6 cards resolve
+   live, no silent drops.
+3. **API key propagation** — `/home/trevor/trevor-dashboard/.env.local`
+   has no `ANTHROPIC_API_KEY`; the systemd unit only loads that file.
+   F2 reads via Python fallback. New `src/lib/anthropic-key.ts` mirrors
+   the F2 pattern Node-side: process.env first, else read
+   `/home/trevor/trevor/.env` once at module load and cache. No systemd
+   churn, no secret duplication.
+4. **A3 demolition state** — prompt said legacy chat was already
+   removed. It wasn't: `/chat` page + `/api/chat/route.ts` (broken;
+   chat_bridge.py / chat_ai.py don't exist) still mounted. Per Ghost
+   ruling: leave legacy untouched. H1 ships purely additive at
+   `/api/chat/{suggestions,budget,stream}`.
+5. **Tailwind v4 — no config file** — A4 ships with `@theme inline` in
+   `globals.css`. New animation tokens
+   (`--animate-slide-up-spring`, `--animate-slide-down-spring`,
+   `--animate-scrim-fade-in`) registered there with matching keyframes
+   appended to the keyframe section. No `tailwind.config.ts` to edit.
+
+### Architecture
+
+```
+src/components/navigation/chat-fab.tsx (UPDATED, ~40 lines)
+  └─ button → opens <ChatModal><ChatPanel/></ChatModal>
+
+src/components/chat/chat-modal.tsx (NEW, ~95 lines)
+  └─ Portal to body. role="dialog" aria-modal.
+     Mobile: 100dvh bottom sheet, slide-up-spring 480ms (cubic-bezier
+       0.17,0.84,0.44,1) on open, slide-down-spring 280ms on close.
+     lg+:  right-rail panel max-w-[480px], lg:border-l border-t-0.
+     Scrim: bg-black/70 backdrop-blur-sm, fades via opacity transition
+       (200ms) — pure transition avoids `[animation-direction:reverse]`
+       footgun in Tailwind v4.
+     Body scroll locked while open. ESC + scrim click + close button
+     all dismiss. Animates out 280ms before unmounting.
+
+src/components/chat/chat-panel.tsx (NEW, ~250 lines)
+  ├─ Header: Sparkles + "TREVOR Chat" + Pill(% used, green/amber/red)
+  ├─ Body: <ChatEmptyState/> when zero msgs, else messages list
+  ├─ Composer: textarea (max-h-32, min-h-44, rows=1) + HapticButton
+  │            (Stop while streaming, Send otherwise)
+  ├─ SSE consumer: reader → buf split on \n\n → events parsed → state
+  │   - event: session  → setSessionId
+  │   - event: token    → append to last assistant msg, keep pending
+  │   - event: done     → mark assistant !pending + refresh budget
+  │   - event: warn     → non-fatal, refresh budget anyway
+  │   - event: error    → set error pill, drop pending if empty
+  └─ AbortController on Stop button cancels mid-stream
+
+src/components/chat/chat-message.tsx (NEW, ~50 lines)
+  └─ User: justify-end, cyan accent border + bg-accent-cyan/10
+     Assistant: justify-start, border-subtle + bg-bg-elevated
+     Pending+empty: 3 staggered pulse dots
+     Pending+content: trailing cyan cursor block
+
+src/components/chat/chat-empty-state.tsx (NEW, ~115 lines)
+  └─ Sparkles avatar + heading + 6 suggestion cards from
+     /api/chat/suggestions. Skeleton during fetch. KILLSWITCH ON pill
+     when killswitch_enabled. AGGR <N> pill when aggressive_threshold
+     < 40. Card click → onPick(label) → ChatPanel.send(label).
+
+src/lib/anthropic-key.ts (NEW, ~55 lines)
+  └─ getAnthropicKey() — process.env first, else parse
+     /home/trevor/trevor/.env at module load, cache.
+     Strips matched single OR double quotes (mirrors F2's Python
+     `env_anthropic_key()`). Test hook clears cache.
+
+src/app/api/chat/{suggestions,budget,stream}/route.ts (NEW)
+  ├─ /suggestions — GET; spawns query_chat_suggestions.py (READ-ONLY)
+  ├─ /budget      — GET; spawns query_chat_budget.py (RW: daily reset)
+  └─ /stream      — POST; SSE.
+       1. Read body { session_id?, user_message }
+       2. readBudget(); if blocked → SSE event:error{error:"budget"}
+       3. getAnthropicKey(); if missing → 503
+       4. persistUserMessage() → resolve session_id
+       5. emit event:session{session_id}
+       6. client.messages.stream({...}); for await content_block_delta
+          text_delta → emit event:token{text}
+       7. await resp.finalMessage() → tokens_in/out
+       8. persistAssistantMessage() bumps shared budget atomically
+       9. emit event:done{tokens_in,tokens_out}; close
+
+query_chat_suggestions.py (NEW, ~165 lines, READ-ONLY)
+  └─ 6 cards from REAL schema: open_positions (active+auto live),
+     last_signal (trade_insights), edge_check OR killswitch_engaged
+     (EMERGENCY_KILLSWITCH), aggressive_check (THRESHOLD<40),
+     calibration (unified_outcomes ≥30), recent_journal (trade_journal).
+
+query_chat_budget.py (NEW, ~95 lines, RW for daily reset)
+  └─ Returns { used_tokens, budget_tokens, available_tokens, pct_used,
+     blocked, reset_at_local_midnight }.
+     Resets ANTHROPIC_API_DAILY_TOKENS_USED to 0 + stamps RESET_DATE
+     when last reset was yesterday — same semantics as F2's
+     `reset_daily_budget_if_needed()`.
+     blocked = available_tokens < 1500 (one round-trip headroom).
+
+write_chat_log.py (NEW, ~155 lines)
+  ├─ user_message <session_id> <content>
+  │   - session_id == 0 → INSERT chat_sessions; return new id
+  │   - else → UPDATE last_active_at; INSERT chat_messages role='user'
+  └─ assistant_message <session_id> <content> <t_in> <t_out> <model>
+      - INSERT chat_messages role='assistant'
+      - UPDATE chat_sessions totals + last_active_at
+      - bump_budget(t_in + t_out) → ANTHROPIC_API_DAILY_TOKENS_USED
+      - daily reset performed on every write
+```
+
+### DB additions (additive only — no existing tables touched)
+
+```sql
+CREATE TABLE chat_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_active_at TEXT NOT NULL DEFAULT (datetime('now')),
+  title TEXT,
+  total_tokens_in INTEGER NOT NULL DEFAULT 0,
+  total_tokens_out INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+  content TEXT NOT NULL,
+  tokens_in INTEGER, tokens_out INTEGER, model TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id)
+);
+
+CREATE INDEX idx_chat_messages_session
+  ON chat_messages(session_id, created_at);
+```
+
+No new `auto_config` keys — the 4 F2 budget keys
+(`ANTHROPIC_API_DAILY_BUDGET_TOKENS`, `ANTHROPIC_API_DAILY_TOKENS_USED`,
+`ANTHROPIC_API_DAILY_RESET_DATE`, plus
+`JOURNAL_AUTO_GENERATE_ENABLED`) are reused as-is. Chat usage
+subtracts from the same 500_000 token/day pool (~$0.25/day at Haiku
+rates).
+
+### Cost math
+
+Smoke-test round-trip: 209 input + 4 output ≈ 213 tokens for a 2-token
+reply. Typical chat turn: ~700 input + ~150 output ≈ 850 tokens. Worst
+case at 800 max-output: ~700 + 800 ≈ 1500 tokens. **Per-turn ceiling ~
+$0.0006**. Even 100 turns/day stays under $0.06 — well within the
+$0.25 budget, sharing pool with F2's per-trade narratives (~$0.0018
+each).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, 4 chat routes registered as `ƒ` Dynamic |
+| Anthropic SDK install | `@anthropic-ai/sdk` ^0.92.0 added to package.json + lockfile (3 packages); pre-existing next/postcss/lodash audit findings unchanged |
+| `/api/chat/suggestions` | HTTP 200, 6/6 cards (open_positions, last_signal BTC LONG @ 56, edge_check, aggressive_check 35, calibration n=867, recent_journal auto#100083) |
+| `/api/chat/budget` | HTTP 200, post-reset state used=0/cap=500000/blocked=false |
+| Real Haiku stream POST | exit=0, SSE: 1 session + 1 token + 1 done event, model said exactly "ok" as instructed |
+| Persistence | new chat_sessions row id=2 with totals 209/4; user msg id=2 + assistant msg id=3 in chat_messages |
+| Budget delta on real call | pre=0 → post=213 (=209+4 exact) |
+| Budget-block path (used=499999) | SSE event:error{"error":"budget","available_tokens":1}; NO new chat_sessions row, NO new chat_messages row; restored cleanly |
+| All 6 zone routes (auth) | 200/200/200/200/200/200 (`/dashboard`, `/scalp`, `/autotrader`, `/intel`, `/memory`, `/chat`); `/` 307 → `/dashboard` |
+| ChatFAB renders on /dashboard | `aria-label="Open TREVOR Chat"` present in SSR HTML |
+| Sacred manifest 12/12 | byte-identical (`BEHAVIOR_RULES.md` pre-existing drift unchanged; per `feedback_sacred_bypass`) |
+| Open positions baseline | active=0 / auto live=1 — matches Phase 0 baseline |
+| 6/6 recurring-bug canaries | CLEAN (C1 portfolio_manager.py allowlisted; C6 discord_bot.py:9272 allowlisted; both per established baseline) |
+| `signal_filter_rules` | UNCHANGED |
+| `trevor.service` | UNTOUCHED — PID 2879412, ActiveEnterTimestamp 2026-04-30 21:15:41 UTC unchanged |
+| `trevor-dashboard.service` | restart healthy, MainPID 2927614, "TREVOR Hub ready" within 4s |
+
+### Browser smoke disclosure
+
+Per CLAUDE.md guidance — Claude Code cannot operate a real browser. SSR
+HTML markers + every endpoint + the real Haiku stream were verified via
+authenticated curl. Visual UX (slide-up-spring overshoot animation,
+mobile drag handle, scrim opacity transition timing, abort-mid-stream
+cleanup, mobile breakpoints 375 / 390 / 430 / 768 / 1024 / 1440)
+**was NOT exercised in a browser**. Real-device smoke is the honest
+validation step Ghost performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `src/components/chat/{chat-modal,chat-panel,chat-message,chat-empty-state}.tsx`
+- New: `src/lib/anthropic-key.ts`
+- New: `src/app/api/chat/{suggestions,budget,stream}/route.ts`
+- New: `query_chat_suggestions.py`, `query_chat_budget.py`, `write_chat_log.py`
+- Modified: `src/components/navigation/chat-fab.tsx` (B1's router.push → ChatModal)
+- Modified: `src/app/globals.css` (3 new `--animate-*` tokens + 3 keyframes)
+- Modified: `package.json` + `package-lock.json` (Anthropic SDK 0.92)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 3 Chat zone rules)
+
+**Untouched (per Ghost's Phase 0 ruling on dirty trees, NOT staged):**
+All pre-existing trevor/ dirty paths from prior waves (training/cache
+parquet deletes, brain/HEARTBEAT/MEMORY/session-state churn, embeds.py
++ observability.py mods, models/hmm_regime_v2.pkl, observatory_v4/,
+docs/AUTOTRADER_EDGE_AUDIT_REPORT.md, docs/HMM_FARTCOIN_COLLAPSE_AUDIT.md,
+sacred_backups/.../env.original).
+trevor-dashboard `.env`, `.env.local`, `tsconfig.tsbuildinfo`,
+`.env.local.bak.pre_lockdown_20260424`.
+
+### What H1 does NOT do
+
+- Does NOT delete legacy `/chat` route or `/api/chat/route.ts` (broken
+  chat_bridge.py / chat_ai.py path). Ghost ruling 3: leave additive.
+  I1 may prune.
+- Does NOT call Sonnet or Opus. Haiku 4.5 only (`claude-haiku-4-5-20251001`).
+- Does NOT give the chat model tool access. Operator messages reach
+  the model verbatim; suggestion labels are NOT sent as tool outputs.
+- Does NOT write to ChromaDB.
+- Does NOT modify F2's journal flow.
+- Does NOT introduce a separate budget pool — single shared
+  ANTHROPIC_API_DAILY_TOKENS_USED ledger.
+- Does NOT change the killswitch.
+- Does NOT auto-close positions. System prompt explicitly forbids
+  recommending it.
+- Does NOT bypass the $50 cap or per-ticker thresholds. System prompt
+  explicitly forbids recommending it.
+- Does NOT change scoring weights, calibration, or thresholds.
+- Does NOT touch backend, Discord, or sacred Python files.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service`
+  restarted.
+- Does NOT surface chat history yet — sessions persist but no history
+  list UI in H1 (deferred to a future polish wave).
+
+### Rollback
+
+```bash
+# Soft (in-place delete of new chat surface — keep legacy /chat as fallback)
+# Restore B1's original chat-fab.tsx (router.push("/chat")):
+cd /home/trevor/trevor-dashboard && git revert <h1-hub-commit>
+sudo systemctl restart trevor-dashboard.service
+
+# Trevor repo doc revert
+git revert <h1-trevor-commit>
+
+# DB cleanup (only if you want to wipe chat history; tables additive
+# so harmless to leave):
+# sqlite3 trevor.db "DROP TABLE IF EXISTS chat_messages;
+#                    DROP TABLE IF EXISTS chat_sessions;"
+```
+
+### Sentinel
+
+```
+H1_COMPLETE: chat_modal=PASS suggestions_n=6/6 streaming_token_count=1 budget_block_test=PASS budget_restored_to_pre=YES chat_sessions_created=2 chat_messages_inserted=3 sacred_manifest_verified=YES build=PASS hub_restart=OK open_positions_unchanged=YES canaries=CLEAN dashboard_commit=<hash> trevor_commit=<hash> wave_h=CLOSED
+```
+
+Wave H closes. Next: Wave I (verify_deploy.sh + sister-infra hardening
++ post-redesign GCS snapshot + RECOVERY.md fixes) per the H1 prompt's
+§9 closer.
+
