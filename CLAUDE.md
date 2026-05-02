@@ -3859,3 +3859,128 @@ sudo systemctl restart trevor-dashboard.service
 # Restores subtab-less MANUAL zone (single composition page, no strip).
 # trevor.service untouched either way.
 ```
+
+## Killswitch + Aggressive Unlock + AutoTrader Toggle (2026-05-02)
+
+Three coordinated changes during a Ghost-authorized experimentation window.
+Two are pure DB flips (no code); one introduces a NEW Hub write surface
+under a Rule 32 carve-out codified in `BEHAVIOR_RULES.md` the same session.
+
+### What shipped
+
+1. **Emergency killswitch ON** — flipped `auto_config.EMERGENCY_KILLSWITCH`
+   to `'true'` plus the 3 audit metadata rows
+   (`_LAST_TOGGLE`/`_LAST_AUTHOR='cc_session'`/`_LAST_REASON`). Bot's
+   cached `auto_trader/killswitch.is_killswitch_on()` returns True after
+   the 5s TTL. Hub `KillswitchPill` mirror reflects state via
+   `/api/killswitch`. **No service restart.** No position closed,
+   no order canceled (Rule 1).
+2. **Aggressive toggle unlocked** —
+   `auto_config.HUB_AGGRESSIVE_TOGGLE_ENABLED='true'`. Existing G2
+   2-tap `<AggressiveModeSection>` UI becomes clickable; `/api/memory/aggressive`
+   returns `toggle_enabled: true`. Zero code changes.
+3. **AutoTrader Pause / Resume toggle (Rule 32 carve-out)** — single new
+   Hub write surface for `auto_config.AUTO_TRADER_ENABLED`. Mirrors the
+   G2 aggressive pattern exactly:
+   - `query_autotrader_enabled.py` (READ-ONLY: state + gate flag + last 5 audit rows)
+   - `set_autotrader_enabled.py` (gate-checked, idempotent, audit-row-on-change; exit codes 0/1/2/3)
+   - `/api/memory/autotrader-toggle` (GET + POST; exit 3 → HTTP 423)
+   - `<AutoTraderToggleCard>` rendered at the bottom of the AUTO `?tab=scalper` view
+   - Defense in depth: locked behind new
+     `auto_config.HUB_AUTOTRADER_TOGGLE_ENABLED` flag (must be flipped
+     to `'true'` per session)
+   - 2-tap BottomSheet confirmation. Pause OFF blocks NEW AT entries
+     only; manual `#scalp-signals` cards keep firing; open positions
+     stay monitored (Rule 1 + Rule 31).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `npm run build` | clean (`/autotrader` 5.78 → 7.75 kB, +1.97 kB for the toggle card) |
+| Bot reads after Phase 1 | `auto_trader.killswitch.is_killswitch_on()` returns True after 5s cache TTL |
+| Hub mirror | `/api/killswitch` returns `enabled:true` with audit metadata |
+| Aggressive unlock | `/api/memory/aggressive` returns `toggle_enabled:true` |
+| Toggle helpers smoke | gate-locked exit 3 → unlock → bad-value exit 1 → idempotent no-op exit 0 → real flip true→false→true; 4 audit rows; bot's `cfg_bool('AUTO_TRADER_ENABLED')` reflects each flip |
+| `/api/memory/autotrader-toggle` GET | 200 with full state |
+| POST bad value | 400 |
+| POST gate-locked | 423 |
+| POST true→false→true round-trip | 200 / 200, audit ids #3 + #4 written |
+| Bundle inspection | `/_next/static/chunks/app/autotrader/page-*.js` contains `AutoTrader Control`, `Resume Trading`, `Pause Trading`, `HUB_AUTOTRADER_TOGGLE_ENABLED`, `Confirm Resume`, `Confirm Pause`, `autotrader_state_audit`, etc. |
+| Sacred files (9/9 Python+brain .md) | byte-identical via `md5sum -c /tmp/sacred_baseline.md5` |
+| `signal_filter_rules` | UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0 reseed per Rule 30) |
+| Open positions baseline | 0 active / 0 auto live (matches Phase 0 baseline) |
+| `trevor.service` | UNTOUCHED — ActiveEnterTimestamp `Sat 2026-05-02 01:44:44 UTC` preserved through Phases 1, 2, 3B |
+| `trevor-dashboard.service` | restart healthy (1 restart for Phase 3B build) |
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, every endpoint, the
+gate-lock 423 path, the round-trip toggle, the bot-side `cfg_bool` read,
+and the bundled component code were all verified via authenticated curl
++ direct Python invocation. Visual UX (BottomSheet slide-up animation,
+2-tap haptic feedback on the Pause/Resume buttons, accent color tone
+swaps when state flips, mobile breakpoint behavior at 375 / 390 / 430)
+was NOT exercised in a browser; real-device smoke is the honest
+validation step Ghost performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_autotrader_enabled.py`, `set_autotrader_enabled.py`
+- New: `src/app/api/memory/autotrader-toggle/route.ts`
+- New: `src/components/autotrader-v2/autotrader-toggle-card.tsx`
+- Modified: `src/components/autotrader-v2/scalper-view.tsx` (import + render at bottom of SCALPER sub-tab)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` Rule 32 — appended Rule 32 carve-out (2026-05-02, Ghost-approved): a single, narrow exemption for an `AUTO_TRADER_ENABLED`-only Hub toggle. NOT a project-wide pause; killswitch remains the only mechanism that blocks both manual signals AND AT entries.
+
+### What this does NOT do
+
+- Does NOT add a Hub button that writes the killswitch — `KillswitchPill` stays read-only mirror; `!killswitch` Discord remains the single project-wide pause.
+- Does NOT close any open position, cancel any HL order, or restart any service (Rule 1 + Rule 31 still binding under both killswitch and AT-pause).
+- Does NOT add a Discord `!autotrader on/off` command (carve-out allows it as future work).
+- Does NOT modify `auto_trader/manager.py`, `config.py`, or any other bot file — the bot's existing `cfg_bool('AUTO_TRADER_ENABLED')` check at `auto_trader/config.py:133` is the single read site, unchanged.
+- Does NOT modify `signal_filter_rules`.
+- Does NOT touch any sacred Python file.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (once after Phase 3B build).
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — toggle never closes a position. Rule 14 (sacred
+files) — 9/9 byte-identical (BEHAVIOR_RULES.md modified per spec via
+`--no-verify` per memory `feedback_sacred_bypass`). Rule 15 (additive DB)
+— new `autotrader_state_audit` table created lazily on first write +
+new `auto_config` rows via `INSERT OR REPLACE`; no DROP, no ALTER, no
+DELETE. Rule 16 (surgical) — only listed files staged. Rule 22 (no
+Discord channels touched). Rule 26 (no shell interpolation) — every
+Python invocation goes through `runPython` (argv) or direct `spawnSync`
+with argv (mirrors `/api/memory/aggressive`). Rule 30 (no
+ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 31
+(auto trader never self-pauses) — toggle is Ghost-driven (or
+future-Discord-driven), never auto-fires. Rule 32 (codified Ghost-
+approved carve-out THIS SESSION, applies ONLY to `AUTO_TRADER_ENABLED`;
+killswitch remains the only project-wide pause). No new npm
+dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores Toggle locked state)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='HUB_AUTOTRADER_TOGGLE_ENABLED';"
+# UI gate immediately locks the buttons; existing card stays visible.
+
+# Disengage killswitch (when ready)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='EMERGENCY_KILLSWITCH';"
+# Cache TTL 5s; bot resumes accepting signals on next loop.
+
+# Full code revert
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Removes the toggle card + 4 backend files; AT scalper view drops back to
+# 6-card composition. trevor.service untouched either way.
+```

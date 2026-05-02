@@ -6,6 +6,7 @@ import { ActivePositionCard } from "./active-position-card";
 import { RecentTradesCard } from "./recent-trades-card";
 import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
+import { AutoTraderToggleCard } from "./autotrader-toggle-card";
 import { DegenSection } from "./degen-section";
 
 interface ScalperViewProps {
@@ -29,6 +30,7 @@ export function ScalperViewV2({ subtab = "scalper" }: ScalperViewProps) {
       <RecentTradesCard />
       <ConfigCard />
       <WatchlistGrid />
+      <AutoTraderToggleCard />
     </div>
   );
 }
