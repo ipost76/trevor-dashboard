@@ -76,6 +76,11 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Manual",
     icon: Activity,
     accent: "violet",
+    subTabs: [
+      { key: "scalp", label: "Scalp" },
+      { key: "stock", label: "Stock" },
+    ],
+    defaultSubTab: "scalp",
   },
   {
     id: "intel",

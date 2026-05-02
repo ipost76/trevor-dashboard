@@ -6,6 +6,10 @@ import { ScalpZoneView } from "@/components/scalp/scalp-zone-view";
 
 export const dynamic = "force-dynamic";
 
+interface ManualPageProps {
+  searchParams: Promise<{ tab?: string }>;
+}
+
 const isHubRedesignManualOn = cache(async (): Promise<boolean> => {
   try {
     const c = await cookies();
@@ -54,7 +58,9 @@ function ManualDisabled() {
   );
 }
 
-export default async function ManualPage() {
+export default async function ManualPage({ searchParams }: ManualPageProps) {
   const useNew = await isHubRedesignManualOn();
-  return useNew ? <ScalpZoneView /> : <ManualDisabled />;
+  if (!useNew) return <ManualDisabled />;
+  const { tab } = await searchParams;
+  return <ScalpZoneView subtab={tab ?? "scalp"} />;
 }

@@ -3786,3 +3786,76 @@ sudo systemctl restart trevor-dashboard.service
 # Restores CollapsibleSection wrapper + per-section page-padding wrappers.
 # trevor.service untouched either way.
 ```
+
+## Hub: Manual Page SCALP / STOCK Sub-tabs (2026-05-02)
+
+Re-added a sub-tab strip to the MANUAL zone using the canonical
+`<ZoneSubTabs />` pattern (NOT inline useState) so the strip is
+pixel-identical to the AUTO page's SCALPER / DEGEN strip — same TabBar
+primitive, same sticky-top chrome, same URL-sync via `?tab=`.
+
+### Changes
+
+- `src/lib/navigation.ts` — added `subTabs: [{key:"scalp"},{key:"stock"}]` +
+  `defaultSubTab: "scalp"` to MANUAL zone. `<ZoneSubTabs />` automatically
+  renders the strip; auto-hide branch (`!zone.subTabs`) no longer triggers
+  on `/manual`.
+- `src/app/manual/page.tsx` — accepts `searchParams: Promise<{tab?:string}>`,
+  passes `subtab` prop to `<ScalpZoneView>` (mirrors AUTO page pattern).
+- `src/components/scalp/scalp-zone-view.tsx` — accepts `subtab?` prop;
+  switches to `<StockSection />` on `subtab === "stock"`, else current
+  scalp composition. Marked `"use client"`.
+- New `src/components/scalp/stock-section.tsx` — magenta header card
+  ("STOCK TRADING · MANUAL · COMING SOON") + one placeholder content card.
+
+### Verification
+
+- `tsc --noEmit` clean; `npm run build` clean (`/manual` 5.96 → 6.2 kB)
+- All 9 routes 200: `/manual`, `/manual?tab=scalp`, `/manual?tab=stock`,
+  `/autotrader`, `/autotrader?tab=degen`, `/dashboard`, `/intel`,
+  `/memory`; `/scalp` 308 → `/manual`
+- SSR markers: `/manual` default → SCALP TRADING + LIVE BOARD + RECENT
+  SIGNALS + SIGNAL QUALITY + CALIBRATION + RESET CONTROLS; `/manual?tab=stock`
+  → STOCK TRADING + COMING SOON + "Stock trading section" + "coming soon"
+- Sub-tab strip markup byte-identical to `/autotrader` (same `aria-current`
+  + `>Scalp< >Stock<` button labels mirror `>Scalper< >Degen<`)
+- 13/13 recurring-bug canaries PASS post-deploy
+- 0 errors/warnings in `journalctl -u trevor-dashboard.service` since restart
+- `trevor.service` UNTOUCHED — ActiveEnterTimestamp `Sat 2026-05-02 01:44:44 UTC`
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, route status codes,
+build output, sub-tab strip parity vs AUTO were verified via authenticated
+curl + tsc + npm. Visual UX (active-tab underline glow, click-to-switch
+animation, mobile long-press BottomSheet on the MANUAL nav icon now that
+sub-tabs exist) was NOT exercised in a browser; real-device smoke is the
+honest validation step Ghost performs after merge.
+
+### Files
+
+- Modified: `src/lib/navigation.ts`
+- Modified: `src/app/manual/page.tsx`
+- Modified: `src/components/scalp/scalp-zone-view.tsx`
+- New: `src/components/scalp/stock-section.tsx`
+- Modified: `CLAUDE.md` (this section)
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restructure. Rule 14 (sacred files)
+— UNTOUCHED (zero Python/sacred .md edits). Rule 15 (additive DB) — N/A.
+Rule 16 (surgical) — only the 4 listed files staged. Rule 22 (no Discord
+channels). Rule 30 (no ticker/direction blocks) — `signal_filter_rules`
+UNCHANGED. Rule 32 (KILLSWITCH-only project-wide pause; UI Stop banned)
+— ENFORCED, no kill affordance added. No new npm dependencies. JetBrains
+Mono only. Cyberpunk palette only via A4 tokens. `trevor.service`
+UNTOUCHED — only `trevor-dashboard.service` restarted.
+
+### Rollback
+
+```bash
+git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores subtab-less MANUAL zone (single composition page, no strip).
+# trevor.service untouched either way.
+```
