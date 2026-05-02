@@ -3690,3 +3690,99 @@ sudo systemctl restart trevor-dashboard.service
 # Restores /scalp route + 4 sub-tabs + ScalpZoneView switch + zone label.
 # trevor.service untouched either way.
 ```
+
+
+## Hub: Manual Page Card Restyle (2026-05-02)
+
+Restyled the Scalp Trading section on `/manual` to match the Auto page's
+Scalper card pattern. The previous CollapsibleSection chevron wrapper is
+gone; `/manual` is now a stack of independent `<Card>`s mirroring
+`ScalperViewV2`'s structure: system header card on top, content cards
+below, each as its own bordered card with consistent spacing.
+
+### Changes
+
+- **New** `src/components/scalp/scalp-header.tsx` — system header card.
+  `<Card padding="md" glow="magenta">` (zone accent: violet → magenta-glow
+  per `accentGlowClass()`) with `Activity` icon (zone identity), "SCALP
+  TRADING" h3 + "Manual Signals · 5 tickers" subtitle, `<LivePulse
+  tone="cyan" label="LIVE">`, `<KillswitchPill />` mirror. Static — no API
+  fetch (display + manual-entry zone has no operational state to track).
+- **Stripped outer page-padding wrappers** from
+  `live-board-section.tsx`, `recent-signals-section.tsx`,
+  `quality-section.tsx`, `calibration-section.tsx`. Each section now
+  emits a bare `<Card>` (or fragment for sections with sibling cards like
+  Calibration's `<ResetControlsCard />`). Behavior, data fetching, SSE
+  polling, ENTER button flow, reset confirmation modal — all UNCHANGED.
+- **`scalp-zone-view.tsx` rewritten** to mirror `ScalperViewV2`: outer
+  `<div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">`
+  containing `<ScalpHeader />` + 4 section cards stacked. No
+  CollapsibleSection wrapper.
+
+### Verification
+
+- `npm run build` clean — `/manual` 5.96 kB / 119 kB First Load
+- HTTP 200 on `/manual`; SSR markers present: SCALP TRADING ×1, Manual
+  Signals ×1, 5 tickers ×1, LIVE BOARD ×1, RECENT SIGNALS ×1, SIGNAL
+  QUALITY ×1, CALIBRATION ×1, RESET CONTROLS ×1, shadow-glow-magenta ×1.
+- `aria-expanded` count = 0 (CollapsibleSection no longer in use here).
+- Legacy redirects intact: `/scalp` 308 → `/manual`, `/trading` 308 →
+  `/manual`. All other zones (`/dashboard`, `/autotrader`, `/intel`,
+  `/memory`, `/chat`) HTTP 200.
+- Live Board API still returns ticker data with real conf/regime fields
+  (`/api/live-board` 200, BTC SHORT/32.45/RANGING in payload).
+- Killswitch API returns full state.
+- Sacred files (9/9) UNCHANGED — md5 baseline matches start of session.
+- `trevor.service` UNTOUCHED — ActiveEnterTimestamp `Sat 2026-05-02
+  01:44:44 UTC` unchanged across the work.
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, route status codes,
+build output, and component composition were verified via authenticated
+curl + npm. Visual UX (magenta border-glow rendering, header alignment
+on mobile vs lg+, gap between stacked cards on real devices, side-by-side
+comparison vs Scalper section pixel-for-pixel) was NOT exercised in a
+browser; real-device smoke is the honest validation step Ghost performs
+after merge.
+
+### Files
+
+- New: `src/components/scalp/scalp-header.tsx`
+- Modified: `src/components/scalp/scalp-zone-view.tsx`
+- Modified: `src/components/scalp/live-board-section.tsx`
+- Modified: `src/components/scalp/recent-signals-section.tsx`
+- Modified: `src/components/scalp/quality-section.tsx`
+- Modified: `src/components/scalp/calibration-section.tsx`
+- Modified: `CLAUDE.md` (this section)
+
+### What this does NOT do
+
+- Does NOT touch Auto page, Dashboard, Intel, or Memory zones.
+- Does NOT modify any API route, query helper, or Python file.
+- Does NOT change SSE, polling cadence, ENTER flow, or reset endpoints.
+- Does NOT delete `src/components/ui/collapsible-section.tsx` (kept as
+  reusable primitive even though unused on `/manual` now).
+- Does NOT modify `signal_filter_rules`, `auto_config`, or any DB row.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service`
+  restarted.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restyle. Rule 14 (sacred files) —
+9/9 byte-identical. Rule 15 (additive DB) — N/A. Rule 16 (surgical) —
+only listed files staged; section internals untouched, only their outer
+padding-wrapper divs removed. Rule 22 (no Discord channels). Rule 30
+(no ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule
+32 (KILLSWITCH-only project-wide pause; UI Stop banned) — ENFORCED, no
+kill button on `/manual`. No new npm dependencies. JetBrains Mono only.
+Cyberpunk palette only via A4 tokens.
+
+### Rollback
+
+```bash
+git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores CollapsibleSection wrapper + per-section page-padding wrappers.
+# trevor.service untouched either way.
+```

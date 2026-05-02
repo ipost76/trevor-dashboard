@@ -67,8 +67,7 @@ export function QualitySection() {
   const populated = tiers.filter((t) => t.trade_count > 0);
 
   return (
-    <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
-      <Card padding="md">
+    <Card padding="md">
         <CardHeader>
           <CardTitle>
             <span className="flex items-center gap-2">
@@ -177,7 +176,6 @@ export function QualitySection() {
             })}
           </ul>
         )}
-      </Card>
-    </div>
+    </Card>
   );
 }

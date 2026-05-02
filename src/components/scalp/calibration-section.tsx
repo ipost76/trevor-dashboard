@@ -63,7 +63,7 @@ export function CalibrationSection() {
   const hasData = data?.data_available === true && buckets.length > 0;
 
   return (
-    <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
+    <>
       <Card padding="md" glow="cyan">
         <CardHeader>
           <CardTitle>
@@ -180,6 +180,6 @@ export function CalibrationSection() {
       </Card>
 
       <ResetControlsCard />
-    </div>
+    </>
   );
 }

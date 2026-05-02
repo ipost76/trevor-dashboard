@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { CollapsibleSection } from "@/components/ui";
+import { ScalpHeader } from "./scalp-header";
 import { LiveBoardSection } from "./live-board-section";
 import { RecentSignalsSection } from "./recent-signals-section";
 import { QualitySection } from "./quality-section";
@@ -9,27 +9,22 @@ import { CalibrationSection } from "./calibration-section";
 /**
  * MANUAL zone — single composition page.
  *
- * Houses the existing Live Board / Recent Signals / Quality / Calibration
- * sections (formerly four sub-tabs) inside one collapsible "SCALP TRADING"
- * section. Manual systems are systems that display information but never
- * trade autonomously. Future manual sections (e.g. DEGEN signals,
- * sentiment scanner) stack below as additional <CollapsibleSection>s.
+ * Mirrors the AUTO page's ScalperViewV2 stacked-Card pattern: outer
+ * page-padding wrapper + system header card + content cards stacked
+ * vertically. Manual systems display information but never trade
+ * autonomously. Future manual sections (DEGEN signals, sentiment scanner,
+ * etc.) drop in below CalibrationSection as additional <Card>s.
  *
- * Calibration section already mounts <ResetControlsCard /> internally —
- * preserved automatically.
+ * CalibrationSection mounts <ResetControlsCard /> internally — preserved.
  */
 export function ScalpZoneView() {
   return (
-    <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
-      <CollapsibleSection title="Scalp Trading" defaultOpen>
-        <div className="space-y-4 md:space-y-6">
-          <LiveBoardSection />
-          <RecentSignalsSection />
-          <QualitySection />
-          <CalibrationSection />
-        </div>
-      </CollapsibleSection>
-      {/* Future manual sections go here as additional <CollapsibleSection>s. */}
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      <ScalpHeader />
+      <LiveBoardSection />
+      <RecentSignalsSection />
+      <QualitySection />
+      <CalibrationSection />
     </div>
   );
 }

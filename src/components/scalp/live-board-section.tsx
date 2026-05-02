@@ -76,7 +76,7 @@ export function LiveBoardSection() {
   }, []);
 
   return (
-    <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
+    <>
       <Card padding="md" glow={killswitch.enabled ? "amber" : "cyan"}>
         <CardHeader>
           <CardTitle>
@@ -188,7 +188,7 @@ export function LiveBoardSection() {
       </Card>
 
       <EnterSheet ticker={enterTicker} onClose={() => setEnterTicker(null)} />
-    </div>
+    </>
   );
 }
 
