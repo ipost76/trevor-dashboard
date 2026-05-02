@@ -65,7 +65,7 @@ def main() -> None:
     used = 0
     budget = DEFAULT_BUDGET
     try:
-        conn = sqlite3.connect(DB, timeout=2.0)
+        conn = sqlite3.connect(DB, timeout=10)
     except sqlite3.OperationalError as exc:
         print(json.dumps({
             "used_tokens": 0,

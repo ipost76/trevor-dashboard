@@ -7,7 +7,7 @@ def main():
     db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
     trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
 
     if scope == "summary":
         result = {}

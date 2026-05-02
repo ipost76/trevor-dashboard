@@ -45,7 +45,7 @@ TIER_MAP = {
 
 
 def _connect_ro() -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0)
+    return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
 def _empty_payload(error: str | None = None) -> dict:

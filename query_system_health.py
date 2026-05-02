@@ -31,7 +31,7 @@ PING_TARGET = "1.1.1.1"
 
 
 def _conn_ro() -> sqlite3.Connection:
-    return sqlite3.connect(DB_RO_URI, uri=True)
+    return sqlite3.connect(DB_RO_URI, uri=True, timeout=10)
 
 
 def _tone_pct(pct: float) -> str:

@@ -250,7 +250,7 @@ def main():
         print(json.dumps({"error": "ANTHROPIC_API_KEY missing"}), file=sys.stderr)
         sys.exit(2)
 
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         reset_daily_budget_if_needed(conn)
 

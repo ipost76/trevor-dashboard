@@ -46,7 +46,7 @@ def empty(message: str) -> Dict[str, Any]:
 
 def main() -> None:
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             rows = conn.execute(
                 """
                 SELECT pnl_pct

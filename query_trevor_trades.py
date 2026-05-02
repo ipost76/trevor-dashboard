@@ -28,7 +28,7 @@ def fmt_hold(opened_at, closed_at):
 
 
 def main():
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
 
     # Active positions

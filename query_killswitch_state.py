@@ -31,7 +31,7 @@ DB_RO_URI = "file:/home/trevor/trevor/trevor.db?mode=ro"
 
 def main() -> None:
     try:
-        with sqlite3.connect(DB_RO_URI, uri=True) as conn:
+        with sqlite3.connect(DB_RO_URI, uri=True, timeout=10) as conn:
             rows = conn.execute(
                 "SELECT key, value FROM auto_config "
                 "WHERE key LIKE 'EMERGENCY_KILLSWITCH%'"

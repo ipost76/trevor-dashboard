@@ -356,7 +356,7 @@ def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "list"
     db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
 
     ensure_table(conn)

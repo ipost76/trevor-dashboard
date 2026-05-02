@@ -83,7 +83,7 @@ def compute_streak(rows: List[Tuple]) -> int:
 
 def fetch_auto(rng: str) -> Dict[str, Any]:
     since_sql = RANGE_TO_SQL.get(rng, RANGE_TO_SQL["lifetime"])
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""
@@ -145,7 +145,7 @@ def fetch_auto(rng: str) -> Dict[str, Any]:
 
 def fetch_scalp(rng: str) -> Dict[str, Any]:
     since_sql = RANGE_TO_SQL.get(rng, RANGE_TO_SQL["lifetime"])
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         # Scalp = manual trades; per audit Phase 6.5 these surface via
         # unified_outcomes.source='live' joined to trade_outcomes.

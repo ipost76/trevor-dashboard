@@ -13,7 +13,7 @@ def main():
     scope = sys.argv[1] if len(sys.argv) > 1 else "get"
 
     if scope == "get":
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
             row = conn.execute("SELECT value FROM trevor_config WHERE key='trading_capital'").fetchone()
@@ -25,7 +25,7 @@ def main():
 
     elif scope == "set":
         value = float(sys.argv[2]) if len(sys.argv) > 2 else 50.0
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=10)
         conn.execute(
             "INSERT OR REPLACE INTO trevor_config (key, value, updated_at) VALUES ('trading_capital', ?, datetime('now'))",
             (str(value),),

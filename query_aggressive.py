@@ -34,7 +34,7 @@ DB_RO_URI = f"file:{DB_PATH}?mode=ro"
 
 
 def _conn_ro() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_RO_URI, uri=True)
+    conn = sqlite3.connect(DB_RO_URI, uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -81,7 +81,7 @@ def normalize_regime(value: Any) -> Optional[str]:
 
 
 def fetch_trades() -> List[Trade]:
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """

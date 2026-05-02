@@ -9,7 +9,7 @@ db_path = sys.argv[1] if len(sys.argv) > 1 else "/home/trevor/trevor/trevor.db"
 result = {}
 
 try:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
 
     # XP
     try:

@@ -41,7 +41,7 @@ def _emit(payload: dict, code: int = 0) -> None:
 
 
 def _conn_rw() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     return conn

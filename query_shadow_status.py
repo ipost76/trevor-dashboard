@@ -22,7 +22,7 @@ SHADOW_ROWS_REQUIRED = 200    # FUTURE_01 threshold
 def main():
     out: Dict[str, Any] = {"shadow": {}, "optuna_ab": {}}
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             conn.row_factory = sqlite3.Row
 
             # Shadow scoring rollup

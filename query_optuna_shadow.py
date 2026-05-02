@@ -23,7 +23,7 @@ DB_PATH = "/home/trevor/trevor/trevor.db"
 
 
 def _ro_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5.0)
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 

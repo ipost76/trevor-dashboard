@@ -181,7 +181,7 @@ def main():
         sys.exit(2)
 
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             base = fetch_trade(conn, trade_id)
             if not base:
                 # Soft error on stdout so the route delivers a clean JSON

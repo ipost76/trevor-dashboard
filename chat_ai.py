@@ -31,7 +31,7 @@ client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
 def _query_trevor(sql, params=()):
     try:
-        conn = sqlite3.connect(f"file:{TREVOR_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{TREVOR_DB}?mode=ro", uri=True, timeout=10)
         cur = conn.execute(sql, params)
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description] if cur.description else []
@@ -45,7 +45,7 @@ def _query_autotrader(sql, params=()):
     try:
         if not os.path.exists(AUTOTRADER_DB):
             return [{"error": "AutoTrader DB not found"}]
-        conn = sqlite3.connect(f"file:{AUTOTRADER_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{AUTOTRADER_DB}?mode=ro", uri=True, timeout=10)
         cur = conn.execute(sql, params)
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description] if cur.description else []

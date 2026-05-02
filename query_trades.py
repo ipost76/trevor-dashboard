@@ -7,7 +7,7 @@ def main():
     trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
     db_path = os.environ.get("TREVOR_DB_PATH", os.path.join(trevor_dir, "trevor.db"))
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
 
     if scope == "active":
@@ -138,7 +138,7 @@ def main():
             print(json.dumps({"error": "Missing trade id"}))
             return
         conn.close()
-        conn_rw = sqlite3.connect(db_path)
+        conn_rw = sqlite3.connect(db_path, timeout=10)
         try:
             conn_rw.execute(
                 "UPDATE trade_outcomes SET notes=?, training_status=? WHERE rowid=?",
@@ -187,7 +187,7 @@ def main():
         conn.close()
 
         # SQLite deletions (read-write)
-        conn_rw = sqlite3.connect(db_path)
+        conn_rw = sqlite3.connect(db_path, timeout=10)
         try:
             cur = conn_rw.execute("DELETE FROM active_trades WHERE trade_id=? AND status='closed'", (trade_id,))
             purged["active_trades"] = cur.rowcount
@@ -347,7 +347,7 @@ def main():
             print(json.dumps({"error": "No ids provided"}))
             return
         conn.close()
-        conn_rw = sqlite3.connect(db_path)
+        conn_rw = sqlite3.connect(db_path, timeout=10)
         try:
             placeholders = ",".join("?" for _ in ids)
             conn_rw.execute(

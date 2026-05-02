@@ -19,7 +19,7 @@ SACRED_NAMES = frozenset(("IDENTITY.md", "BRAIN.md", "SOUL.md", "AGENTS.md"))
 
 def is_edit_enabled() -> bool:
     try:
-        with sqlite3.connect(DB, timeout=2.0) as conn:
+        with sqlite3.connect(DB, timeout=10) as conn:
             row = conn.execute(
                 "SELECT value FROM auto_config WHERE key='HUB_BRAIN_EDIT_ENABLED'"
             ).fetchone()

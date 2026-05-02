@@ -38,7 +38,7 @@ def main() -> None:
         "data_available": False,
     }
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(*) AS total,

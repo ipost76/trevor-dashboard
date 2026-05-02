@@ -32,7 +32,7 @@ STARTING_CAPITAL_FALLBACK = 50.0
 
 
 def _connect_ro() -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0)
+    return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
 def _per_ticker_enabled() -> bool:

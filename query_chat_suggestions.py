@@ -57,7 +57,7 @@ def main() -> None:
     aggressive_threshold: Optional[int] = None
 
     try:
-        conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0)
+        conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
     except sqlite3.OperationalError as exc:
         print(json.dumps({"suggestions": [], "error": f"db open failed: {exc}"}))
         return

@@ -4143,3 +4143,72 @@ sudo systemctl restart trevor-dashboard.service
 cd /home/trevor/trevor && git revert <sibling-trevor-commit>
 sudo systemctl restart trevor.service
 ```
+
+## Hub-side busy_timeout sweep (2026-05-02 PM)
+
+Companion to the bot-side `P3: busy_timeout sweep + backup hardening` ship
+(see trevor `CLAUDE.md` for full root-cause writeup). Investigation
+triggered by 04:19-04:20 ET DB-lock storm: every Hub Python helper
+spawned by `runPython` / `runPythonInline` opened SQLite with the
+default `busy_timeout=0`, so any backup-window contention failed
+instantly with `SQLITE_BUSY`. Fix: bumped every `sqlite3.connect()` site
+in the dashboard helper layer to `timeout=10` (Python sqlite3's
+connect-arg sets busy_timeout in ms).
+
+### Scope
+
+**63 substitutions across 47 dashboard root `*.py` helpers** — every
+top-level `query_*.py`, `set_*.py`, `write_*.py`, `chat_ai.py`,
+`manage_*.py` file. Pattern is uniform: connections that previously had
+no timeout now get `, timeout=10` appended before the closing paren;
+connections that had `timeout=2.0`/`3.0`/`4.0`/`5.0` are bumped to
+`timeout=10`; the one site already at `timeout=10` (`query_quality.py:39`)
+was correctly left alone (idempotent script).
+
+### Mechanism
+
+A one-shot regex script (`/tmp/bump_busy_timeout.py`) walked the dashboard
+root, found every `sqlite3.connect(...)` call (flat args — none have
+nested parens), and either replaced an existing `timeout=N` value with
+`10` or appended `, timeout=10` if no timeout kwarg was present. Every
+substitution was printed `file:line  before -> after` for the audit trail
+(see trevor commit message for the full report).
+
+### Why no Hub restart needed
+
+The Hub's `src/lib/api-helpers.ts` `runPython` and `runPythonInline`
+spawn a fresh Python subprocess per request via `spawnSync(PYTHON_PATH,
+...)`. Python imports + connection objects are re-created in each child
+process, so the new `timeout=10` connect-arg takes effect on the very
+next API call — no `trevor-dashboard.service` restart needed. Verified:
+authenticated round-trip on `/api/status`, `/api/killswitch`,
+`/api/auto/state`, `/api/dashboard/edge`, `/api/memory/health`,
+`/api/intel/calibration` all returned HTTP 200 immediately after the
+edits, with no Hub restart between.
+
+### What this does NOT do
+
+- Does NOT change any TypeScript / React code in `src/`.
+- Does NOT modify any API route handler — only the Python helpers each
+  route's `runPython` call invokes.
+- Does NOT alter caching, polling cadence, or SSE behavior.
+- Does NOT change any sacred Python file in the trevor repo (the
+  sacred sweep happens in the trevor commit, separate from this Hub
+  commit, with `--no-verify` per `feedback_sacred_bypass`).
+- Does NOT modify `package.json` or any npm dependency.
+- Does NOT modify `trevor-dashboard.service` systemd unit.
+
+### Files
+
+47 files, all top-level `.py` in `/home/trevor/trevor-dashboard/`. See
+`git diff --stat` on the companion commit for the full enumeration.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+# No service restart needed — next API call spawns a fresh subprocess
+# that imports the reverted helpers. Pre-revert behavior (timeout=0
+# for most sites, mixed 2.0/3.0/4.0/5.0 elsewhere) restored on the
+# very next request.
+```

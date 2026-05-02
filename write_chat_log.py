@@ -101,7 +101,7 @@ def bump_budget(conn: sqlite3.Connection, delta: int) -> tuple[int, int]:
 
 
 def cmd_user_message(session_id: int, content: str) -> dict:
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         reset_daily_budget_if_needed(conn)
         sid = get_or_create_session(conn, session_id)
         cur = conn.execute(
@@ -115,7 +115,7 @@ def cmd_user_message(session_id: int, content: str) -> dict:
 
 def cmd_assistant_message(session_id: int, content: str,
                           tokens_in: int, tokens_out: int, model: str) -> dict:
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         reset_daily_budget_if_needed(conn)
         cur = conn.execute(
             "INSERT INTO chat_messages "

@@ -60,7 +60,7 @@ def aggregate(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def main():
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """

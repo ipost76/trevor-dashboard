@@ -19,7 +19,7 @@ DB = "/home/trevor/trevor/trevor.db"
 
 def main():
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             rows = conn.execute(
                 "SELECT key, value, updated_at FROM auto_config "
                 "WHERE key LIKE 'HUB_REDESIGN%' ORDER BY key"

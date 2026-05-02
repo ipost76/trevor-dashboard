@@ -53,7 +53,7 @@ def main() -> None:
         "message": None,
     }
     try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=4.0) as conn:
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
             buckets: List[Dict[str, Any]] = []
             for lo, hi, label in BUCKETS:
                 row = conn.execute(

@@ -8,7 +8,7 @@ def main():
     trevor_dir = os.environ.get("TREVOR_PROJECT_DIR", "/home/trevor/trevor")
 
     if scope == "xp":
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         result = {"currentXP": 0, "currentRank": "Unknown", "totalXP": 0, "history": [], "ranks": []}
 
@@ -127,7 +127,7 @@ def main():
         print(json.dumps(result))
 
     elif scope == "costs":
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         result = {"daily": [], "totalSpend": 0, "byModel": []}
 

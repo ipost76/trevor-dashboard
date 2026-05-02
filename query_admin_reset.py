@@ -27,7 +27,7 @@ def _now_unix():
 
 
 def current_state():
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         # Latest capital
@@ -65,7 +65,7 @@ def current_state():
 
 def reset_capital(new_capital):
     new_capital = float(new_capital)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
@@ -98,7 +98,7 @@ def reset_capital(new_capital):
 
 
 def reset_pnl_stats():
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         prev = conn.execute(
@@ -125,7 +125,7 @@ def reset_pnl_stats():
 
 
 def reset_xp():
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         # Read current lifetime XP for audit trail
@@ -152,7 +152,7 @@ def reset_xp():
 
 
 def reset_history():
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(

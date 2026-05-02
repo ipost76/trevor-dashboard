@@ -68,7 +68,7 @@ def hold_minutes(opened_at: str | None) -> int:
 
 
 def fetch_auto_open() -> List[Dict[str, Any]]:
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -100,7 +100,7 @@ def fetch_auto_open() -> List[Dict[str, Any]]:
 
 
 def fetch_scalp_open() -> List[Dict[str, Any]]:
-    with sqlite3.connect(DB, timeout=4.0) as conn:
+    with sqlite3.connect(DB, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """

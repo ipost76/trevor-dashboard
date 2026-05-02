@@ -22,7 +22,7 @@ MAX_BYTES = 256 * 1024
 
 def is_edit_enabled() -> bool:
     try:
-        with sqlite3.connect(DB, timeout=2.0) as conn:
+        with sqlite3.connect(DB, timeout=10) as conn:
             row = conn.execute(
                 "SELECT value FROM auto_config WHERE key='HUB_BRAIN_EDIT_ENABLED'"
             ).fetchone()
@@ -92,7 +92,7 @@ def main() -> None:
         tmp.write_text(new_content, encoding="utf-8")
         os.replace(tmp, p)
 
-        with sqlite3.connect(DB, timeout=4.0) as conn:
+        with sqlite3.connect(DB, timeout=10) as conn:
             ensure_audit_table(conn)
             cur = conn.execute(
                 "INSERT INTO brain_edit_audit "
