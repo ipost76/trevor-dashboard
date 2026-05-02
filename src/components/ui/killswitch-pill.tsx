@@ -11,12 +11,14 @@ interface KillswitchState {
 }
 
 /**
- * Read-only Hub mirror of EMERGENCY_KILLSWITCH state.
+ * Read-only Hub mirror of EMERGENCY_KILLSWITCH state in the topbar.
  * Polls /api/killswitch every 5s; renders nothing when killswitch is OFF.
  *
- * Design intent (A2 2026-04-28; A4 ui-migration 2026-04-29):
- *  - Toggle is Discord-only via `!killswitch on/off`. There is NO POST endpoint
- *    and no UI button. This component is purely informational.
+ * Design intent (A2 2026-04-28; A4 ui-migration 2026-04-29; Hub-Only
+ * Control Doctrine 2026-05-02):
+ *  - Toggle now lives at MEMORY → System Health (`<KillswitchControlCard>`)
+ *    which POSTs `/api/killswitch` (the SAME endpoint this pill polls).
+ *    This pill is purely informational — no buttons, no modals.
  *  - Fail-safe: 500/network error keeps last known state — never flickers off.
  *  - Built on the design-system <Pill tone="amber" pulse> primitive.
  */

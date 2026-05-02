@@ -9,7 +9,8 @@ import {
   Skeleton,
   EmptyState,
 } from "@/components/ui";
-import { Activity, ShieldOff, Cpu } from "lucide-react";
+import { Activity, Cpu } from "lucide-react";
+import { KillswitchControlCard } from "./killswitch-control-card";
 
 type Tone = "green" | "amber" | "red";
 
@@ -98,47 +99,11 @@ export function HealthSection() {
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
-      {/* Killswitch banner */}
-      <Card
-        padding="md"
-        glow={data?.killswitch_enabled ? "red" : "none"}
-        className={data?.killswitch_enabled ? "border-accent-red/60" : undefined}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <ShieldOff
-              size={20}
-              className={
-                data?.killswitch_enabled
-                  ? "text-accent-red"
-                  : "text-fg-muted"
-              }
-            />
-            <div>
-              <div className="text-caption uppercase tracking-wider text-fg-muted">
-                Emergency Killswitch
-              </div>
-              <div
-                className={
-                  "text-h3 font-semibold " +
-                  (data?.killswitch_enabled
-                    ? "text-accent-red"
-                    : "text-fg-primary")
-                }
-              >
-                {data?.killswitch_enabled ? "ENGAGED" : "Off"}
-              </div>
-            </div>
-          </div>
-          <Pill
-            tone={data?.killswitch_enabled ? "red" : "neutral"}
-            size="sm"
-            pulse={data?.killswitch_enabled}
-          >
-            EMERGENCY_KILLSWITCH
-          </Pill>
-        </div>
-      </Card>
+      {/* Killswitch — interactive write toggle (Hub-Only Control Doctrine,
+          Rule 32 rewritten 2026-05-02). Replaces the former read-only
+          banner; <KillswitchPill> in the topbar remains the read-only
+          mirror that polls the same /api/killswitch endpoint. */}
+      <KillswitchControlCard />
 
       {/* Services grid */}
       <Card padding="md">

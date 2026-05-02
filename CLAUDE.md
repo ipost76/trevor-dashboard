@@ -3984,3 +3984,162 @@ sudo systemctl restart trevor-dashboard.service
 # Removes the toggle card + 4 backend files; AT scalper view drops back to
 # 6-card composition. trevor.service untouched either way.
 ```
+
+## Hub-Only Control Doctrine (2026-05-02)
+
+Completed the migration of all bot-control surfaces to the Hub. After this
+ship, **`!qa status` is the only Discord command in the entire system**.
+Killswitch is now a Hub-side write toggle on `MEMORY` → System Health;
+the read-only banner that previously sat at the top of that page has been
+replaced by an interactive 2-tap card. The AutoTrader Pause/Resume toggle
+shipped earlier today (commit `d7e0fe4`) is reaffirmed under the new
+doctrine. Aggressive Mode toggle (G2) unchanged. Topbar `KillswitchPill`
+still mirrors state via the same `/api/killswitch` GET — no UI change to
+the pill, just a docstring refresh.
+
+### What shipped
+
+1. **Hub killswitch write surface** — replaces the now-removed
+   `!killswitch` Discord command:
+   - `set_killswitch.py` — thin wrapper that calls
+     `auto_trader.killswitch.set_killswitch(enabled, author, reason)` so
+     the in-process bot cache busts AND `[KILLSWITCH-ON]`/`[KILLSWITCH-OFF]`
+     WARNING sentinels still fire (Observatory continues to see toggles —
+     though sentinel emission moves from trevor.service's journal to the
+     Hub subprocess; if the Observatory monitor needs visibility into
+     Hub-initiated toggles, a separate sentinel-mirror is a follow-up).
+   - `/api/killswitch` route — added POST handler, refactored GET from
+     `execSync` to `runPython` for Rule 26 stylistic alignment, busts the
+     5s GET cache after a successful POST so the topbar pill + System
+     Health card see fresh state immediately.
+   - `<KillswitchControlCard>` (new component) — replaces the read-only
+     banner in `health-section.tsx` with an interactive 2-tap BottomSheet
+     toggle. Mirrors the G2 aggressive pattern (no flag gate — the
+     killswitch toggle is always-available per the new doctrine).
+   - `KillswitchPill` topbar mirror (both `src/components/KillswitchPill.tsx`
+     legacy alias and `src/components/ui/killswitch-pill.tsx`) — unchanged
+     behavior, docstring updated to drop the obsolete "Discord-only"
+     claim.
+2. **AutoTrader Pause/Resume** (already shipped commit `d7e0fe4`) —
+   reaffirmed under the new doctrine. The `HUB_AUTOTRADER_TOGGLE_ENABLED`
+   gate flag stays as defense-in-depth (matches the aggressive pattern).
+3. **Bot side** (sibling trevor commit) — `!killswitch` / `!ks` handler
+   block + the dead `_killswitch_count_open` helper deleted from
+   `discord_bot.py`. `/scalp` ephemeral text updated: "Use `!killswitch
+   off`" → "Release via Hub → MEMORY → System Health". `auto_trader/killswitch.py`
+   module unchanged — `is_killswitch_on()` (Manager Gate 0 + signal POST
+   gates) still enforced, `set_killswitch()` still emits WARN sentinel +
+   busts cache. BEHAVIOR_RULES.md Rule 32 rewritten as the **Hub-Only
+   Control Doctrine** with a Discord allowlist sub-section
+   (`!qa status` only).
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `npm run build` | clean (`/memory` 8.07 → 8.89 kB, +0.82 kB for the toggle card) |
+| `discord_bot.py` `python3 -m py_compile` | OK |
+| Backend module post-Phase-2 | imports + reads + sets all work |
+| Hub round-trip POST `{action:"on"}` → bot's `is_killswitch_on()` | True (matches DB; matches audit metadata `hub:cc` + my smoke reason) |
+| Hub round-trip POST `{action:"off"}` → bot reads | False; `[KILLSWITCH-OFF]` WARN sentinel emitted by helper subprocess |
+| Hub round-trip POST `{action:"on"}` (restore) → bot reads | True; `[KILLSWITCH-ON]` WARN emitted |
+| Bot's gate enforcement live | `[KILLSWITCH-BLOCKED] ticker=FARTCOIN direction=SHORT` observed in trevor.service journal during smoke window — proves gate works post-handler-removal |
+| Idempotent no-op (POST `on` while already on) | 200 with `no_change:true` |
+| POST bad JSON | 400 |
+| POST bad action | 400 |
+| GET cache bust after POST | next GET returns fresh state immediately |
+| AT toggle endpoint still works | 200 with full state shape (audit_id 4 visible) |
+| Aggressive endpoint still works | 200, `toggle_enabled:true`, `killswitch_enabled:true` |
+| Bundle inspection `/memory` | `Activate Killswitch`×2, `Release Killswitch`×2, `EMERGENCY_KILLSWITCH_LAST_`×1 (component lives in prod build) |
+| Sacred files (9/9 Python+brain .md) | byte-identical via `md5sum -c /tmp/sacred_baseline_p4.md5` |
+| `signal_filter_rules` | UNCHANGED |
+| Open positions baseline | 0 active / 0 auto live (matches Phase 0 baseline before bot restart; AutoTrader equity $34.12 reported on init) |
+| `trevor.service` restart | pre `Sat 2026-05-02 01:44:44 UTC` → post `Sat 2026-05-02 04:47:44 UTC`. First restart this session — required by Phase 2 (`!killswitch` removal). Bot started clean: 0 NameError / 0 AttributeError / 0 traceback in 60s post-restart. |
+| `trevor-dashboard.service` restart | pre `04:27:07` → post `04:46:28`, active, 0 errors in journal |
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, every endpoint, the
+round-trip POST→bot-read→DB chain, the bundle inspection, the bot-side
+sentinel emission, and the gate-enforcement live observation
+(`[KILLSWITCH-BLOCKED]`) were all verified via authenticated curl,
+direct Python invocation, journalctl, and sqlite3. Visual UX
+(BottomSheet slide-up animation, 2-tap haptic on Activate/Release,
+accent color tone swap when state flips, mobile breakpoint behavior at
+375 / 390 / 430) was NOT exercised in a browser; real-device smoke is
+the honest validation step Ghost performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `set_killswitch.py` — thin wrapper around `auto_trader.killswitch.set_killswitch()`
+- New: `src/components/memory/killswitch-control-card.tsx`
+- Modified: `src/app/api/killswitch/route.ts` (added POST + refactor GET to `runPython` + bust cache after POST)
+- Modified: `src/components/memory/health-section.tsx` (banner → `<KillswitchControlCard>`, dropped `ShieldOff` icon import that's no longer used here)
+- Modified: `src/components/ui/killswitch-pill.tsx` (docstring refresh — drops "Discord-only" claim, points at the new control card)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, --no-verify per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` Rule 32 — REWRITTEN from "Killswitch is the only project-wide pause" (Discord-only) to **Hub-Only Control Doctrine**. Carve-out from prior morning's commit (`835f4c1`) deleted as part of the rewrite. New `#### Discord commands (allowlist — only ONE exists)` sub-section: `!qa status` only. Section 3 changelog entry dated 2026-05-02. Line 197 reference to `**Rule 32**` updated.
+- Modified: `discord_bot.py` — deleted `_killswitch_count_open` helper (was only-caller from the !killswitch handler) + the entire `!killswitch` / `!ks` handler block (~82 lines, replaced with a 5-line removal-comment). `/scalp` ephemeral killswitch-blocked text updated to point at Hub. `python3 -m py_compile` verifies clean.
+
+### What this does NOT do
+
+- Does NOT change the bot's killswitch enforcement gates (Manager Gate 0 + 2 signal-card POST gates) — the `is_killswitch_on()` import sites are unchanged.
+- Does NOT modify the `auto_trader/killswitch.py` module itself.
+- Does NOT modify the topbar `KillswitchPill` rendering behavior — only the docstring.
+- Does NOT add a kill / pause UI to any zone other than MEMORY → System Health (killswitch) and AUTO → SCALPER bottom (AT toggle, already shipped).
+- Does NOT auto-close any open position, cancel any HL order, or restart any service when killswitch flips ON or OFF (Rule 1 + Rule 31 still binding).
+- Does NOT introduce a new audit table for the killswitch — the existing 4 `auto_config.EMERGENCY_KILLSWITCH_LAST_*` rows + `[KILLSWITCH-ON]`/`[KILLSWITCH-OFF]` WARN sentinel IS the audit trail (skipped the prompt's `killswitch_audit` table proposal as duplicate).
+- Does NOT modify the GET cache TTL for `/api/killswitch` — still 5s, busted only after a successful POST.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — toggle never closes a position. Rule 14 (sacred
+files) — 9/9 byte-identical (BEHAVIOR_RULES.md modified per spec via
+`--no-verify` per `feedback_sacred_bypass`). Rule 15 (additive DB) — no
+schema changes; existing 4 `EMERGENCY_KILLSWITCH*` `auto_config` rows
+get UPDATEd in-place by `auto_trader.killswitch.set_killswitch()`. Rule
+16 (surgical) — only listed files staged. Rule 22 (no Discord channels
+touched). Rule 26 (no shell interpolation) — POST handler uses
+`runPython` with stdin via the helper's `input` option; argv passes
+nothing user-controlled. Rule 30 (no ticker/direction blocks) —
+`signal_filter_rules` UNCHANGED. Rule 31 (auto trader never self-pauses)
+— Hub-driven killswitch is Ghost-driven, not auto-fired. Rule 32
+(rewritten) — Hub-Only Control Doctrine: all bot control surfaces live
+on the Hub; `!qa status` is the only Discord command. No new npm
+dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
+
+### Known nuance — sentinel emission scope
+
+The `[KILLSWITCH-ON]`/`[KILLSWITCH-OFF]` WARN sentinels fired by
+`auto_trader.killswitch.set_killswitch()` now emit in the Hub-spawned
+`set_killswitch.py` subprocess (their stderr is captured by spawnSync
+and discarded). They no longer appear in `journalctl -u trevor.service`
+the way they did when the toggle was triggered by the Discord handler
+running inside the bot process. The per-blocked-signal
+`[KILLSWITCH-BLOCKED]` WARN still emits inside trevor.service (verified
+during smoke). If Observatory monitor `mon_03` (or successor) needs
+visibility into Hub-initiated toggles, a separate sentinel-mirror would
+need to be added (e.g. write the same WARN to `/home/trevor/trevor/logs/trevor.log`
+via the helper). Surfacing for follow-up consideration; not blocking.
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — disengage killswitch)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='EMERGENCY_KILLSWITCH';"
+# Bot's 5s cache TTL → resumes accepting signals immediately.
+
+# Full code revert (Hub side)
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores read-only banner in health-section, removes POST handler from
+# /api/killswitch, removes set_killswitch.py + control card.
+
+# Full code revert (bot side — restores !killswitch Discord command)
+cd /home/trevor/trevor && git revert <sibling-trevor-commit>
+sudo systemctl restart trevor.service
+```
