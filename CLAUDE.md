@@ -88,7 +88,7 @@
 3. **Rank thresholds are hardcoded** in both `query_brain.py` and API routes (15 ranks from Intern Quant at 0 to CEO at 400,000 XP). AST parsing of `xp_system.py` is fragile — don't rely on it.
 4. **Training timeout** — `query_training.py summary` can take 30-60s due to ChromaDB scan. Timeout set to 60s.
 5. **gcloud SSH segfaults** — intermittent `Exit code 139` on SSH. Commands still complete; ignore the segfault.
-6. **Credentials live in `.env.local`** — `DASHBOARD_USER=trevor`, `DASHBOARD_PASS=trevor2026`. The `/api/auth` route reads this file directly at `process.cwd()`. `.env` contains only `DISCORD_BOT_TOKEN` (separate concern).
+6. **Credentials live in `.env.local`** (perms 600) — `DASHBOARD_USER=trevor`, `DASHBOARD_PASS=<rotating, see file>`. The `/api/auth` route reads this file directly at `process.cwd()` on every POST (no caching, no Hub restart needed after a rotation). `.env` contains only `DISCORD_BOT_TOKEN` (separate concern). QA agent's expected password lives in `/home/ghost/ghost_qa/.env.ghost` as `HUB_PASSWORD=…` — must match `.env.local` byte-for-byte.
 7. **Auth requires `username` AND `password`** fields in login POST body.
 8. **`npm run build` requires service restart** — Next.js production server caches the app-build manifest in memory at startup. Rebuilding while the service is running deletes the old fingerprinted CSS/JS files but leaves the running process serving HTML that still references them, returning 400/404 on every static asset and rendering pages as raw unstyled HTML. **Always run `sudo systemctl restart trevor-dashboard.service` after any rebuild.** Symptom: served HTML's `_next/static/css/<hash>.css` link does not match the file on disk in `.next/static/css/`. Diagnosed 2026-05-01.
 
@@ -115,7 +115,7 @@
 # Login and get cookie
 curl -s -c cookies.txt -X POST http://localhost:3333/api/auth \
   -H "Content-Type: application/json" \
-  -d '{"action":"login","username":"trevor","password":"trevor2026"}'
+  -d "{\"action\":\"login\",\"username\":\"trevor\",\"password\":\"$(grep ^DASHBOARD_PASS= /home/trevor/trevor-dashboard/.env.local | cut -d= -f2-)\"}"
 
 # Test any API route
 curl -s -b cookies.txt http://localhost:3333/api/status
