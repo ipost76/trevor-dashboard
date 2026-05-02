@@ -3580,3 +3580,113 @@ G2_COMPLETE: subtabs_shipped=5/5 collectors=11/11 services=3/3 centering_fixed=Y
 
 Wave G closes. Wave I (sister-infra hardening + verify scripts + RECOVERY.md) shipped 2026-05-01 ahead of G2 (out-of-order due to sprint sequencing). All 5 MEMORY sub-tabs live; entire MEMORY zone redesign complete.
 
+
+
+## SCALP → MANUAL Rename + Sub-tab Consolidation (2026-05-02)
+
+Renamed the SCALP zone to MANUAL and collapsed its 4 sub-tabs (Live Board /
+Recent / Quality / Calibration) into one collapsible "Scalp Trading"
+section. The zone is now a host page for manual systems that display info
+but never trade autonomously; future manual sections (DEGEN signals,
+sentiment scanner, etc.) drop in below as additional `<CollapsibleSection>`s.
+
+### Route + nav rename
+
+- `mv src/app/scalp src/app/manual`
+- `src/lib/navigation.ts` — ZoneId `"scalp"` → `"manual"`; SCALP zone block
+  rewritten as MANUAL (id/label/shortLabel "Manual", href `/manual`,
+  accent unchanged); **`subTabs` + `defaultSubTab` removed** (single
+  composition page now). LEGACY_REDIRECTS appended `["/scalp", "/manual"]`.
+- `src/middleware.ts` — legacyMap added `"/scalp": "/manual"` 308 redirect
+  alongside the existing `/trading` → `/manual` (was `/scalp`).
+- `src/app/manual/page.tsx` — display label `SCALP` → `MANUAL` in disabled
+  state; functions `ScalpPage` → `ManualPage`, `ScalpDisabled` →
+  `ManualDisabled`, cache fn `isHubRedesignScalpOn` → `isHubRedesignManualOn`.
+  Drops `searchParams.tab` (no sub-tabs) and the `subtab` prop on
+  `<ScalpZoneView>`.
+
+### Sub-tab consolidation
+
+- New `src/components/ui/collapsible-section.tsx` primitive — chevron-toggle
+  header + 200ms rotation transition + React state. Exported from
+  `@/components/ui` barrel for reuse.
+- `src/components/scalp/scalp-zone-view.tsx` rewritten — no more `switch`
+  on subtab. Renders one `<CollapsibleSection title="Scalp Trading"
+  defaultOpen>` containing `<LiveBoardSection /> <RecentSignalsSection />
+  <QualitySection /> <CalibrationSection />` stacked vertically. The
+  CalibrationSection already mounts `<ResetControlsCard />` internally,
+  so reset buttons remain at the bottom — no extra wiring.
+
+### Things deliberately preserved (per Rule 16 / Phase 0 §2C)
+
+- Flag name `HUB_REDESIGN_SCALP` (auto_config row + cookie override key
+  + `src/lib/feature-flags.ts` const)
+- Components dir `src/components/scalp/` and the 5 section files
+  (internal namespace; section IS still called "Scalp Trading")
+- Internal symbols `ScalpZoneView` / its file path
+- Backend system enum `{auto, degen, scalp}` in dashboard PnL routes +
+  hero/active cards (backend payload type, not UI label)
+- API query params `?mode=scalp`, `activeScalps` field, `scalp_signals`
+  table — all backend
+- AUTO zone's `Scalper` bot section (totally unrelated feature)
+- System prompt mention of "scalp trading system" in chat stream
+  (backend AI prompt, not Manual UI)
+
+### Verification
+
+- `npm run build` clean — `/manual` 5.87 kB / 119 kB First Load,
+  `/scalp` removed from route table
+- `/manual` HTTP 200, "Manual" label rendering in BottomNav + SidebarRail
+  (3 occurrences)
+- `/scalp` HTTP 308 → `/manual` (follow → 200) — bookmark-safe
+- `/trading` HTTP 308 → `/manual` (legacy redirect retargeted)
+- All other zones (`/dashboard`, `/autotrader`, `/intel`, `/memory`,
+  `/chat`) HTTP 200
+- HTML markers on `/manual`: Scalp Trading×1, LIVE BOARD×1, RECENT
+  SIGNALS×1, SIGNAL QUALITY×1, CALIBRATION×1, RESET CONTROLS×1
+- Sub-tab strip auto-hides — `zone-sub-tabs.tsx:17` returns null when
+  `zone.subTabs` is undefined
+- `trevor.service` UNTOUCHED — ActiveEnterTimestamp 2026-05-02 01:44:44
+  UTC unchanged through the work
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, route status codes,
+build output, and component composition were verified via authenticated
+curl + tsc + npm. Visual UX (CollapsibleSection chevron rotation,
+mobile-bottom-nav long-press behavior on the now-subtabless MANUAL zone,
+fade-in stacking of the 4 sections, exact pixel layout) was NOT exercised
+in a browser; real-device smoke is the honest validation step Ghost
+performs after merge.
+
+### Files
+
+- New: `src/components/ui/collapsible-section.tsx`
+- Renamed: `src/app/scalp/{page,loading}.tsx` → `src/app/manual/{page,loading}.tsx`
+- Modified: `src/app/manual/page.tsx` (rename functions + display label)
+- Modified: `src/components/scalp/scalp-zone-view.tsx` (consolidation)
+- Modified: `src/lib/navigation.ts` (zone rename + subTabs removed + legacy redirect)
+- Modified: `src/middleware.ts` (legacy redirect)
+- Modified: `src/components/ui/index.ts` (CollapsibleSection barrel export)
+- Modified: `CLAUDE.md` (this section)
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only restructure. Rule 14 (sacred files)
+— UNTOUCHED (zero Python edits; only Hub frontend). Rule 15 (additive DB)
+— N/A (no schema changes). Rule 16 (surgical edits) — only the 8 listed
+files staged. Rule 22 (no Discord channels touched). Rule 30 (no
+ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 32
+(KILLSWITCH-only project-wide pause; UI Stop banned) — ENFORCED, no kill
+affordance. No new npm dependencies. JetBrains Mono only. Cyberpunk
+palette only via A4 tokens. `trevor.service` UNTOUCHED — only
+`trevor-dashboard.service` restarted.
+
+### Rollback
+
+```bash
+git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores /scalp route + 4 sub-tabs + ScalpZoneView switch + zone label.
+# trevor.service untouched either way.
+```

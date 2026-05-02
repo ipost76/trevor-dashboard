@@ -37,3 +37,6 @@ export type { BottomSheetProps } from "./bottom-sheet";
 
 export { HapticButton } from "./haptic-button";
 export type { HapticButtonProps } from "./haptic-button";
+
+export { CollapsibleSection } from "./collapsible-section";
+export type { CollapsibleSectionProps } from "./collapsible-section";

@@ -35,7 +35,8 @@ export async function middleware(request: NextRequest) {
   // Old route names map to new canonical paths; redirects fire whether the
   // session is authed or not (the new path is then auth-gated normally).
   const legacyMap: Record<string, string> = {
-    "/trading": "/scalp",
+    "/trading": "/manual",
+    "/scalp": "/manual",
     "/command": "/memory",
     "/intelligence": "/intel",
   };

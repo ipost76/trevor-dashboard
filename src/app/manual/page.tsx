@@ -6,7 +6,7 @@ import { ScalpZoneView } from "@/components/scalp/scalp-zone-view";
 
 export const dynamic = "force-dynamic";
 
-const isHubRedesignScalpOn = cache(async (): Promise<boolean> => {
+const isHubRedesignManualOn = cache(async (): Promise<boolean> => {
   try {
     const c = await cookies();
     const raw = c.get("hub_redesign_override")?.value;
@@ -33,11 +33,11 @@ const isHubRedesignScalpOn = cache(async (): Promise<boolean> => {
   }
 });
 
-function ScalpDisabled() {
+function ManualDisabled() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-8 text-center font-mono">
       <div className="text-micro uppercase tracking-[0.3em] text-accent-violet/60">
-        SCALP
+        MANUAL
       </div>
       <h1 className="text-h2 text-fg-primary">Temporarily Disabled</h1>
       <p className="max-w-md text-caption text-fg-muted">
@@ -54,12 +54,7 @@ function ScalpDisabled() {
   );
 }
 
-interface ScalpPageProps {
-  searchParams: Promise<{ tab?: string }>;
-}
-
-export default async function ScalpPage({ searchParams }: ScalpPageProps) {
-  const { tab } = await searchParams;
-  const useNew = await isHubRedesignScalpOn();
-  return useNew ? <ScalpZoneView subtab={tab ?? "live-board"} /> : <ScalpDisabled />;
+export default async function ManualPage() {
+  const useNew = await isHubRedesignManualOn();
+  return useNew ? <ScalpZoneView /> : <ManualDisabled />;
 }

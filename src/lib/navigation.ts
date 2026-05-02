@@ -8,7 +8,7 @@
  * Mobile bottom-nav order is the priority order:
  *   1. DASHBOARD (home)
  *   2. AUTO       (Scalper + Degen — front and center per Ghost crunch posture)
- *   3. SCALP      (deprioritized but accessible — was TRADING)
+ *   3. MANUAL     (manual systems that display but never trade — was SCALP/TRADING)
  *   4. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
  *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
  *
@@ -26,7 +26,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "dashboard" | "auto" | "scalp" | "intel" | "memory";
+export type ZoneId = "dashboard" | "auto" | "manual" | "intel" | "memory";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -70,19 +70,12 @@ export const ZONES: ReadonlyArray<Zone> = [
     defaultSubTab: "scalper",
   },
   {
-    id: "scalp",
-    href: "/scalp",
-    label: "Scalp",
-    shortLabel: "Scalp",
+    id: "manual",
+    href: "/manual",
+    label: "Manual",
+    shortLabel: "Manual",
     icon: Activity,
     accent: "violet",
-    subTabs: [
-      { key: "live-board", label: "Live Board" },
-      { key: "recent", label: "Recent" },
-      { key: "quality", label: "Quality" },
-      { key: "calibration", label: "Calibration" },
-    ],
-    defaultSubTab: "live-board",
   },
   {
     id: "intel",
@@ -128,7 +121,8 @@ export const CHAT_FAB = {
 };
 
 export const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
-  ["/trading", "/scalp"],
+  ["/trading", "/manual"],
+  ["/scalp", "/manual"],
   ["/command", "/memory"],
   ["/intelligence", "/intel"],
 ] as const;
