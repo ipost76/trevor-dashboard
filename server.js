@@ -9,7 +9,7 @@ const next = require("next");
 const { parse } = require("url");
 
 const PORT = parseInt(process.env.PORT || "3333", 10);
-const HOST = process.env.HOST || "0.0.0.0";
+const HOST = "127.0.0.1";
 
 const app = next({ dev: false, dir: __dirname });
 const handle = app.getRequestHandler();
