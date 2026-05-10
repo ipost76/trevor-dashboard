@@ -4303,3 +4303,57 @@ src/components/scout/use-fetch.ts        # minimal fetch hook (manual refresh + 
 - "Promote to watchlist" button on signal rows (currently watchlist add is manual ticker entry only).
 - `signal_outcomes` table is empty until SCOUT side ships outcome backfill — `/api/scout/outcomes` returns `{"outcomes": [], "summary": {}}` for now.
 - `universe.sector` is NULL across the universe (D-A2-1 in scout repo) — sector columns show "—" until the SCOUT-side enrichment ships.
+
+## SCOUT Dashboard Integration — D3 Part 2 (2026-05-10)
+
+Adds four new tabs (Filings / Insiders / Sectors / Performance) to the
+existing `/manual/scout` Scout section. Total tabs now **7**: Signals ·
+Watchlist · Filings · Insiders · Sectors · Performance · Config. Tab
+state is now URL-synced (`/manual/scout?tab=filings` is bookmarkable).
+
+### What was added
+
+```
+src/components/scout/filings-stream.tsx        # 8-K + Form 4 + 13G/D unified feed
+src/components/scout/insider-heatmap.tsx       # Top buyers / Top sellers split
+src/components/scout/sector-rotation.tsx       # 11-sector ranking + macro regime
+src/components/scout/performance-tracker.tsx   # outcomes summary + recharts panels
+```
+
+### What was modified (D2 files I authored)
+
+```
+src/components/scout/scout-tabs.tsx   # 3 tabs → 7, URL-synced state via useSearchParams
+src/components/scout/api.ts           # added fetchFilings/Insiders/Sectors/Macro/Outcomes
+src/components/scout/types.ts         # added 5 new endpoint response types
+```
+
+### Component design notes
+
+- **FilingsStream**: unified feed of `/api/scout/filings` (3 source arrays merged + sorted desc). Type chip filter (All / 8-K / Form 4 / 13G/13D), ticker contains-search, days slider (3/7/14/30). 8-K item codes parsed from JSON-encoded string column (`item_codes: "[\"5.02\"]"`) and color-coded per spec: green (1.01 / 2.02 / 7.01 / 5.07 / 2.01 — material catalysts), red (1.02 / 2.06 / 4.01 / 4.02 / 1.03 / 3.01 — negative), amber (5.02 / 8.01 / 5.03 — neutral). EDGAR links use the company-by-ticker filings page filtered to type (the only stable URL pattern that works without per-filing CIK lookup).
+- **InsiderHeatmap**: data is aggregated by `(ticker, role, transaction_code)` over the requested window — no week-level granularity, so I render two parallel ranked tables (Top Buyers / Top Sellers) with bar-encoded values and footer totals. Days chips: 7/14/30/60/90.
+- **SectorRotation**: two-card layout — left card has the macro regime badge (RISK-ON green / RISK-OFF red / NEUTRAL amber / UNKNOWN neutral) + sub-indicators (yield-curve / financial-stress / VIX placeholder) + 90-day history strip; right card lists 11 sectors with rank + bar (length = `(total + 1 - rank) / total` since the API exposes rank only, not return magnitude — documented in the footer note). Top-4 green, middle-3 amber, bottom-4 red per spec.
+- **PerformanceTracker**: empty-state-aware. Today the API returns `{outcomes: [], summary: {}}`, so it renders a friendly empty state describing what will appear (per-engine summary cards · 20d distribution bars · rolling 30d win-rate line · factor contribution table). When outcomes populate, the same component lights up the four sections automatically. Uses **recharts** (already in package.json — no new dep) for the distribution bar chart and win-rate line chart with a 50% reference line.
+
+### Tab routing
+
+`scout-tabs.tsx` switched to `useSearchParams` + `router.replace` so the active tab is `?tab=`-bound. Wrapped in `<Suspense>` per Next.js' useSearchParams requirement. Direct-link to any tab works: `/manual/scout?tab=performance`. Unknown tab values fall back to "signals".
+
+### Build numbers
+
+`/manual/scout` grew from 8.85 kB / 122 kB First Load (D2) to **23.3 kB / 236 kB First Load** (D3). The +114 kB First Load delta is mostly recharts (server lazy-imports it, but client gets the library on this route). No other route was affected.
+
+### Verification (post `npm run build` + `sudo systemctl restart trevor-dashboard.service`)
+
+- Build succeeded — `/manual/scout` listed at 23.3 kB. One TS narrow-to-`never` error caught and fixed pre-deploy (Engine type was being narrowed past its union after two equality checks).
+- Service came up clean: `[HUB] TREVOR Hub ready on http://127.0.0.1:3333`. Hub at 152 MB RSS.
+- Routes verified (all return `307 → /login?from=...` as expected — auth gate, route resolution working): `/manual/scout`, `/manual/scout?tab=filings`, `/manual/scout?tab=insiders`, `/manual/scout?tab=sectors`, `/manual/scout?tab=performance`. Existing `/dashboard`, `/autotrader`, `/manual` unchanged.
+- SCOUT backend (`scout.service`) untouched, still serving `/api/scout/health` → 13 tables / 935,345 rows.
+
+### Outstanding for Wave D follow-ons
+
+- Sidebar `NAV_ZONES` entry for SCOUT (so it appears in the chrome's primary nav).
+- Outcome tracker backend (Wave E) — populates `signal_outcomes` from historical scans + forward returns. PerformanceTracker activates automatically once data lands.
+- Promote-to-watchlist buttons on signal rows.
+- Sector-rotation API extension to expose blended return + 4-week / 13-week relative returns (currently rank-only — bars are visual ordering, not magnitude).
+- Macro regime history is sparse (1 snapshot); fix in scout side by running the scheduler's macro job daily so the regime-history strip is meaningful.

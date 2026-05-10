@@ -9,13 +9,18 @@
 // use relative URLs from the browser.
 
 import type {
+  Engine,
+  FilingsResponse,
   HealthResponse,
   HistoryResponse,
+  InsiderHeatmapResponse,
+  MacroResponse,
+  OutcomesResponse,
   ScoutConfig,
+  SectorsResponse,
   Signal,
   SignalsResponse,
   WatchlistResponse,
-  Engine,
 } from "./types";
 
 const BASE = "/api/scout";
@@ -120,6 +125,44 @@ export async function updateConfig(
     throw new Error(`SCOUT config update → ${detail}`);
   }
   return res.json();
+}
+
+// D3 — additional endpoints ---------------------------------------------------
+
+export function fetchFilings(opts: {
+  days?: number;
+  ticker?: string;
+  type?: "8k" | "form4" | "13g";
+  signal?: AbortSignal;
+} = {}) {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set("days", String(opts.days));
+  if (opts.ticker) params.set("ticker", opts.ticker);
+  if (opts.type) params.set("type", opts.type);
+  const qs = params.toString();
+  return getJson<FilingsResponse>(`/filings${qs ? `?${qs}` : ""}`, opts.signal);
+}
+
+export function fetchInsiders(opts: { days?: number; signal?: AbortSignal } = {}) {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set("days", String(opts.days));
+  const qs = params.toString();
+  return getJson<InsiderHeatmapResponse>(`/insiders${qs ? `?${qs}` : ""}`, opts.signal);
+}
+
+export function fetchSectors(signal?: AbortSignal) {
+  return getJson<SectorsResponse>("/sectors", signal);
+}
+
+export function fetchMacro(signal?: AbortSignal) {
+  return getJson<MacroResponse>("/macro", signal);
+}
+
+export function fetchOutcomes(opts: { days?: number; signal?: AbortSignal } = {}) {
+  const params = new URLSearchParams();
+  if (opts.days !== undefined) params.set("days", String(opts.days));
+  const qs = params.toString();
+  return getJson<OutcomesResponse>(`/outcomes${qs ? `?${qs}` : ""}`, opts.signal);
 }
 
 // Helpers —————————————————————————————————————————————

@@ -124,3 +124,103 @@ export interface HealthResponse {
 }
 
 export type Engine = "position" | "swing";
+
+// D3 — additional endpoint types ----------------------------------------------
+
+export interface Filing8K {
+  filing_date: string;
+  ticker: string;
+  /** JSON-encoded array string like "[\"5.02\"]" — must JSON.parse client-side. */
+  item_codes: string;
+  accession_no: string;
+  summary: string | null;
+}
+
+export interface InsiderTrade {
+  filing_date: string;
+  trade_date: string;
+  ticker: string;
+  insider_name: string;
+  insider_role: string;
+  /** "P" = open-market purchase, "S" = sale */
+  transaction_code: string;
+  shares: number;
+  price: number | null;
+  value: number | null;
+}
+
+export interface StakeAlert {
+  filing_date: string;
+  ticker: string;
+  filer_name: string;
+  /** e.g. "SCHEDULE 13D" or "SCHEDULE 13G" */
+  form_type: string;
+  pct_ownership: number | null;
+  shares: number | null;
+}
+
+export interface FilingsResponse {
+  filings_8k?: Filing8K[];
+  insider_trades?: InsiderTrade[];
+  stake_alerts?: StakeAlert[];
+}
+
+export interface InsiderHeatmapRow {
+  ticker: string;
+  insider_role: string;
+  /** "P" or "S" */
+  transaction_code: string;
+  total_value: number;
+  trade_count: number;
+  earliest: string;
+  latest: string;
+}
+
+export interface InsiderHeatmapResponse {
+  heatmap_data: InsiderHeatmapRow[];
+}
+
+export interface SectorsResponse {
+  date: string | null;
+  /** Map of ETF ticker → 1-11 rank. e.g. {XLK: 1, XLRE: 2, ...} */
+  sector_rotation: Record<string, number> | null;
+  regime_label: string | null;
+  yield_curve: number | null;
+  financial_stress: number | null;
+}
+
+export interface MacroRow {
+  date: string;
+  yield_curve_10y3m: number | null;
+  financial_stress_index: number | null;
+  regime_label: string | null;
+}
+
+export interface MacroResponse {
+  macro_history: MacroRow[];
+}
+
+export interface OutcomeRow {
+  signal_date: string;
+  ticker: string;
+  engine: Engine | string;
+  entry_price: number | null;
+  signal_score: number | null;
+  fwd_return_5d: number | null;
+  fwd_return_20d: number | null;
+  fwd_return_60d: number | null;
+  components: SignalComponents | null;
+}
+
+export interface OutcomesEngineSummary {
+  count: number;
+  avg_5d: number | null;
+  avg_20d: number | null;
+  avg_60d: number | null;
+  win_rate_20d: number | null;
+}
+
+export interface OutcomesResponse {
+  outcomes: OutcomeRow[];
+  summary: Partial<Record<Engine, OutcomesEngineSummary>>;
+}
