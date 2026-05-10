@@ -4212,3 +4212,94 @@ cd /home/trevor/trevor-dashboard && git revert <this-commit>
 # for most sites, mixed 2.0/3.0/4.0/5.0 elsewhere) restored on the
 # very next request.
 ```
+
+## SCOUT Dashboard Integration — D2 Part 1 (2026-05-10)
+
+A new "Scout" section under `/manual/scout` reads from the SCOUT FastAPI
+service (separate Python process at `127.0.0.1:3334`, nginx-proxied at
+`/api/scout/`). The Scout system is a separate stock-discovery pipeline
+that lives at `/home/trevor/scout/` — see that repo's CLAUDE.md for the
+backend (Engines A & B, scheduler, Discord webhooks, etc.).
+
+### What was added (all additive)
+
+```
+src/app/manual/scout/page.tsx            # server wrapper
+src/app/manual/scout/loading.tsx         # skeleton fallback
+src/components/scout/scout-tabs.tsx      # top-level Signals|Watchlist|Config tab strip
+src/components/scout/position-signals-panel.tsx  # Engine A table + 30d history bars
+src/components/scout/swing-signals-panel.tsx     # Engine B table w/ sub-signal badges
+src/components/scout/watchlist-table.tsx # active watchlist + add/remove
+src/components/scout/config-panel.tsx    # SCOUT thresholds + size multipliers (PUT .env)
+src/components/scout/history-bars.tsx    # tiny CSS bar chart (no recharts dep)
+src/components/scout/api.ts              # typed fetch helpers for /api/scout/*
+src/components/scout/types.ts            # response types
+src/components/scout/format.ts           # mcap/score/pct formatters + tone helpers
+src/components/scout/use-fetch.ts        # minimal fetch hook (manual refresh + visibility-aware polling)
+```
+
+### What was NOT modified
+
+- No changes to `src/app/manual/page.tsx` (HUB_REDESIGN_SCALP feature flag preserved).
+- No changes to `sidebar.tsx` / `app-shell-*.tsx` — `/manual/scout` has **no nav entry yet** (deferred to D3 once Ghost approves the UI). Reachable directly via URL.
+- No changes to existing `/api/*` routes; SCOUT data goes through nginx → 3334, not through Next.js.
+
+### Endpoint contract (from /home/trevor/scout/scout/api/server.py)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/scout/health` | DB row counts, last_scan |
+| GET | `/api/scout/signals/position` | Engine A top-N (default 50) |
+| GET | `/api/scout/signals/swing` | Engine B top-N |
+| GET | `/api/scout/signals/history` | ranged scans for the 30d bars |
+| GET | `/api/scout/watchlist` | active watchlist (joined w/ universe) |
+| POST | `/api/scout/watchlist/add` | manual ticker add (status='active') |
+| DELETE | `/api/scout/watchlist/{ticker}` | soft delete (status='dropped') |
+| GET | `/api/scout/config` | runtime config view |
+| PUT | `/api/scout/config` | write to SCOUT `.env` (allowlisted keys) |
+
+### Architecture notes
+
+- All Scout components are **`'use client'`** — no SSR. SCOUT API is not
+  guaranteed to be reachable during `next build`, so any server-component
+  fetch would risk build failures. Browser-side fetch on mount keeps
+  build deterministic.
+- All requests use the relative `/api/scout/...` URL. Browser → nginx
+  on `trevor-prime.com` → SCOUT FastAPI on `127.0.0.1:3334`. The
+  trevor-prime.com server block has the existing Ghost-only IP allowlist;
+  Scout endpoints inherit it automatically — no separate gate needed.
+- `useScoutFetch(fetcher, deps, {refreshMs})` hook polls only when the
+  page is visible (`document.hidden` check), aborts in-flight requests
+  on unmount, and uses an epoch counter to drop stale responses on
+  rapid re-renders.
+- DuckDB JSON shape (`scans.components`) is parsed client-side once per
+  row, not per render — see `_parse_components` in the panels.
+
+### Visual / design system
+
+- Uses Design System v1 tokens (`bg-bg-card`, `text-fg-muted`,
+  `text-accent-cyan`, `border-border-subtle`, `shadow-glow-*`,
+  `rounded-pill`, `text-h2/h3/caption/micro`, `duration-fast`).
+- Primary accent **cyan** to match the rest of the Hub; **green** is
+  the "NEW signal / win" accent; **amber** for "config dirty / changed";
+  **red** for errors / deletes.
+- Reuses `Card`, `Pill`, `Skeleton`, `EmptyState`, `TabBar` from
+  `@/components/ui`. No new design primitives.
+- `recharts` not pulled in for the 30d history strip — small enough
+  that CSS `height: %` bars beat the bundle cost.
+
+### Verification (post `npm run build` + `systemctl restart trevor-dashboard`)
+
+- Build succeeded. `/manual/scout` listed at **8.85 kB / 122 kB First Load JS**.
+- Routes return expected behavior: `/manual/scout` → 307 → `/login?from=%2Fmanual%2Fscout` (auth gate); same shape as `/dashboard`, `/autotrader`, `/manual` → no regression.
+- SCOUT backend still healthy (`scout.service` active, `127.0.0.1:3334/api/scout/health` returns 13 tables / 935,345 rows).
+- Hub at 168 MB RSS (well under `MemoryMax=1500M`).
+- External `https://trevor-prime.com/api/scout/health` from the VM returns 403 by design (IP allowlist excludes the VM's own egress); browser access from an allowlisted IP is the supported path.
+
+### Outstanding for D3 / D2 Part 2
+
+- Sidebar `NAV_ZONES` entry for SCOUT (so users don't need to type the URL).
+- Filings tab + insider heatmap + sector-rotation widget + outcome-tracking display.
+- "Promote to watchlist" button on signal rows (currently watchlist add is manual ticker entry only).
+- `signal_outcomes` table is empty until SCOUT side ships outcome backfill — `/api/scout/outcomes` returns `{"outcomes": [], "summary": {}}` for now.
+- `universe.sector` is NULL across the universe (D-A2-1 in scout repo) — sector columns show "—" until the SCOUT-side enrichment ships.
