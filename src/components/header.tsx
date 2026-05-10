@@ -1,12 +1,13 @@
 "use client";
 import * as React from "react";
-import { LogOut, Sun, Moon } from "lucide-react";
+import { LogOut, Sun, Moon, KeyRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useRouter, usePathname } from "next/navigation";
 import { LivePulse, KillswitchPill, Pill } from "@/components/ui";
 import PriceStrip from "@/components/PriceStrip";
 import { useScrollDirection } from "@/hooks/useScrollDirection";
 import { cn } from "@/lib/utils";
+import { ChangePasswordModal } from "./change-password-modal";
 
 interface StatusData {
   ok: boolean;
@@ -34,6 +35,7 @@ export function Header() {
   const { resolvedTheme, setTheme } = useTheme();
   const [status, setStatus] = React.useState<StatusData | null>(null);
   const [now, setNow] = React.useState<string>("");
+  const [showChangePassword, setShowChangePassword] = React.useState(false);
   const scrollDir = useScrollDirection();
 
   // Single status poll — replaces /api/system-health + /api/admin/current-state
@@ -164,21 +166,38 @@ export function Header() {
           {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
-        {/* Logout */}
-        <button
-          type="button"
-          onClick={handleLogout}
-          aria-label="Logout"
-          className="tap-target rounded-md p-2 text-fg-muted hover:text-accent-red"
-        >
-          <LogOut size={16} />
-        </button>
+        {/* Change password + Logout (visually grouped) */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowChangePassword(true)}
+            aria-label="Change password"
+            title="Change password"
+            className="tap-target rounded-md p-2 text-fg-muted hover:text-fg-primary"
+          >
+            <KeyRound size={14} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            aria-label="Logout"
+            className="tap-target rounded-md p-2 text-fg-muted hover:text-accent-red"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Row 2: mobile-only ticker strip */}
       <div className="lg:hidden border-t border-border-subtle px-4 py-1">
         <PriceStrip />
       </div>
+
+      <ChangePasswordModal
+        open={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
     </header>
   );
 }

@@ -32,10 +32,10 @@ export function ChangePasswordModal({ open, onClose }: { open: boolean; onClose:
       const res = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "change-password", currentPass: current, newPass: next }),
+        body: JSON.stringify({ action: "change-password", currentPassword: current, newPassword: next }),
       });
       const data = await res.json();
-      if (data.ok) { setSuccess(true); setTimeout(onClose, 1500); }
+      if (data.ok) setSuccess(true);
       else setError(data.error || "Failed");
     } catch { setError("Connection error"); }
     setLoading(false);
