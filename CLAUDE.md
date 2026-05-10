@@ -4357,3 +4357,71 @@ src/components/scout/types.ts         # added 5 new endpoint response types
 - Promote-to-watchlist buttons on signal rows.
 - Sector-rotation API extension to expose blended return + 4-week / 13-week relative returns (currently rank-only — bars are visual ordering, not magnitude).
 - Macro regime history is sparse (1 snapshot); fix in scout side by running the scheduler's macro job daily so the regime-history strip is meaningful.
+
+## 2026-05-10 — Password Rotation + Header Change-Password Button
+
+Rotated `DASHBOARD_PASS` in `.env.local` (`yZBHrSk7FGAEIqkmPTi75Pz9kCi_TrNz` → new value, NOT committed — perms 600). Wired the orphaned `ChangePasswordModal` (dormant since B2, 2026-04-29) into the current `header.tsx`. Fixed a latent field-name bug in the modal that meant the change-password POST never worked end-to-end even from the legacy header.
+
+### Changes
+
+- **`src/components/header.tsx`** — added named import `{ ChangePasswordModal }` (NOT default — component is a named export) + merged `KeyRound` into the existing `lucide-react` import. Added `React.useState(false)` for `showChangePassword` matching the file's existing hook style. New `KeyRound` button (`size={14}`, `aria-label="Change password"`, `title="Change password"`) placed inside a tight `gap-1` flex group with the existing Logout button at the end of Row 1. Mounted `<ChangePasswordModal open={...} onClose={...} />` at the bottom of the header's return JSX. `/chat` minimal-variant branch UNTOUCHED (no change-pw button there per design — that variant only has back-button + title + LivePulse).
+- **`src/components/change-password-modal.tsx`** — POST body field names fixed: `currentPass` → `currentPassword`, `newPass` → `newPassword` to match the real `/api/auth/route.ts:90-93` contract `{currentPassword, newPassword}`. Auto-close on success removed (`setTimeout(onClose, 1500)` deleted) — modal now stays open after Save until the user clicks X or backdrop, per Ghost's explicit decision.
+- **Modal positioning UNCHANGED** — `fixed inset-0 z-50 flex items-center justify-center bg-black/70` overlay + `onClick={onClose}` backdrop + `onClick={e => e.stopPropagation()}` panel were already correct vs. the prompt's §2D requirements. No edits needed there.
+- **`.env.local`** — `DASHBOARD_PASS` rotated. NOT staged in git per the standing "no secrets in commits" rule.
+- **`/api/auth/route.ts`** UNTOUCHED. The existing `action: "change-password"` handler already supports the change-pw flow; the prompt's spec (`{action:"change_password", current, next}`) was inaccurate.
+
+### Why the original prompt's API contract was wrong
+
+The prompt opening claimed the route expects `{action:"change_password", current, next}`. The actual route at `/api/auth/route.ts:89-93` matches on `action === "change-password"` (hyphen, not underscore) and destructures `{currentPassword, newPassword}` (full words, not abbreviated). The pre-existing modal (1.5 years old per git blame) sent `currentPass`/`newPass` — close but no cigar — so a click on the legacy header's `KeyRound` would have always failed with `400 "Current password is incorrect"`. Surfaced + fixed in this commit.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx next build` | clean, 0 errors / 0 warnings, all routes registered |
+| `sudo systemctl restart trevor-dashboard` | active (running), PID 633430, "TREVOR Hub ready" within 2s |
+| Curl new password login | LOGIN OK |
+| Curl old password login | OLD REJECTED |
+| Curl change-pw endpoint round-trip (Popcorn → Popcorn) | CHANGE-PW ENDPOINT OK — proves field names match end-to-end |
+| `.env.local` perms | `-rw-------` (600) |
+| Sacred files 9/9 (bot side) | byte-identical MD5 to Phase 0 baseline (none touched — pure Hub change) |
+| Auto-close canary `grep -rE "auto.close\|auto_close\|autoClose" discord_bot.py` | 5 hits, all pre-existing legitimate `auto_close_time` orphan-handler correction-window references (per "Recurring residuals" doc) — not a regression |
+| `signal_filter_rules` | UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0 reseed per Rule 30 known residual) |
+| Open positions baseline | UNCHANGED |
+| `trevor.service` | UNTOUCHED — pure dashboard-side change |
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. End-to-end CURL verification covered the auth round-trip (new-pw login + old-pw rejection + change-pw POST). Visual UX (KeyRound button alignment next to Logout, modal slide-in centering, X-click vs backdrop-click dismissal, success state without auto-close) was NOT exercised in a browser; real-device smoke is the honest validation step Ghost performs after merge.
+
+### Files
+
+- Modified: `src/components/header.tsx` (+18 / -2 lines: import KeyRound + ChangePasswordModal, useState hook, grouped KeyRound+Logout flex container, mount modal)
+- Modified: `src/components/change-password-modal.tsx` (+2 / -2 lines: field rename + remove setTimeout)
+- Rotated (not committed): `.env.local` `DASHBOARD_PASS`
+- Untouched: `src/app/api/auth/route.ts`, `src/components/header-legacy.tsx`, `src/middleware.ts`, every other file in the repo
+
+### What this does NOT do
+
+- Does NOT delete `src/components/header-legacy.tsx` (kept for I1 cleanup later).
+- Does NOT add a Cancel button to the modal — X + backdrop are the existing dismissal paths and the prompt's §2D rule 5 only required "clicking the backdrop closes the modal".
+- Does NOT add a change-password button to the `/chat` minimal-variant header (no design call for it).
+- Does NOT modify `auth/route.ts` — the route already worked, the modal was the bug.
+- Does NOT touch any bot-side / sacred / Discord code.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard
+git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores orphaned ChangePasswordModal (still buggy field names; still
+# dormant since no header wires it). Password rotation is NOT reverted
+# by git revert — to roll DASHBOARD_PASS back, edit .env.local manually
+# and restart (or use the change-pw modal once it's reverted, ironic).
+```
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only change. Rule 14 (sacred files) — 9/9 byte-identical (zero bot-side edits). Rule 15 (additive DB) — N/A (no schema). Rule 16 (surgical edits) — only `header.tsx` + `change-password-modal.tsx` staged. Rule 22 (no Discord channels touched). Rule 28 (env files 600) — `.env.local` perms verified post-edit. Rule 30 (no ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 32 (Hub-Only Control Doctrine) — N/A (no kill / pause affordance added or removed). No new npm dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
