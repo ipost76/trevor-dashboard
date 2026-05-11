@@ -4503,3 +4503,232 @@ sudo systemctl restart trevor-dashboard.service
 # reaction handler, cleanup timer) remains untouched and continues to operate
 # normally; only the UI surface is removed.
 ```
+
+## 2026-05-11 — MANUAL Reminders + DCA sub-tabs (full CRUD)
+
+Two new sub-tabs on the MANUAL zone — `Reminders` (`/manual?tab=reminders`)
+and `DCA` (`/manual?tab=dca`). Both are full read+write surfaces: Ghost can
+add / edit / complete / cancel reminders and add / edit / pause / resume /
+remove DCA entries directly from the Hub. The bot side is unchanged —
+`reminder_manager.py` and `dca_manager.py` are read+written via Python
+helpers + `runPython` in the same READ + WRITE pattern as G2 aggressive +
+AT toggle.
+
+### Composition (locked)
+
+```
+/manual sub-tabs (4 total): Scalp · Stock · Reminders · DCA  (default = Scalp)
+
+/manual?tab=reminders  → <RemindersSection>
+  ├─ Header card (magenta glow, Bell, REMINDERS title, active-count Pill)
+  ├─ Summary strip — 4 MetricTiles (Pending/Active/Completed/Cancelled)
+  ├─ Add Reminder card — text + datetime-local + repeat-mode (3 buttons) + submit
+  ├─ Active list — text + due (formatted ET) + relative pill (red if OVERDUE) +
+  │   repeat pill + status pill + Done/Edit/Cancel buttons. Inline edit mode
+  │   replaces card body with form. Edit Save uses POST {action:"edit", id, …}.
+  └─ CollapsibleSection (default closed): last 10 completed/cancelled
+
+/manual?tab=dca  → <DCASection>
+  ├─ Header card (magenta glow, DollarSign, DCA SCHEDULE, active-count Pill,
+  │   "Robinhood · 9:00 PM ET daily fire window" subtitle)
+  ├─ Summary strip — 3 MetricTiles (Active / Daily Total / Monthly Est)
+  ├─ Add Entry card — ticker (auto-uppercase) + amount + frequency (4 buttons:
+  │   Daily/Weekly/Bi-weekly/Monthly) + day buttons (only if weekly/biweekly) +
+  │   notes + submit
+  ├─ Active list — ticker + amount + freq pill + day pill + notes + last-reminded
+  │   relative + Pause/Edit/Remove buttons. Inline edit. Remove opens BottomSheet
+  │   confirm with "Remove TICKER from DCA schedule?" + Cancel/Remove buttons.
+  └─ Paused entries (CollapsibleSection, only renders when paused.length>0)
+```
+
+### Phase 0 audit deviations from prompt (Ghost-approved)
+
+1. **Accent name** — prompt called the MANUAL accent "magenta" but
+   `navigation.ts` uses `accent: "violet"`. However `accentGlowClass("violet")`
+   returns `shadow-glow-magenta`, AND existing `scalp-header.tsx` already
+   uses `glow="magenta"` directly on its `<Card>`. New sections also use
+   `glow="magenta"` literally so the magenta-glow header card matches the
+   existing MANUAL composition pixel-for-pixel.
+2. **Auth cookie** — prompt's verification cmds used `-b "session=<TOKEN>"`,
+   but the actual cookie is `trevor_session`. Used the correct name in all
+   E2E tests.
+3. **Legacy redirect** — `next.config.ts:19` shipped a stale 308 from
+   `/reminders` → `/command?tab=reminders` (from the 2026-04-02 nav restructure;
+   `/command` itself was deleted in B1). Updated to point at
+   `/manual?tab=reminders`. Did NOT create `src/app/reminders/page.tsx` —
+   framework-level 308 supersedes any file-route, and a single-hop permanent
+   redirect is more browser-cache-friendly than a 307 server-render.
+4. **DCA schema** — `dca_schedule` rows expose `active: 0|1`, NOT
+   `status: "active"|"paused"` as the prompt example implied. `isPaused()`
+   helper checks `Number(e.active ?? 1) === 0`. Field for last reminder is
+   `last_reminded_at`, not `last_reminded`. Both fixed before deploy.
+5. **EmptyState API** — `EmptyState` only accepts `{title, body, icon, action,
+   className}` — no `description` or `tone` props. Adjusted all 6 call sites
+   accordingly.
+6. **Other primitive prop fixes**: `MetricTile tone="info"` → `"cyan"` (info
+   not in union); `HapticButton variant="danger"` → `"destructive"` (danger
+   not in union).
+
+### Endpoints
+
+| Route | Method | Helper | Behavior |
+|---|---|---|---|
+| `/api/reminders` | GET | `query_reminders.py` (READ-ONLY) | Returns `{reminders[], summary{pending,active,completed,cancelled}}` |
+| `/api/reminders` | POST | `set_reminders.py` (RW dispatcher) | Body `{action: "add\|complete\|cancel\|edit", …params}` → 200/400/500 |
+| `/api/dca` | GET | `query_dca.py` (READ-ONLY) | Returns `{entries[], summary{total_active,total_paused,daily_total,monthly_estimate}}` |
+| `/api/dca` | POST | `set_dca.py` (RW dispatcher) | Body `{action: "add\|remove\|edit\|pause\|resume", …params}` → 200/400/500 |
+
+POST routes use `spawnSync` directly (NOT `runPython`) so stdout is captured
+regardless of exit code — Python helpers exit 0 on success, 1 on usage,
+2 on DB error, 4 on invalid input. Route maps exit 1/4 → HTTP 400, exit 2
+→ HTTP 500. No HTTP 423 path (these toggles are not flag-gated; the bot's
+existing managers are the source of truth).
+
+### POST body validation
+
+- **add reminder** — requires `text` (non-empty) + `due_at` (ISO);
+  `repeat_mode ∈ {once, twice, until_confirmed}`; defaults `repeat_mode="once"`,
+  `source="hub"`.
+- **complete/cancel reminder** — requires int `id`.
+- **edit reminder** — requires int `id` + at least one of {text, due_at, repeat_mode}.
+- **add dca** — requires non-empty `ticker` (auto-uppercase) + numeric `amount > 0`;
+  `frequency ∈ {daily, weekly, biweekly, monthly}` (default daily); `day_of_week`
+  required for weekly/biweekly only and must be one of {MON, TUE, WED, THU, FRI, SAT, SUN}.
+- **remove/pause/resume dca** — requires `ticker`. Manager returns False
+  on missing ticker → exit 4 → HTTP 400.
+- **edit dca** — requires `ticker` + at least one of {amount, frequency, day_of_week, notes}.
+
+### ET timezone handling
+
+Reminders display ALL times in ET via `formatISOAsET()` (uses
+`Intl.DateTimeFormat("en-US", {timeZone:"America/New_York", …})`). The
+HTML `datetime-local` input value is interpreted as ET wall-clock time
+and converted to UTC ISO before POST via `dtLocalToISOAsET()` (uses the
+sv-SE-locale offset trick to compute the correct EST/EDT shift for the
+specific date — no hard-coded offset). On edit, stored UTC ISO is
+converted back to a `datetime-local`-compatible string in ET via
+`isoToDateTimeLocalET()`.
+
+Relative time labels for reminders: `in Nm/h/d` for future, `OVERDUE Nm/h/d ago`
+in red for past. DCA `last_reminded_at` shows `Nm/h/d ago` or `never`.
+
+### Verification (all PASS)
+
+- `npm run build` clean, 29s. New routes registered: `/api/reminders` (347 B),
+  `/api/dca` (347 B), `/reminders` (347 B redirect). `/manual` bundle
+  6.22 → 11.4 kB (+5.2 kB for the two new sections).
+- Authenticated curl matrix: `/manual?tab={scalp,stock,reminders,dca}` all
+  HTTP 200; `/reminders` 308 → `/manual?tab=reminders` → 200 (single hop
+  via `next.config.ts`, file-system route avoided); all other zones
+  (`/dashboard`, `/autotrader`, `/intel`, `/memory`) HTTP 200; unauth on
+  `/api/reminders` POST → HTTP 401.
+- SSR HTML markers on `/manual?tab=reminders`: REMINDERS×1, ADD REMINDER×1,
+  Pending/Active/Completed/Cancelled all present, `shadow-glow-magenta`×3
+  (header + active card + add-form card), Repeat label.
+- SSR HTML markers on `/manual?tab=dca`: DCA SCHEDULE×1, ADD TO SCHEDULE×1,
+  Daily Total + Monthly Est tiles, Robinhood subtitle, `shadow-glow-magenta`×3,
+  Frequency + Daily + Bi-weekly buttons.
+- Sub-tab strip on `/manual` (no `?tab=`) shows `>Scalp< >Stock< >Reminders<
+  >DCA<` in order, all 4 visible.
+- E2E POST round-trip via Hub HTTP layer:
+  - reminder add → returns id=4, status="pending" (manager default), summary.pending
+    bumps from 0→1; cancel id=4 → ok, summary.pending back to 0
+  - DCA add `_HUB_E2E` $12.34 daily → returns id=5; GET shows entry with
+    `daily_total: 12.34`, `monthly_estimate: 370.2`; remove → ok, summary back to 0
+  - pause/resume cycle: add → active=1 / total_active=1; pause → active=0 /
+    total_paused=1 / total_active=0; resume → active=1; remove → cleanup
+- Negative-path E2E:
+  - unknown action → HTTP 400 `{"error":"unknown action: explode"}`
+  - missing required text → HTTP 400 `{"error":"text required"}`
+  - invalid repeat_mode → HTTP 400 `{"error":"invalid repeat_mode: forever"}`
+  - DCA weekly w/o day → HTTP 400 `{"error":"day_of_week required for weekly/biweekly"}`
+  - unauth POST → HTTP 401 `{"error":"Unauthorized"}` (middleware enforced)
+- 0 errors / tracebacks in `journalctl -u trevor-dashboard.service` post-restart
+- Sacred 9/9 md5 byte-identical to Phase 0 baseline (zero bot-side edits)
+- `signal_filter_rules` UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0
+  reseed row per Rule 30 known residual)
+- Open positions baseline preserved: 0 active / 0 auto live
+- `trevor.service` UNTOUCHED (PID 660125, ActiveEnterTimestamp `Mon 2026-05-11
+  01:05:20 UTC` unchanged through entire prompt)
+- `trevor-dashboard.service` restarted twice (once after Phase 3 wiring, once
+  after schema-fix rebuild); both healthy
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, every endpoint, the
+E2E POST round-trip (incl. pause/resume), and the negative-path validation
+were all verified via authenticated curl. Visual UX (BottomSheet slide-up
+for the DCA Remove confirm, datetime-local picker UX on real devices,
+inline edit mode field focus / save / cancel transitions, mobile breakpoints
+375 / 390 / 430 / 768 / 1024 / 1440, magenta glow rendering against actual
+screen calibration, tap-target haptic feedback) was NOT exercised in a
+browser. Real-device smoke is the honest validation step Ghost performs
+after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `query_reminders.py`, `set_reminders.py`, `query_dca.py`, `set_dca.py` (top-level dashboard helpers, all executable, all `mode=ro` for SQLite read paths via the bot managers)
+- New: `src/app/api/reminders/route.ts`, `src/app/api/dca/route.ts`
+- New: `src/components/scalp/reminders-section.tsx` (~470 lines), `src/components/scalp/dca-section.tsx` (~530 lines)
+- Modified: `src/components/scalp/scalp-zone-view.tsx` (added `RemindersSection` + `DCASection` imports + 2 new `if (subtab === …)` branches; pure surgical insertion)
+- Modified: `src/lib/navigation.ts` (added 2 sub-tab entries to MANUAL zone subTabs array; defaultSubTab unchanged at "scalp")
+- Modified: `next.config.ts` (changed `/reminders` redirect destination from `/command?tab=reminders` to `/manual?tab=reminders`; the other 8 stale redirects from the 2026-04-02 nav restructure left untouched per Rule 16)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, `--no-verify` per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 2 + Section 3 entries)
+
+### What this does NOT do
+
+- Does NOT modify `reminder_manager.py` or `dca_manager.py` — used as-is via Python helpers.
+- Does NOT modify `discord_bot.py`. The `/remind` slash command + `!dca` Discord interface remain operational; Hub and Discord are independent surfaces to the same data.
+- Does NOT add any kill / pause / halt button on `/manual` (Rule 32 Hub-Only Control Doctrine — the only project-wide pause is the killswitch toggle on `/memory?tab=health`).
+- Does NOT modify `signal_filter_rules`, `auto_config`, or any sacred file.
+- Does NOT change schema for `reminders` or `dca_schedule` tables — pure read+write through existing manager APIs.
+- Does NOT add a `delete` action on reminders (manager exposes `delete_reminder` but cancellation is reversible; deletion is destructive and out of scope per the prompt). Use cancel + reopen-via-complete instead.
+- Does NOT introduce new design tokens, CSS utility classes, or any new npm dependency.
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (twice).
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display + manual entry only, zero trade-closing
+code. Rule 14 (sacred files) — 9/9 byte-identical (`BEHAVIOR_RULES.md` +
+`CLAUDE.md` modified per spec via `--no-verify` per memory
+`feedback_sacred_bypass`). Rule 15 (additive DB) — N/A (no schema
+changes; existing manager APIs handle their own writes via `INSERT`/`UPDATE`,
+no `DROP`/`DELETE`/`ALTER`). Rule 16 (surgical edits) — only the listed
+files staged. Rule 22 (no Discord channels touched). Rule 26 (no shell
+interpolation) — every Python invocation uses argv (`spawnSync(PYTHON_PATH,
+[scriptPath, action], {input: JSON.stringify(body)})`); no `execSync`
+with user input, no Python source interpolation. Rule 30 (no
+ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 31 (auto
+trader never self-pauses) — N/A. Rule 32 (Hub-Only Control Doctrine —
+killswitch is the only project-wide pause; UI Stop banned) — ENFORCED,
+no kill affordance on `/manual`. No new npm dependencies (`Bell`,
+`DollarSign`, `Plus`, `Pencil`, `Save`, `Trash2`, `PauseCircle`,
+`PlayCircle`, `Check`, `X`, `Repeat`, `RotateCcw` icons all pre-existing
+in `lucide-react`). JetBrains Mono only (font-mono on data values, default
+on labels). Cyberpunk palette only via A4 tokens. MANUAL zone accent =
+violet → magenta-glow preserved (matches existing `scalp-header.tsx`).
+Mobile-first verified at 375vw via SSR markup. Tap target floor 44×44
+enforced via `HapticButton` and `.tap-target` on all inputs.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores MANUAL zone subTabs to [Scalp, Stock] only; restores ScalpZoneView
+# dispatcher to 2-branch (stock + default scalp); restores `/reminders` legacy
+# redirect to `/command?tab=reminders` (which then chains via middleware to
+# `/memory?tab=reminders` → falls through to default Brain tab — broken state
+# pre-this-commit). Removes /api/reminders, /api/dca, both section components,
+# both Python helper pairs.
+
+# To wipe stray test rows that may have accumulated during E2E:
+# (none expected — all smoke tests cleaned up after themselves and reminder
+# IDs 3+4 are status='cancelled' which is the intended end state)
+```
+
+Wave M (MANUAL zone) extension complete. Bot side untouched.
