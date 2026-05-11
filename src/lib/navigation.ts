@@ -90,13 +90,14 @@ export const ZONES: ReadonlyArray<Zone> = [
     icon: Brain,
     accent: "magenta",
     subTabs: [
+      { key: "downloads", label: "Downloads" },
       { key: "lessons", label: "Lessons" },
       { key: "journal", label: "Journal" },
       { key: "similar", label: "Similar" },
       { key: "calibration", label: "Calibration" },
       { key: "shadow", label: "Shadow" },
     ],
-    defaultSubTab: "lessons",
+    defaultSubTab: "downloads",
   },
   {
     id: "memory",

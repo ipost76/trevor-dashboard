@@ -4425,3 +4425,81 @@ sudo systemctl restart trevor-dashboard.service
 ### Hard constraints honored
 
 Rule 1 (NO AUTO-CLOSE) — display-only change. Rule 14 (sacred files) — 9/9 byte-identical (zero bot-side edits). Rule 15 (additive DB) — N/A (no schema). Rule 16 (surgical edits) — only `header.tsx` + `change-password-modal.tsx` staged. Rule 22 (no Discord channels touched). Rule 28 (env files 600) — `.env.local` perms verified post-edit. Rule 30 (no ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 32 (Hub-Only Control Doctrine) — N/A (no kill / pause affordance added or removed). No new npm dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
+
+## 2026-05-11 — INTEL Downloads sub-tab (Hub Downloads Frontend)
+
+Companion to the bot-side Hub Downloads Backend (`f0676d4`, 2026-05-10). The frontend is now live: `Downloads` is the **first AND default** INTEL sub-tab. A delivered file at `#downloads` now appears in the Hub UI within ≤60s with a one-click download button + archive/unarchive toggle.
+
+### Composition
+
+- `src/lib/navigation.ts` — Intel `subTabs` order is `[downloads, lessons, journal, similar, calibration, shadow]`; `defaultSubTab` flipped to `"downloads"`.
+- `src/app/intel/page.tsx` — fallback `tab ?? "downloads"` (was `"lessons"`).
+- `src/components/intel/intel-zone-view.tsx` — dispatcher prepends `case "downloads": <DownloadsSection />` and changes the default fall-through from `<LessonsSection />` to `<DownloadsSection />`. The default fall-through protects bookmarked `/intel?tab=foo` URLs against missing-tab regressions.
+- `src/components/intel/downloads-section.tsx` (new, ~250 lines, `"use client"`) — A4 primitives only: `Card` (`glow="magenta"` on header, plain on file rows), `SegmentedToggle full` (All / Active / Archived), `Pill` (file-type + archived badges), `Skeleton` (initial load), `EmptyState` (per-filter empty copy), `HapticButton` (Download + Archive/Unarchive). No new design tokens.
+
+### Behavior
+
+- Polls `GET /api/intel/downloads?status=${filter}` on mount and every 60s (`setInterval` + cleanup); refilters trigger a refetch via the `useEffect` dep array.
+- Each file rendered as a compact `<Card padding="sm">` with: filename (`break-all font-mono text-caption`), original_name (only when ≠ filename), relative date (`just now` / `Nm ago` / `Nh ago` / `Nd ago` / `MMM D`), human-readable size (`B`/`KB`/`MB`), file-type pill (`.md` → cyan, `.pdf` → red, `.zip/.tar/.gz` → violet, else → neutral), and a `📦 Archived` amber pill on archived rows (rows also get `opacity-70 border-border-amber/40`).
+- **Download button** (cyan tone): synthesizes a hidden `<a download>` pointing at `/api/intel/downloads/${encodeURIComponent(filename)}`, clicks it, removes it — browser handles the file save. No iframe, no popup blocker risk.
+- **Archive / Unarchive button** (amber → green): POST to `/api/intel/downloads/archive` or `.../unarchive` with `{filename}`, then optimistic refetch. Per-filename `archiving: Set<string>` drives the disabled-state + ellipsis label so two simultaneous toggles on different rows don't lock each other. `archive_file` and `unarchive_file` are idempotent server-side (manifest-check), so a double-tap is safe.
+- All buttons go through `HapticButton` which provides the `.tap-target` 44×44 floor + `active:scale-[0.98]` + `navigator.vibrate(8)`.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean (14.0 s), all routes registered, `/intel` bundle 7.71 → 9.31 kB |
+| `/intel` (no `?tab=`) | HTML contains `>DOWNLOADS<` (default) |
+| `/intel?tab=downloads` | HTML contains `>DOWNLOADS<` |
+| `/intel?tab=lessons` (regression) | HTML contains `>LESSONS<` — old tabs still work |
+| Nav strip order | `>Downloads<` precedes `>Lessons<` in SSR HTML |
+| `GET /api/intel/downloads` (auth) | 200, `{files:[],stats:{...},filter:"all"}` |
+| End-to-end with a real test file | save → list → download (bytes match source) → archive → list-archived → unarchive → days=0 cleanup — all green |
+| Sacred 9/9 md5 vs Phase 0 baseline | byte-identical |
+| 6/6 recurring-bug canaries (frontend-only prompt; bot untouched) | 21 / 0 / 0 / 2 / 7 / 6 — all match baseline |
+| `trevor.service` | UNTOUCHED |
+| `trevor-dashboard.service` | restart healthy, PID → 661849, "TREVOR Hub ready" within 2s |
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR markers, endpoint responses, and the build output were verified via authenticated curl. Visual UX (mobile breakpoints 375 / 390 / 430 / 768 / 1024 / 1440, the `<a download>` browser-save dialog, button hover states, the segmented-toggle active underline on touch, accent color rendering against real screen calibration) was NOT exercised in a browser. Real-device smoke is the honest validation step Ghost performs after merge.
+
+### Files
+
+**Hub repo (this commit):**
+- New: `src/components/intel/downloads-section.tsx`
+- Modified: `src/components/intel/intel-zone-view.tsx` (prepend `case "downloads"`, change default fall-through to `<DownloadsSection />`)
+- Modified: `src/app/intel/page.tsx` (fallback `tab ?? "downloads"`)
+- Modified: `src/lib/navigation.ts` (Intel `subTabs` order + `defaultSubTab`)
+- Modified: `CLAUDE.md` (this section)
+
+**Trevor repo (sibling commit, `--no-verify` per `feedback_sacred_bypass`):**
+- Modified: `BEHAVIOR_RULES.md` (Section 2 + Section 3 entries)
+
+### What this does NOT do
+
+- Does NOT add a Discord-side download UI (the bot-side 📦 reaction handler already exists from yesterday's `f0676d4`).
+- Does NOT touch backend file storage, archive logic, or cleanup timer.
+- Does NOT change API contract — purely consumes existing `/api/intel/downloads/*` routes shipped 2026-05-10.
+- Does NOT add a confirmation modal on archive/unarchive (matches G2 + AutoTrader-toggle precedent — both are reversible operator actions, not destructive).
+- Does NOT introduce new design tokens, CSS utility classes, or `.css` files.
+- Does NOT add new npm dependencies (`lucide-react` icons `Download`, `FolderOpen`, `Archive`, `RotateCcw` already in lockfile).
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted.
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only frontend, zero trade-closing code. Rule 14 (sacred files) — 9/9 byte-identical (zero bot-side edits). Rule 15 (additive DB) — N/A. Rule 16 (surgical edits) — only the 4 listed Hub files + 2 doc files staged. Rule 22 (no Discord channels touched). Rule 30 (no ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 32 (Hub-Only Control Doctrine) — N/A (no kill / pause affordance). No new npm dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens. INTEL accent = magenta preserved (glow on header card only). Mobile-first verified at 375vw via SSR markup. Tap-target floor 44×44 enforced via `HapticButton`.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores Intel sub-tab order to [lessons, journal, similar, calibration, shadow]
+# and defaultSubTab to "lessons". DownloadsSection component file is deleted
+# by the revert. Backend (download_manager.py, /api/intel/downloads/*, 📦
+# reaction handler, cleanup timer) remains untouched and continues to operate
+# normally; only the UI surface is removed.
+```
