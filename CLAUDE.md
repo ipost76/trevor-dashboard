@@ -4732,3 +4732,164 @@ sudo systemctl restart trevor-dashboard.service
 ```
 
 Wave M (MANUAL zone) extension complete. Bot side untouched.
+
+## 2026-05-11 — MANUAL / Stock tab → SCOUT discovery feed (F3 hub side)
+
+The MANUAL zone's Stock sub-tab — previously a "coming soon" placeholder —
+now renders a live SCOUT discovery feed reading from the new
+`/api/scout/discoveries` endpoint (see scout repo `CLAUDE.md` § F3). The
+underlying scout signal-driven engine + scheduler + Discord embeds were
+already shipped in SCOUT waves F1/F2; this commit only wires up the
+hub-side surface.
+
+### Composition (locked)
+
+```
+/manual?tab=stock  → <StockSection>
+  └─ <DiscoveryFeed />  (src/components/scout/discovery-feed.tsx)
+       ├─ Header card (magenta glow, Compass icon, "STOCK DISCOVERIES" title,
+       │   "Manual · SCOUT feed" subtitle, right-aligned result-count chip,
+       │   two SegmentedToggle rows for engine filter [All / Long-term /
+       │   Swing] and days filter [7d / 14d / 30d]).
+       ├─ Loading: 4 SkeletonCard placeholders in a grid (only on first load,
+       │   no spinner on filter-change refetches — keeps stale data visible).
+       ├─ Error: red-glow Card with "Failed to load discoveries — {msg}".
+       ├─ Empty: <EmptyState> with Compass icon, "No discoveries yet" title,
+       │   body "SCOUT runs daily at 4:30 PM ET. Try widening the date range
+       │   or switching engine."
+       └─ Feed: 1-col on mobile, 2-col on xl. Each card glow=cyan if engine
+           is "position", glow=green if "swing". Card body:
+             · ticker + truncated company name + timeframe pill ("Position ·
+               1-8mo" or "Swing · 1-4wk")
+             · posted-at line
+             · 3-up metric grid (Price / MCap / Sector) framed by border-y
+             · 3-up metric grid (RS [colored via rsColor] / Trend [short] /
+               Volume [Nx])
+             · narrative paragraph (text-caption leading-relaxed)
+             · footer row: material_change_trigger pill (amber, with the
+               matching lucide icon — FileText / Users / Building2 /
+               TrendingUp) OR a muted "No catalyst" label, plus right-aligned
+               "Confidence {score}" chip.
+```
+
+### Files
+
+```
+new:   src/components/scout/discovery-feed.tsx       (~340 LOC, "use client")
+mod:   src/components/scalp/stock-section.tsx        (rewrite — placeholder
+                                                       replaced with single
+                                                       <DiscoveryFeed /> render
+                                                       inside standard page
+                                                       wrapper; preserved
+                                                       `animate-fade-in` + the
+                                                       canonical `space-y-4 p-4
+                                                       md:space-y-6 md:p-6
+                                                       lg:px-8` padding chain)
+mod:   CLAUDE.md                                     (this entry)
+```
+
+### Surgical scope
+
+- `/manual/scout` 7-tab detail view (D2/D3 work) untouched — different file
+  tree (`src/components/scout/*.tsx` siblings, but only the new
+  `discovery-feed.tsx` and `use-fetch.ts` + `format.ts` reads).
+- `ScalpZoneView` dispatcher in `scalp-zone-view.tsx` — unchanged. Already
+  routes `subtab === "stock"` to `<StockSection />`.
+- Other MANUAL sub-tabs (Scalp / Reminders / DCA) — unchanged.
+- Other zones (`/dashboard`, `/autotrader`, `/intel`, `/memory`, `/manual/scout`) — unchanged.
+- No new npm dependencies (`Compass`, `FileText`, `Users`, `Building2`,
+  `TrendingUp`, `Search` icons all pre-existing in `lucide-react`; reuses
+  existing UI primitives Card / Pill / SegmentedToggle / Skeleton /
+  EmptyState from `@/components/ui` barrel).
+
+### URL sync
+
+Filters use `?engine=` and `?days=` URL params alongside the existing
+`?tab=stock`. Pattern matches `scout-tabs.tsx`: `useSearchParams` →
+validate against `Set` allowlist → `router.replace(pathname?params,
+{scroll:false})` on change. Defaults `engine=all` and `days=7` when unset
+or invalid. `Suspense` wrapper around the inner component matches the
+Next 15 `useSearchParams` requirement.
+
+### Data fetching
+
+Reuses `useScoutFetch` hook from `src/components/scout/use-fetch.ts` —
+same AbortController + epoch + visibility-aware polling that powers the
+other SCOUT panels (here without `refreshMs` since discoveries publish
+once daily at 4:30 PM ET; the user-driven filter change is sufficient
+refresh granularity). `fetchDiscoveries(engine, days, signal)` is inline
+to the feed file rather than added to `api.ts` — the discovery endpoint
+is only consumed in this one component, so co-located keeps imports
+shorter and the existing `api.ts` surface stable.
+
+### Aesthetic conformance
+
+- Cyberpunk palette only via existing tokens (`accent-cyan`,
+  `accent-green`, `accent-magenta`, `accent-amber`, `accent-red`,
+  `border-border-subtle`, `bg-bg-card`).
+- MANUAL zone accent (`accent-magenta`) preserved on the feed's header
+  card — matches the existing `scalp-header.tsx` / `reminders-section`
+  /`dca-section` pattern so tab-flipping density is consistent.
+- Per-card glow distinguishes engines (cyan = position long-term,
+  green = swing) — same color mapping as the F2 Discord embeds.
+- JetBrains Mono on all data values (ticker, price, rs, score) via
+  `font-mono`; default font on labels.
+- Mobile-first verified at 375px: `space-y-4`/`gap-2` base; `grid-cols-3`
+  metric rows with `truncate` on cell values to handle long sector
+  strings; filter SegmentedToggles stack vertically on mobile via
+  `flex-col md:flex-row`.
+
+### Verification (live)
+
+- Hub build: `npm run build` → ✓ Compiled successfully in 9.0s, 0 errors,
+  9/9 static pages generated. `/manual` route bundle: 14.4 kB / 127 kB
+  first-load (was ~14.0 kB before — net +0.4 kB for DiscoveryFeed).
+- `trevor-dashboard.service` restarted at 23:51:47 UTC, MainPID 1193172,
+  `[HUB] TREVOR Hub ready on http://127.0.0.1:3333` within 2 s, zero
+  errors in journalctl since restart.
+- `scout.service` restarted at 23:38 UTC for the new endpoint, MainPID
+  1193053, 8 jobs re-registered, RSS=193MB on first heartbeat, no
+  ERROR / CRITICAL / FAILED in journalctl.
+- `GET /api/scout/discoveries` → 200, count=6 (matches DB inventory from
+  F2 live test).
+- `GET /api/scout/discoveries?engine=position&days=30` → count=3.
+- `GET /api/scout/discoveries?engine=swing&days=30` → count=3.
+- `GET /api/scout/discoveries?engine=invalid` → 422 (validator firing).
+- `GET /api/scout/discoveries?days=200` → 422.
+- Hub `/api/health` (unauth) → 200, `node_uptime_seconds=45`.
+- Hub `/manual?tab=stock` (unauth) → 307 → `/login` (correct — `manual`
+  remains auth-gated by middleware). Compiled chunk
+  `chunks/app/manual/page-23c51f847e3d9b22.js` contains all expected
+  strings: `STOCK DISCOVERIES`, `SCOUT feed`, `Position · 1-8mo`,
+  `Swing · 1-4wk`, `Long-term`, `No discoveries yet`, `Compass`,
+  `api/scout/discoveries`.
+- Regression: `/dashboard`, `/autotrader`, `/manual/scout`, `/intel`,
+  `/memory` all still respond with 307 → `/login` (unauthed) — no 5xx,
+  no route compilation breaks.
+
+### Rules touched
+
+- Rule 14 (sacred `/home/trevor/trevor/`): not touched.
+- Rule 16 (surgical edits): one new file, one rewritten file (placeholder),
+  one CLAUDE.md append. `scout-tabs.tsx`, `scalp-zone-view.tsx`, all
+  other scout/scalp/UI primitives, all other routes — untouched.
+- Rule 18 (live evidence): every claim above is grep / curl / journalctl
+  output.
+- Rule 32 (Hub-only control doctrine — killswitch sovereign): not
+  applicable — discovery feed is read-only, no actions emitted.
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores StockSection back to the "COMING SOON" placeholder. The new
+# discovery-feed.tsx file is deleted by the revert. The companion SCOUT
+# backend endpoint at /api/scout/discoveries is a separate commit in the
+# scout repo and persists independently — it remains live and harmless
+# (no consumers in the hub after this revert).
+```
+
+F3 hub side complete. SCOUT backend remains live (see scout/CLAUDE.md
+§ F3). MANUAL zone now has four real sub-tabs end-to-end:
+SCALP · STOCK · REMINDERS · DCA.
