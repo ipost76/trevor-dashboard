@@ -4893,3 +4893,36 @@ sudo systemctl restart trevor-dashboard.service
 F3 hub side complete. SCOUT backend remains live (see scout/CLAUDE.md
 § F3). MANUAL zone now has four real sub-tabs end-to-end:
 SCALP · STOCK · REMINDERS · DCA.
+
+## 2026-05-12 — SCOUT v2 discovery feed E2E verified (F4 hub side)
+
+End-to-end smoke run of the F1→F2→F3 chain (driven from the scout repo,
+documented in scout `CLAUDE.md` § F4). Hub-side observable surface
+unchanged this commit — no code edits to the dashboard, only this
+docstring entry.
+
+### Verification from the hub vantage (2026-05-12 00:30 UTC)
+
+- `/api/scout/discoveries` (nginx → :3334) → `count=12` rows (6 from F2 +
+  6 newly persisted by the F4 E2E run). Latest = `RXT (swing)` with full
+  narrative + parsed `factors` dict.
+- `/api/scout/health` → status=healthy, discoveries=12 table count,
+  last_scan=2026-05-12T00:29:10.
+- All hub routes (`/dashboard`, `/autotrader`, `/manual`, `/intel`,
+  `/memory`, `/manual/scout`) respond `307 → /login` — middleware auth
+  gate firing normally, no 5xx, no regression from F3 surfaces.
+- `<DiscoveryFeed />` bundle still present in
+  `chunks/app/manual/page-23c51f847e3d9b22.js` (same hash as F3 build —
+  no hub rebuild triggered by F4 since no hub source changed).
+- `/manual/scout` 7-tab detail view (D2/D3 scope) still data-fed: scout
+  engines persist top-50 daily to the `scans` table per F2's
+  preservation contract; the F4 E2E run wrote 50 + 50 rows there.
+
+### Files touched in this commit
+
+```
+mod: CLAUDE.md  (this entry only; no .tsx / .ts / config edits)
+```
+
+SCOUT v2 discovery feed verified end-to-end. Bot side, AutoTrader side,
+and `/manual/scout` detail view all unaffected.
