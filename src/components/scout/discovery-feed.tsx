@@ -1,3 +1,12 @@
+/**
+ * @deprecated v2 discovery feed. Superseded by DiscoveryFeedV3 (Wave G, 2026-05-14).
+ *
+ * Retained as the rollback path: flip SCOUT_V3_FEED to 'false' in auto_config
+ * to revert the Hub STOCK tab to this implementation.
+ *
+ * DO NOT MODIFY OR DELETE before 2026-06-13 (30-day retention window).
+ * After that window, removal candidacy can be evaluated.
+ */
 "use client";
 
 import { Suspense, useCallback, useMemo } from "react";
