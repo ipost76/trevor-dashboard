@@ -5,12 +5,18 @@ import { LiveBoardSection } from "./live-board-section";
 import { RecentSignalsSection } from "./recent-signals-section";
 import { QualitySection } from "./quality-section";
 import { CalibrationSection } from "./calibration-section";
-import { StockSection } from "./stock-section";
 import { RemindersSection } from "./reminders-section";
 import { DCASection } from "./dca-section";
 
 interface ScalpZoneViewProps {
   subtab?: string;
+  /**
+   * Pre-rendered StockSection server component, passed in from the parent
+   * page (/manual/page.tsx) so the SCOUT_V3_FEED flag-read (which uses
+   * server-only `next/headers`) can compose correctly with this client
+   * dispatcher. Rendered when subtab === "stock".
+   */
+  stockSlot?: React.ReactNode;
 }
 
 const PAGE_WRAPPER =
@@ -33,9 +39,9 @@ const PAGE_WRAPPER =
  * REMINDERS and DCA emit fragments — wrapped here in the standard
  * page-padding container so spacing matches SCALP.
  */
-export function ScalpZoneView({ subtab = "scalp" }: ScalpZoneViewProps) {
+export function ScalpZoneView({ subtab = "scalp", stockSlot }: ScalpZoneViewProps) {
   if (subtab === "stock") {
-    return <StockSection />;
+    return <>{stockSlot}</>;
   }
 
   if (subtab === "reminders") {

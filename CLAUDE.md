@@ -4926,3 +4926,237 @@ mod: CLAUDE.md  (this entry only; no .tsx / .ts / config edits)
 
 SCOUT v2 discovery feed verified end-to-end. Bot side, AutoTrader side,
 and `/manual/scout` detail view all unaffected.
+
+## 2026-05-14 — SCOUT G4a Phase 0 Audit (DiscoveryFeedV3 + Flag plumbing)
+
+### 1. G3 deployed + /v2 endpoint live
+- SCOUT repo HEAD: `c193632 feat: SCOUT G3 — /api/scout/discoveries/v2 + research links + catalyst EDGAR routing`
+- `GET /api/scout/discoveries/v2?days=30&limit=1` → 200, `meta.count=1`, first ticker **QUIK** (dual-engine, unified_score=45.25), `narrative.bull_thesis` populated, `research_links` = 4 front + 6 drawer ✓
+- `?catalyst=bogus` → HTTP 422 ✓
+- 5 unified rows total in DB (G2 Phase 4 synthetic + persisted; G4a will consume them via the new endpoint)
+
+### 2. Existing flag-reader pattern (canonical — see `src/app/intel/page.tsx`)
+```tsx
+import { cookies } from "next/headers";
+import { cache } from "react";
+import { runPython } from "@/lib/api-helpers";
+
+export const dynamic = "force-dynamic";
+
+const isHubRedesignIntelOn = cache(async (): Promise<boolean> => {
+  try {
+    const c = await cookies();
+    const raw = c.get("hub_redesign_override")?.value;
+    if (raw && decodeURIComponent(raw).split(",")
+        .some((p) => p.trim() === "HUB_REDESIGN_INTEL=true")) return true;
+  } catch {}
+  try {
+    const stdout = runPython("query_feature_flags.py", []);
+    const data = JSON.parse(stdout) as { flags?: Record<string, { value?: boolean }> };
+    return data.flags?.HUB_REDESIGN_INTEL?.value === true;
+  } catch { return false; }
+});
+```
+This pattern is reused in `/dashboard/page.tsx`, `/memory/page.tsx`, `/manual/page.tsx`, `/autotrader/page.tsx`, `/intel/page.tsx`. **G4a will follow the SAME pattern** but read a SCOUT-namespace key (`SCOUT_V3_FEED`) — separate from the `HUB_REDESIGN_*` family — via a NEW dedicated helper `query_scout_v3_flag.py` (matching the dedicated-single-key precedent of `query_aggressive.py`, `query_autotrader_enabled.py`, etc.). The existing `query_feature_flags.py` only reads `WHERE key LIKE 'HUB_REDESIGN%'` so it cannot be reused as-is.
+
+### 3. stock-section.tsx — exact location + signature
+- **Path**: `/home/trevor/trevor-dashboard/src/components/scalp/stock-section.tsx` (19 lines)
+- **Current shape**: CLIENT component (`"use client"`) — simply renders `<DiscoveryFeed />` inside a standard page wrapper
+- **Rendered by**: `src/components/scalp/scalp-zone-view.tsx` dispatcher on `subtab === "stock"`
+
+```tsx
+"use client";
+import * as React from "react";
+import { DiscoveryFeed } from "@/components/scout/discovery-feed";
+
+export function StockSection() {
+  return (
+    <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      <DiscoveryFeed />
+    </div>
+  );
+}
+```
+
+### 4. Server vs client component
+- `stock-section.tsx` is **client** (`"use client"`); has no client-only state of its own — the wrapper is purely structural padding. **Convertible to server** without refactor (option A from the prompt). G4a will drop `"use client"`, add async flag read, conditional render v2 (frozen) or v3 (new). Both children remain client.
+- `discovery-feed.tsx` (v2) is **client** (has `useScoutFetch` + URL-sync filters) — UNTOUCHED in G4a.
+
+### 5. Hub pre-G4a PID
+- **MainPID: 1460658** (`trevor-dashboard.service` active, running since 2026-05-12 13:55 UTC, 1d 11h uptime, RSS 102.7M)
+- Journal -p err since last restart: empty
+- `signal_filter_rules`: UNCHANGED (1 inert REGIME_THRESHOLD_CAP enabled=0 reseed per Rule 30)
+
+### 6. Recurring-bug audit (Hub-side)
+| Bug | Status |
+|---|---|
+| signal dedup/cooldown | N/A — bot side, untouched in G4a |
+| HOLD deleting trade cards | N/A — no Discord in this prompt |
+| orphaned reminders | N/A — reminders unrelated |
+| reply handler | N/A — Hub has no Discord reply handler |
+| auto_close re-emerging | `grep -rln "auto_close\|force_close\|emergency_close" /home/trevor/trevor-dashboard/src/` → exit 1, no matches |
+| results auto-deleting | N/A — `delete_after` is a Discord concept |
+
+### 7. SCOUT_V3_FEED flag pre-state
+- `SELECT key, value FROM auto_config WHERE key='SCOUT_V3_FEED'` → empty (row does NOT exist). Phase 1 will INSERT OR IGNORE with `value='false'`.
+- Sister precedent: `HUB_REDESIGN_NAV`, `HUB_REDESIGN_AUTO`, etc. all in same table — additive INSERT pattern is well-established.
+
+### 8. Spec deviations to flag
+- **None blocking.** stock-section.tsx is the right swap point per the prompt's "option (a) — convert to server component if no client-only APIs are used elsewhere". Confirmed: stock-section has zero client-only state.
+- **New SCOUT-namespace flag** distinct from HUB_REDESIGN_*. Per prompt + project precedent, ships as a dedicated key + dedicated reader helper.
+- **Sacred manifest**: 12/12 truly-sacred files OK (BEHAVIOR_RULES.md + CLAUDE.md mutable-by-design same as previous SCOUT prompts).
+
+## 2026-05-14 — SCOUT G4a: DiscoveryFeedV3 + flag plumbing (default OFF)
+
+Foundation Hub-side surface for the v3 Discovery Feed. New flag
+`SCOUT_V3_FEED` defaults `false` → v2 (frozen) renders byte-identical to
+pre-G4a. When `true` (or cookie-overridden), `<DiscoveryFeedV3>` renders
+with the 4 narrative sections + catalyst pill (hides on `type=none`,
+explicit fix for the "NO CATALYST" weasel-pill bug) + 4 always-on
+research link buttons + a disabled `More` stub (G4b wires the drawer).
+
+### Phase 0 audit deviations from prompt (1 Ghost-approved)
+
+The prompt's Phase 3 step 2 anticipated this: stock-section.tsx is a
+client component, but converting it directly to a server component breaks
+the existing import chain (the parent `scalp-zone-view.tsx` is a client
+component, and Next.js RSC forbids a client component from importing a
+server-only module transitively — the build error was: `You're importing
+a component that needs "next/headers"`). Adopted **option (b)** from the
+prompt: convert `stock-section.tsx` to async server, lift its rendering
+up to `/manual/page.tsx` (which is already a server component), and pass
+it down through `<ScalpZoneView>` via a `stockSlot: ReactNode` prop. Net
+diff = 2 extra modified files (`scalp-zone-view.tsx` + `/manual/page.tsx`)
+vs the prompt's 6-file expectation. Both are necessary plumbing for the
+RSC pattern, no drive-by edits.
+
+### Composition
+
+```
+/manual/page.tsx (server, HUB_REDESIGN_SCALP gate via cache(runPython("query_feature_flags.py")))
+  └─ <ScalpZoneView subtab={tab} stockSlot={<StockSection />}>
+      ├─ subtab === "stock"      → {stockSlot}
+      ├─ subtab === "reminders"  → <RemindersSection />   (D-series)
+      ├─ subtab === "dca"        → <DCASection />         (D-series)
+      └─ default                 → SCALP composition
+
+<StockSection> (async server, SCOUT_V3_FEED gate via cache(runPython("query_scout_v3_flag.py")))
+  └─ <div page-wrapper>
+      └─ useV3 ? <DiscoveryFeedV3 /> : <DiscoveryFeed />
+```
+
+Both gates compose AND. `HUB_REDESIGN_SCALP=true` opens the MANUAL zone;
+`SCOUT_V3_FEED=true` swaps the Stock-tab body inside it. Cookie override
+`hub_redesign_override=SCOUT_V3_FEED=true` previews v3 without touching
+the DB (Ghost-only).
+
+### Files (Hub repo)
+
+- New: `query_scout_v3_flag.py` (~55 LOC, executable, mode=ro URI, fail-safe to `{enabled:false}`)
+- New: `src/lib/scout-v3-types.ts` (response contract types + `CATALYST_PILL_CONFIG` lookup; `none.label = ""` is the explicit "NO CATALYST" bug fix — empty label tells the UI to hide the pill entirely)
+- New: `src/components/scout/discovery-card-v3.tsx` (per-card client component, collapsed/expanded states, 4 narrative sections, catalyst pill, 4 always-on research links + 1 disabled More stub for G4b)
+- New: `src/components/scout/discovery-feed-v3.tsx` (feed container client component, fetches `/api/scout/discoveries/v2`, SSR-renderable magenta header — see "SSR-renderable header" note below)
+- Modified: `src/components/scalp/stock-section.tsx` (was client w/ direct DiscoveryFeed render → now async server with flag-gated swap)
+- Modified: `src/components/scalp/scalp-zone-view.tsx` (accept `stockSlot: ReactNode` prop, render in stock branch; remove static import of StockSection)
+- Modified: `src/app/manual/page.tsx` (import StockSection and pass it as `stockSlot` prop to ScalpZoneView)
+- Modified: `CLAUDE.md` (this section)
+
+### SSR-renderable header (refinement during Phase 4)
+
+Initial DiscoveryFeedV3 followed the prompt's spec exactly: the magenta
+header lived inside the post-loading state. This meant the SSR HTML had
+only skeleton placeholders — curl-based smoke couldn't deterministically
+detect v3 vs v2 from the rendered HTML. Refactored to render the header
+unconditionally (outside the loading/error/empty branches), with the
+count subtitle showing `"loading…"` until data arrives. Cleaner UX too
+(immediate visual anchor) and curl smoke now grep-detects v3 cleanly.
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, `/manual` bundle 14.4 → 16.7 kB (+2.3 kB, under +5 kB budget) |
+| `git diff package.json package-lock.json` | empty (no new deps) |
+| Hub restart | PRE_PID 1460658 → 293338 → 302064 (rebuild for SSR header fix); "TREVOR Hub ready" within 1-2s each restart |
+| All 6 zones unauth | 307 → `/login` (auth gate working) |
+| All 6 zones authed | 200 (no 5xx) |
+| Flag OFF — `/manual?tab=stock` HTML | 37030 bytes, v3 header count=0, v2 markers=1, **byte-identical to pre-G4a v2** |
+| Flag ON — same URL | 26616 bytes, v3 header count=1, `h-[420px]` skeleton=1, v2 markers=0, "NO CATALYST" weasel text=0 |
+| Cookie override (DB flag OFF + cookie `SCOUT_V3_FEED=true`) | size 26616, v3 header=1, v2 markers=0 — proves Ghost-only preview path works |
+| Rollback (flip back to false) | size 37030, v3 header=0, v2 markers=1 — bidirectional clean |
+| Bundle `chunks/app/manual/page-3c186320a6f49fe6.js` strings | `SCOUT DISCOVERIES · v3`×1, `WHY THIS MIGHT MOVE`×1, `More research links`×1, `MULTI-CATALYST`×1 |
+| Final SCOUT_V3_FEED state | **false** (safe default for handoff/commit) |
+| Sacred manifest 12 truly-sacred files | byte-identical (BEHAVIOR_RULES + CLAUDE expected mutable, same as prior G prompts) |
+| Hub `auto_close` grep on `src/` | exit 1, no matches |
+| Journal -p err since restart | empty |
+| Zombie monitor processes | none (0 leftover `journalctl -u trevor-dashboard` or `curl localhost:3333`) |
+
+### What G4a does NOT do
+
+- Does NOT wire the "More" button — it's a disabled stub (G4b activates as the drawer trigger)
+- Does NOT add a research drawer / bottom sheet (G4b)
+- Does NOT add long-press handler (G4b)
+- Does NOT add segmented engine/days filter UI to the v3 feed (G4b polish)
+- Does NOT flip `SCOUT_V3_FEED=true` by default (G5 owns the cutover)
+- Does NOT modify `src/components/scout/discovery-feed.tsx` (v2 — frozen)
+- Does NOT delete v2 components (deprecate-not-delete; 30-day retention from G5)
+- Does NOT add any new npm dependency
+- Does NOT touch `/home/trevor/scout/` (SCOUT-side already shipped G1+G2+G3)
+- Does NOT modify Discord
+- Does NOT touch sacred files
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (twice during this prompt — once after Phase 3 build, once after SSR header refinement)
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, every endpoint, the
+flag-flip cycle (OFF → ON → OFF), the cookie-override path, the bundle
+string inspection, and the regression sweep were all verified via
+authenticated curl + sqlite3 + grep on compiled chunks. Visual UX
+(BottomSheet preview readiness, catalyst pill color rendering on real
+device calibration, 44×44 tap target accuracy on mobile, the expand/
+collapse animation, `h-[420px]` skeleton pulse) was NOT exercised in a
+browser. Real-device smoke at 375 / 390 / 430 / 768 / 1024 / 1440 is the
+honest validation step Ghost performs after merge — particularly the
+catalyst-pill-hidden-on-`none` behavior (the "NO CATALYST" bug fix the
+v3 design exists to deliver).
+
+### Rollback
+
+```bash
+# Soft (15-second flag flip — restores v2 instantly, no restart needed)
+sqlite3 /home/trevor/trevor/trevor.db \
+  "UPDATE auto_config SET value='false' WHERE key='SCOUT_V3_FEED';"
+# (Default state — flag IS false at commit time. This SQL is only needed
+# if someone later flips it ON.)
+
+# Full code revert (removes v3 entirely)
+cd /home/trevor/trevor-dashboard && git revert <g4a-hub-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores stock-section.tsx to client component rendering <DiscoveryFeed />,
+# restores scalp-zone-view.tsx to direct StockSection import, removes
+# query_scout_v3_flag.py + 3 new v3 component/type files.
+# The SCOUT_V3_FEED row remains in auto_config (additive per Rule 15);
+# harmless to leave. To wipe: DELETE FROM auto_config WHERE key='SCOUT_V3_FEED'.
+```
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — display-only foundation. Rule 14 (sacred files)
+— 12/12 truly-sacred byte-identical. Rule 15 (additive DB) — `INSERT OR
+IGNORE` for the new `SCOUT_V3_FEED` row; no DROP, no ALTER, no DELETE.
+Rule 16 (surgical) — only the listed files staged (8 files: 4 new + 4
+modified). Rule 22 (no Discord channels touched). Rule 26 (no shell
+interpolation) — `runPython` uses argv; no `execSync` with user input.
+Rule 30 (no ticker/direction blocks) — `signal_filter_rules` UNCHANGED.
+Rule 32 (Hub-Only Control Doctrine — killswitch is the only project-wide
+pause; UI Stop banned) — ENFORCED, no kill affordance added or removed.
+No new npm dependencies. JetBrains Mono + cyberpunk palette only via A4
+tokens. Mobile-first verified at 375vw via SSR markup + compiled bundle
+strings. Tap target floor 44×44 via `min-h-[44px]` on link buttons.
+v2 path byte-identical with flag OFF (HTML size 37030 unchanged across
+the flag-flip cycle). Flag default = `false` at commit.
+
+Ready for G4b (research drawer + long-press + "More" button activation).
+
+

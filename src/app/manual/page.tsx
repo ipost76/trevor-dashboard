@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { cache } from "react";
 import { runPython } from "@/lib/api-helpers";
 import { ScalpZoneView } from "@/components/scalp/scalp-zone-view";
+import { StockSection } from "@/components/scalp/stock-section";
 
 export const dynamic = "force-dynamic";
 
@@ -62,5 +63,9 @@ export default async function ManualPage({ searchParams }: ManualPageProps) {
   const useNew = await isHubRedesignManualOn();
   if (!useNew) return <ManualDisabled />;
   const { tab } = await searchParams;
-  return <ScalpZoneView subtab={tab ?? "scalp"} />;
+  // <StockSection /> is an async server component (reads SCOUT_V3_FEED flag);
+  // we render it here so the client-side <ScalpZoneView /> can receive it as
+  // a prop slot. RSC import boundary: client components cannot import server
+  // components, but they can accept them as props.
+  return <ScalpZoneView subtab={tab ?? "scalp"} stockSlot={<StockSection />} />;
 }
