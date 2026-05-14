@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import type { DiscoveryV2Response } from "@/lib/scout-v3-types";
+import type { DiscoveryV2Item, DiscoveryV2Response } from "@/lib/scout-v3-types";
 
 import { DiscoveryCardV3 } from "./discovery-card-v3";
+import { ResearchDrawer } from "./research-drawer";
 
 /**
  * DiscoveryFeedV3 — fetches /api/scout/discoveries/v2 (G3 endpoint) and renders cards.
@@ -16,6 +17,7 @@ export function DiscoveryFeedV3() {
   const [data, setData] = useState<DiscoveryV2Response | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeDrawer, setActiveDrawer] = useState<DiscoveryV2Item | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,9 +92,15 @@ export function DiscoveryFeedV3() {
         </div>
       ) : (
         data.discoveries.map((item) => (
-          <DiscoveryCardV3 key={`${item.ticker}-${item.posted_at}`} item={item} />
+          <DiscoveryCardV3
+            key={`${item.ticker}-${item.posted_at}`}
+            item={item}
+            onMoreClick={() => setActiveDrawer(item)}
+          />
         ))
       )}
+
+      <ResearchDrawer item={activeDrawer} onClose={() => setActiveDrawer(null)} />
     </div>
   );
 }

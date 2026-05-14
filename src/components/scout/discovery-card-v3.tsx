@@ -7,6 +7,7 @@ import { CATALYST_PILL_CONFIG } from "@/lib/scout-v3-types";
 
 interface Props {
   item: DiscoveryV2Item;
+  onMoreClick: () => void;
 }
 
 /**
@@ -22,7 +23,7 @@ interface Props {
  * Catalyst pill HIDDEN when catalyst_type === "none" (label === "") — explicit
  * fix for the v2 "NO CATALYST" weasel-pill bug.
  */
-export function DiscoveryCardV3({ item }: Props) {
+export function DiscoveryCardV3({ item, onMoreClick }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const pill = CATALYST_PILL_CONFIG[item.catalyst_type];
@@ -150,15 +151,15 @@ export function DiscoveryCardV3({ item }: Props) {
             </span>
           </a>
         ))}
-        {/* G4a placeholder — becomes drawer trigger in G4b */}
         <button
           type="button"
-          disabled
-          className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-zinc-800 opacity-40 cursor-not-allowed min-h-[44px]"
-          title="More research links — enabled in G4b"
+          onClick={onMoreClick}
+          className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-zinc-800 hover:border-fuchsia-400/50 hover:bg-fuchsia-400/5 transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-fuchsia-400"
+          title={`More research sources for ${item.ticker}`}
+          aria-label={`Open more research sources for ${item.ticker}`}
         >
           <span className="text-lg leading-none">➕</span>
-          <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-500">More</span>
+          <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-300">More</span>
         </button>
       </div>
 
