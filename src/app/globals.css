@@ -87,10 +87,10 @@
   --radius-xs: 0.125rem;
   --radius-xl: 1rem;
   --radius-pill: 9999px;
-  --duration-instant: 80ms;
-  --duration-fast: 160ms;
-  --duration-medium: 240ms;
-  --duration-slow: 400ms;
+  --transition-duration-instant: 80ms;
+  --transition-duration-fast: 160ms;
+  --transition-duration-medium: 240ms;
+  --transition-duration-slow: 400ms;
   --breakpoint-xs: 23.4375rem;
   --breakpoint-mm: 26.875rem;
   --animate-pulse-cyan: pulse-cyan 2s ease-in-out infinite;
@@ -98,8 +98,8 @@
   --animate-pulse-green: pulse-green 2s ease-in-out infinite;
   --animate-pulse-magenta: pulse-magenta 2s ease-in-out infinite;
   --animate-shimmer-ds: shimmer-ds 1.6s linear infinite;
-  --animate-slide-up: slide-up var(--duration-medium) cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-fade-in: fade-in var(--duration-fast) ease-out;
+  --animate-slide-up: slide-up var(--transition-duration-medium) cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in var(--transition-duration-fast) ease-out;
   /* H1 — TREVOR Chat modal motion (slide-up bottom sheet w/ spring overshoot) */
   --animate-slide-up-spring:   slide-up-spring 480ms cubic-bezier(0.17, 0.84, 0.44, 1);
   --animate-slide-down-spring: slide-down-spring 280ms cubic-bezier(0.4, 0, 1, 1);
