@@ -5,7 +5,6 @@ import { LiveBoardSection } from "./live-board-section";
 import { RecentSignalsSection } from "./recent-signals-section";
 import { QualitySection } from "./quality-section";
 import { CalibrationSection } from "./calibration-section";
-import { RemindersSection } from "./reminders-section";
 import { DCASection } from "./dca-section";
 
 interface ScalpZoneViewProps {
@@ -36,20 +35,15 @@ const PAGE_WRAPPER =
  *
  * STOCK self-wraps its own outer padding container (placeholder).
  *
- * REMINDERS and DCA emit fragments — wrapped here in the standard
- * page-padding container so spacing matches SCALP.
+ * DCA emits a fragment — wrapped here in the standard page-padding
+ * container so spacing matches SCALP. (Reminders sub-tab was removed
+ * 2026-05-14; reminders back the DCA cadence as a mechanism, not a
+ * standalone view. `?tab=reminders` URLs are redirected to
+ * `?tab=dca` at the page level — see /manual/page.tsx.)
  */
 export function ScalpZoneView({ subtab = "scalp", stockSlot }: ScalpZoneViewProps) {
   if (subtab === "stock") {
     return <>{stockSlot}</>;
-  }
-
-  if (subtab === "reminders") {
-    return (
-      <div className={PAGE_WRAPPER}>
-        <RemindersSection />
-      </div>
-    );
   }
 
   if (subtab === "dca") {

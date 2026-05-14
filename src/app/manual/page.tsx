@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { runPython } from "@/lib/api-helpers";
 import { ScalpZoneView } from "@/components/scalp/scalp-zone-view";
@@ -63,6 +64,10 @@ export default async function ManualPage({ searchParams }: ManualPageProps) {
   const useNew = await isHubRedesignManualOn();
   if (!useNew) return <ManualDisabled />;
   const { tab } = await searchParams;
+  // Legacy `?tab=reminders` → DCA (REMINDERS sub-tab merged into DCA 2026-05-14).
+  if (tab === "reminders") {
+    redirect("/manual?tab=dca");
+  }
   // <StockSection /> is an async server component (reads SCOUT_V3_FEED flag);
   // we render it here so the client-side <ScalpZoneView /> can receive it as
   // a prop slot. RSC import boundary: client components cannot import server

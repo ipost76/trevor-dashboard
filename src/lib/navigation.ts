@@ -79,7 +79,6 @@ export const ZONES: ReadonlyArray<Zone> = [
     subTabs: [
       { key: "scalp", label: "Scalp" },
       { key: "stock", label: "Stock" },
-      { key: "reminders", label: "Reminders" },
       { key: "dca", label: "DCA" },
     ],
     defaultSubTab: "scalp",

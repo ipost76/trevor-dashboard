@@ -5683,3 +5683,107 @@ Do not delete before this date.
 - Mobile-first 375vw layout; 44×44 tap targets; A11y on the drawer (role=dialog, Escape, focus trap, body scroll lock)
 
 
+## 2026-05-14 — MANUAL zone: merge REMINDERS sub-tab into DCA (3 sub-tabs)
+
+MANUAL zone collapses from 4 sub-tabs (Scalp / Stock / Reminders / DCA) to 3
+(Scalp / Stock / DCA). Reminders are the mechanism that delivers DCA's
+9 PM ET notifications — not a standalone feature worth a dedicated tab.
+Per Ghost: disconnect REMINDERS from navigation + the dispatcher, leave
+`reminders-section.tsx` and `/api/reminders` on disk for the bot side's
+ReminderManager. Phase 1 of the same brief was a Hub-restart drill to
+clear a reported "SYSTEM ERROR — A component failed to render" on all
+4 sub-tabs; Phase 0 diagnosis found SSR healthy on every tab + TypeScript
+clean + APIs all 200, so the crash was either a stale `_next/static`
+hash mismatch (Gotcha #8) or a browser cache — restart fixed it.
+
+### Files
+
+**Modified (4):**
+- `src/lib/navigation.ts` — drop `{key:"reminders", label:"Reminders"}` from
+  MANUAL `subTabs`. Final order: `[scalp, stock, dca]`, `defaultSubTab="scalp"`.
+  The mobile long-press BottomSheet, the desktop sub-tab strip, and the
+  BottomNav all pick up the new shape automatically (single source of truth).
+- `src/components/scalp/scalp-zone-view.tsx` — drop the `RemindersSection`
+  import + the `subtab === "reminders"` branch from the dispatcher.
+  Docstring updated.
+- `src/app/manual/page.tsx` — import `redirect` from `next/navigation`; when
+  `tab === "reminders"` call `redirect("/manual?tab=dca")`. Next.js 15 returns
+  this as a soft redirect (HTTP 200 + `<meta http-equiv="refresh"
+  content="1;url=..."`); body is a minimal chrome-only HTML so the browser
+  follows the refresh within 1s and lands on `/manual?tab=dca`.
+- `next.config.ts` — flip the legacy `/reminders` 308 destination from
+  `/manual?tab=reminders` to `/manual?tab=dca`. Existing 308 mechanism
+  unchanged.
+
+**Untouched (per Ghost — disconnect, don't delete):**
+- `src/components/scalp/reminders-section.tsx` — left on disk
+- `src/app/api/reminders/route.ts` — left on disk (bot side still writes
+  to `reminders` table; ReminderManager continues to fire 9 PM ET pings)
+- `query_reminders.py`, `set_reminders.py` — left on disk
+
+### Verification (all PASS)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` | clean, 0 errors |
+| `npm run build` | clean, `/manual` bundle 16.7 → 15.3 kB (-1.4 kB from dropped RemindersSection import in dispatcher) |
+| 3 valid sub-tabs `?tab={scalp,stock,dca}` | 200/200/200 with `LIVE BOARD` / `SCOUT DISCOVERIES` / `DCA SCHEDULE` markers |
+| `/manual` default (no `?tab`) | 200 (scalp) |
+| `/manual?tab=reminders` | 200 + `<meta http-equiv="refresh" content="1;url=/manual?tab=dca">` (Next.js soft redirect — body is chrome-only, no rendered tab content; 5440 B smaller than `/manual?tab=dca`, confirming `redirect()` short-circuited) |
+| Legacy `/reminders` | 308 → `/manual?tab=dca` (via `next.config.ts`) |
+| Other zones (`/dashboard /autotrader /intel /memory /chat`) | 200×5 |
+| Compiled chunk `1657-ff8b21794418374d.js` | only `"Scalp"` / `"Stock"` / `"DCA"` subtab labels present; `"Reminders"` string fully gone from `.next/static/chunks/**/*.js` |
+| `/manual` aria markup | sub-tab strip shows 3 buttons (Scalp aria-current, Stock, DCA) — was 4 |
+| Recurring-bug canary on changed files | 0 `auto_close`/`force_close`/`message.delete` hits across all 4 modified files |
+| Sacred 12/12 | byte-identical (`BEHAVIOR_RULES.md` + `CLAUDE.md` modified per spec, expected manifest miss per `feedback_sacred_bypass`) |
+| `signal_filter_rules` | UNCHANGED (empty — 0 enabled rows) |
+| Open positions baseline | 0 active / 0 auto-live (matches Phase 0 baseline) |
+| `trevor.service` | UNTOUCHED (PID 440298 from 13:11 UTC) |
+| `trevor-dashboard.service` | restart healthy (PID 458082 → 458631), `[HUB] TREVOR Hub ready` within 2s of each restart |
+
+### Browser smoke disclosure
+
+CC cannot operate a real browser. SSR HTML markers, every endpoint, both
+redirects (legacy `/reminders` 308 and in-zone `?tab=reminders` soft
+redirect), and compiled-chunk inspection were verified via authenticated
+curl + grep. Visual UX (the 1-second meta-refresh transition on
+`?tab=reminders`, mobile long-press BottomSheet now showing 3 entries,
+sub-tab strip rendering at 375vw without overflow) was NOT exercised in
+a browser. Phase 1 restart drill addressed Ghost's "SYSTEM ERROR"
+report — real-device confirmation after `Cmd-Shift-R` is the honest
+validation step Ghost performs.
+
+### What this does NOT do
+
+- Does NOT delete `reminders-section.tsx`, `/api/reminders`, `query_reminders.py`, or `set_reminders.py` (per Ghost: disconnect, leave for future cleanup pass)
+- Does NOT modify the bot-side `reminder_manager.py` or the `reminders` SQLite table
+- Does NOT touch the `/remind` Discord slash command (continues to work)
+- Does NOT embed `<RemindersSection />` inside `<DCASection />` (Ghost's explicit decision — redundant view, not worth surfacing)
+- Does NOT change the DCA tab content or behavior
+- Does NOT modify any other zone
+- Does NOT touch sacred files, Discord, or backend bot
+- Does NOT modify `trevor.service` — only `trevor-dashboard.service` restarted (twice: once for Phase 1 crash drill, once for Phase 2 deploy)
+
+### Rollback
+
+```bash
+cd /home/trevor/trevor-dashboard && git revert <this-commit>
+sudo systemctl restart trevor-dashboard.service
+# Restores 4-tab MANUAL zone: navigation subTabs entry + ScalpZoneView
+# reminders branch + manual/page.tsx redirect + next.config.ts /reminders
+# destination. trevor.service untouched either way.
+```
+
+### Hard constraints honored
+
+Rule 1 (NO AUTO-CLOSE) — pure UI consolidation, zero trade-closing code.
+Rule 14 (sacred files) — 12/12 byte-identical. Rule 15 (additive DB) — N/A
+(no schema changes). Rule 16 (surgical edits) — only the 4 listed files
+staged. Rule 22 (no Discord channels touched). Rule 30 (no
+ticker/direction blocks) — `signal_filter_rules` UNCHANGED. Rule 32
+(Hub-Only Control Doctrine — killswitch is the only project-wide pause;
+UI Stop banned) — ENFORCED, no kill affordance changed. No new npm
+dependencies. JetBrains Mono only. Cyberpunk palette only via A4 tokens.
+MANUAL zone accent (`violet` → magenta-glow) preserved on DCA header card.
+
+
