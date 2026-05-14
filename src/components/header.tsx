@@ -36,7 +36,11 @@ export function Header() {
   const [status, setStatus] = React.useState<StatusData | null>(null);
   const [now, setNow] = React.useState<string>("");
   const [showChangePassword, setShowChangePassword] = React.useState(false);
-  const scrollDir = useScrollDirection();
+  // Mobile hide-on-scroll tuning:
+  //   threshold=32 — was 8, too sensitive to iOS rubber-band + address-bar churn
+  //   minScrollY=80 — header stays visible while user is near the top, so iOS
+  //                   Safari's ~50px address-bar collapse can't trip the hide.
+  const scrollDir = useScrollDirection(32, 80);
 
   // Single status poll — replaces /api/system-health + /api/admin/current-state
   // per Phase 0 audit (those endpoints don't return the shape the prompt assumed;
@@ -131,7 +135,18 @@ export function Header() {
     <header
       className={cn(
         "safe-pt sticky top-0 z-30 flex flex-col gap-1 border-b border-border-subtle bg-bg-sidebar/95 backdrop-blur",
-        "transition-transform duration-medium",
+        // GPU-composited transform-only animation. `duration-100` (100ms,
+        // Tailwind built-in) replaces the prior `duration-medium` token —
+        // which silently falls back to the default 150ms because
+        // Tailwind v4's `--duration-*` @theme namespace does NOT emit
+        // `.duration-*` utilities (only `--transition-duration-*` does).
+        // 100ms is fast enough that the body bg behind the sticky element
+        // is not perceptible as a "black gap" during the hide.
+        // `will-change-transform` hints the browser to put the header on
+        // its own compositor layer so the transform doesn't repaint
+        // underlying content each frame. `ease-out` keeps the bulk of the
+        // motion at the start (gap exposed for less time).
+        "transition-transform duration-100 ease-out will-change-transform",
         hidden ? "-translate-y-full md:translate-y-0" : "translate-y-0"
       )}
     >
