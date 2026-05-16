@@ -1,16 +1,15 @@
 /**
  * TREVOR // NAVIGATION CONTRACT v1
  *
- * Single source of truth for the 5-zone navigation + per-zone sub-tabs.
+ * Single source of truth for the 4-zone navigation + per-zone sub-tabs.
  * Every nav-rendering component (BottomNav, SidebarRail, TabBar instances,
  * mobile long-press BottomSheet) imports from here. No bespoke zone arrays.
  *
  * Mobile bottom-nav order is the priority order:
- *   1. DASHBOARD (home)
- *   2. AUTO       (Scalper — front and center per Ghost crunch posture)
- *   3. MANUAL     (manual systems that display but never trade — was SCALP/TRADING)
- *   4. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
- *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
+ *   1. AUTO       (Scalper — front and center per Ghost crunch posture; Hub landing)
+ *   2. MANUAL     (manual systems that display but never trade — was SCALP/TRADING)
+ *   3. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
+ *   4. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
  * full-screen on mobile, side panel on desktop.
@@ -18,7 +17,6 @@
 
 import type { LucideIcon } from "lucide-react";
 import {
-  LayoutDashboard,
   Bot,
   Activity,
   Brain,
@@ -26,7 +24,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "dashboard" | "auto" | "manual" | "intel" | "memory";
+export type ZoneId = "auto" | "manual" | "intel" | "memory";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -48,14 +46,6 @@ export interface Zone {
 }
 
 export const ZONES: ReadonlyArray<Zone> = [
-  {
-    id: "dashboard",
-    href: "/dashboard",
-    label: "Dashboard",
-    shortLabel: "Home",
-    icon: LayoutDashboard,
-    accent: "cyan",
-  },
   {
     id: "auto",
     href: "/autotrader",

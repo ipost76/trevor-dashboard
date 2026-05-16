@@ -122,7 +122,7 @@ Invoked from `src/lib/api-helpers.ts`:
 - `/design-system` renders every `ui/` primitive live — review it before building a new one. Mobile-interaction hooks: `useLongPress`, `usePullToRefresh`, `useScrollDirection`.
 - The "live data" affordance is `live-pulse` + the `pulse-*` keyframes — reuse it rather than rolling a new indicator.
 - Mobile-first — verify every layout at **375 px** (the `xs` breakpoint) before calling it done.
-- Bottom nav: 6 zones — Dashboard, Auto, Manual, Intel, Memory, Chat.
+- Bottom nav: 4 zones — Auto, Manual, Intel, Memory (Wave B3 dropped the HOME slot). Chat is a floating action button, not a tab.
 
 ---
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, TrendingUp, Brain, Settings, MessageSquare, Bot,
+  TrendingUp, Brain, Settings, MessageSquare, Bot,
   ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef, Suspense } from "react";
@@ -20,13 +20,6 @@ type NavZone = {
 };
 
 const NAV_ZONES: NavZone[] = [
-  {
-    id: "dashboard",
-    label: "DASHBOARD",
-    icon: LayoutDashboard,
-    href: "/dashboard",
-    children: [],
-  },
   {
     id: "autotrader",
     label: "AUTO TRADER",
@@ -85,13 +78,12 @@ const LEGACY_ROUTE_MAP: Record<string, string> = {
 function getActiveZoneId(pathname: string): string | null {
   for (const zone of NAV_ZONES) {
     if (pathname === zone.href) return zone.id;
-    if (zone.id !== "dashboard" && pathname.startsWith(zone.href)) return zone.id;
+    if (pathname.startsWith(zone.href)) return zone.id;
   }
   // Check legacy routes
   for (const [route, zoneId] of Object.entries(LEGACY_ROUTE_MAP)) {
     if (pathname === route || pathname.startsWith(route + "/")) return zoneId;
   }
-  if (pathname === "/" || pathname === "/dashboard") return "dashboard";
   return null;
 }
 
