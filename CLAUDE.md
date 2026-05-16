@@ -32,6 +32,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 | `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
 | `/stocks/scout` | SCOUT discovery feed |
 | `/intel` | Lessons / Journal / Similar / Calibration / Shadow / Downloads |
+| `/docs` | Downloads / Lessons / Journal — Wave D1 scaffold (gated `HUB_REDESIGN_DOCS`, default off; placeholder tabs, content migrates from `/intel` in Wave D2) |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
 | `/login` | Cookie auth |
@@ -143,9 +144,10 @@ Live values, verified from `auto_config` on 2026-05-16:
 | `HUB_REDESIGN_INTEL` | `true` | rebuilt `/intel` sections |
 | `HUB_REDESIGN_MEMORY` | `true` | rebuilt `/memory` sections |
 | `HUB_REDESIGN_CHAT` | `false` | new chat surface |
+| `HUB_REDESIGN_DOCS` | `false` | gates the `/docs` page — Wave D1 scaffold; flag-off → 404, content lands Wave D2 |
 | `SCOUT_V3_FEED` | `true` | SCOUT discovery feed v3 |
 
-Seven wave flags are live; `MODE` (master) and `CHAT` remain off. Note: `feature-flags.ts:readFlag()` is a leftover stub that always returns `false` — `/api/feature-flags` is the real source.
+Seven wave flags are live; `MODE` (master), `CHAT`, and `DOCS` (Wave D1 scaffold) remain off. Note: `feature-flags.ts:readFlag()` is a leftover stub that always returns `false` — `/api/feature-flags` is the real source.
 
 ---
 
