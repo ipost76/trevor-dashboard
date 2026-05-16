@@ -17,10 +17,10 @@ export default function NotFound() {
           </p>
         </div>
         <Link
-          href="/dashboard"
+          href="/autotrader"
           className="btn-primary flex items-center gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em]"
         >
-          Return to Dashboard
+          Return to AutoTrader
         </Link>
       </div>
     </div>

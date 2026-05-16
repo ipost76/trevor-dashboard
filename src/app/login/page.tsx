@@ -24,7 +24,7 @@ function LoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        router.push(searchParams.get("from") || "/dashboard");
+        router.push(searchParams.get("from") || "/autotrader");
       } else {
         setError(data.error || "Invalid credentials");
         setShake(true);

@@ -39,6 +39,7 @@ export async function middleware(request: NextRequest) {
     "/scalp": "/manual",
     "/command": "/memory",
     "/intelligence": "/intel",
+    "/dashboard": "/autotrader", // Wave B1 — HOME/dashboard page retired
   };
   const legacyTarget = legacyMap[pathname];
   if (legacyTarget) {

@@ -28,8 +28,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 | Path | Purpose |
 |---|---|
-| `/dashboard` | Main dashboard — P&L hero, active positions, supporting widgets |
-| `/autotrader` | AutoTrader — Scalper + Degen views |
+| `/autotrader` | AutoTrader — Scalper + Degen views. **Hub landing** — `/` redirects here (Wave B1). |
 | `/manual` | Manual signals — Scalp / Stock / DCA sub-tabs |
 | `/manual/scout` | SCOUT discovery feed |
 | `/intel` | Lessons / Journal / Similar / Calibration / Shadow / Downloads |
@@ -40,8 +39,8 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 - App-level files in `src/app/`: `layout.tsx` (shell), `error.tsx` (error boundary), `not-found.tsx` (404), `globals.css`.
 - Every page except `/login` is auth-gated by `middleware.ts`; an unauthenticated page request 302-redirects to `/login?from=<path>`, and unauthenticated `/api/*` calls get a 401.
-- Redirect-only pages: `/` → `/dashboard`; `/brain` → `/control` (chains through to `/memory`).
-- Legacy redirects in `middleware.ts` (308): `/trading` & `/scalp` → `/manual`, `/command` → `/memory`, `/intelligence` → `/intel`.
+- Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
+- Legacy redirects in `middleware.ts` (308): `/trading` & `/scalp` → `/manual`, `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
 - Sub-tabs are `?tab=` query params only — no nested routes except `/manual/scout`. Per zone: autotrader → `scalper`/`degen`; manual → `scalp`/`stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`.
 
@@ -49,9 +48,9 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 ## API Routes
 
-81 `route.ts` files under `src/app/api/`, grouped by zone:
+77 `route.ts` files under `src/app/api/`, grouped by zone:
 
-- **Dashboard** — `status`, `live`, `dashboard/{active,pnl,edge,calibration,quick-stats}`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`.
+- **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes; `dashboard/calibration` is kept — still consumed by the MANUAL zone's calibration section.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
 - **Manual / Trades** — `signals`, `signals/unread-count`, `trades` + `trades/{add-position,close,close-status,command-status,edit-entry,flip,partial-close,tranches}`, `live-board` + `live-board/{enter,ticker}`, `watchlist`, `reminders`, `dca`.
 - **Intel** — `intel/{lessons,journal,similar,calibration,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`.
@@ -71,13 +70,12 @@ Conventions:
 
 ## Component Map
 
-`src/components/` — 13 zone directories + 14 top-level files. Each redesigned zone has a `*-zone-view` (or `*-view`) dispatcher that the zone page renders and that swaps sections on the `?tab=` param.
+`src/components/` — 12 zone directories + 14 top-level files. Each redesigned zone has a `*-zone-view` (or `*-view`) dispatcher that the zone page renders and that swaps sections on the `?tab=` param.
 
 | Directory | Files | Key components |
 |---|---|---|
 | `ui/` | 20 | A4 + legacy primitives — `card`, `panel`, `pill`, `tab-bar`, `metric-tile`, `bottom-sheet`, `skeleton` |
 | `navigation/` | 4 | `bottom-nav`, `sidebar-rail`, `zone-sub-tabs`, `chat-fab` |
-| `dashboard/` | 7 | `dashboard-view`, `hero-pnl-card`, `active-positions-card`, `edge-analysis-card` |
 | `autotrader-v2/` | 9 | `scalper-view`, `capital-hero`, `config-card`, `degen-section`, `autotrader-toggle-card` |
 | `scalp/` | 10 | `scalp-zone-view`, `recent-signals-section`, `live-board-section`, `dca-section`, `stock-section` |
 | `scout/` | 14 | `scout-tabs`, `discovery-feed-v3`, `filings-stream`, `insider-heatmap`, `swing-signals-panel` |

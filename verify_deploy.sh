@@ -74,7 +74,7 @@ for path in \
   "/memory" "/memory?tab=brain" "/memory?tab=memory" "/memory?tab=chromadb" "/memory?tab=health" "/memory?tab=aggressive" \
 ; do
   CODE=$(http_code_auth "$HUB$path")
-  # Accept 200 (rendered) or 307/308 (auth-redirect to /dashboard from /)
+  # Accept 200 (rendered) or 307/308 (auth-redirect; / now redirects to /autotrader)
   if [ "$CODE" = "200" ] || [ "$CODE" = "307" ] || [ "$CODE" = "308" ]; then
     ok "page $path ($CODE)"
   else
@@ -87,8 +87,6 @@ section "API surfaces (Wave A–H)"
 # ============================================================================
 for ep in \
   "/api/killswitch" \
-  "/api/dashboard/pnl?system=auto&range=today" \
-  "/api/dashboard/active" \
   "/api/auto/state" \
   "/api/auto/trades?type=open" \
   "/api/auto/config" \
