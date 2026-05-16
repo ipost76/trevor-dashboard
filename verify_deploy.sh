@@ -68,7 +68,7 @@ section "Page routes (Wave A–H)"
 # ============================================================================
 for path in \
   "/" \
-  "/scalp" "/scalp?tab=live-board" "/scalp?tab=recent" "/scalp?tab=quality" "/scalp?tab=calibration" \
+  "/stocks" "/stocks?tab=stock" "/stocks?tab=dca" \
   "/autotrader" "/autotrader?tab=scalper" "/autotrader?tab=degen" \
   "/intel" "/intel?tab=lessons" "/intel?tab=journal" "/intel?tab=similar" "/intel?tab=calibration" "/intel?tab=shadow" \
   "/memory" "/memory?tab=brain" "/memory?tab=memory" "/memory?tab=chromadb" "/memory?tab=health" "/memory?tab=aggressive" \

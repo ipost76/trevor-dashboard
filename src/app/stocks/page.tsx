@@ -3,16 +3,20 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { runPython } from "@/lib/api-helpers";
-import { ScalpZoneView } from "@/components/scalp/scalp-zone-view";
-import { StockSection } from "@/components/scalp/stock-section";
+import { StocksZoneView } from "@/components/stocks/stocks-zone-view";
+import { StockSection } from "@/components/stocks/stock-section";
 
 export const dynamic = "force-dynamic";
 
-interface ManualPageProps {
+interface StocksPageProps {
   searchParams: Promise<{ tab?: string }>;
 }
 
-const isHubRedesignManualOn = cache(async (): Promise<boolean> => {
+// Gated by the `HUB_REDESIGN_SCALP` auto_config flag. Wave C2 renamed the
+// zone (/manual → /stocks) but deliberately kept the legacy flag key — an
+// inert auto_config row — per the additive-DB rule. Flag name is a known
+// misnomer; see Hub CLAUDE.md.
+const isStocksZoneOn = cache(async (): Promise<boolean> => {
   try {
     const c = await cookies();
     const raw = c.get("hub_redesign_override")?.value;
@@ -39,11 +43,11 @@ const isHubRedesignManualOn = cache(async (): Promise<boolean> => {
   }
 });
 
-function ManualDisabled() {
+function StocksDisabled() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-8 text-center font-mono">
       <div className="text-micro uppercase tracking-[0.3em] text-accent-violet/60">
-        MANUAL
+        STOCKS
       </div>
       <h1 className="text-h2 text-fg-primary">Temporarily Disabled</h1>
       <p className="max-w-md text-caption text-fg-muted">
@@ -60,17 +64,17 @@ function ManualDisabled() {
   );
 }
 
-export default async function ManualPage({ searchParams }: ManualPageProps) {
-  const useNew = await isHubRedesignManualOn();
-  if (!useNew) return <ManualDisabled />;
+export default async function StocksPage({ searchParams }: StocksPageProps) {
+  const useNew = await isStocksZoneOn();
+  if (!useNew) return <StocksDisabled />;
   const { tab } = await searchParams;
   // Legacy `?tab=reminders` → DCA (REMINDERS sub-tab merged into DCA 2026-05-14).
   if (tab === "reminders") {
-    redirect("/manual?tab=dca");
+    redirect("/stocks?tab=dca");
   }
   // <StockSection /> is an async server component (reads SCOUT_V3_FEED flag);
-  // we render it here so the client-side <ScalpZoneView /> can receive it as
+  // we render it here so the client-side <StocksZoneView /> can receive it as
   // a prop slot. RSC import boundary: client components cannot import server
   // components, but they can accept them as props.
-  return <ScalpZoneView subtab={tab ?? "scalp"} stockSlot={<StockSection />} />;
+  return <StocksZoneView subtab={tab ?? "stock"} stockSlot={<StockSection />} />;
 }

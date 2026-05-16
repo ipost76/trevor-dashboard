@@ -29,8 +29,8 @@ App Router pages under `src/app/`, verified against the filesystem:
 | Path | Purpose |
 |---|---|
 | `/autotrader` | AutoTrader — single-view Scalper board. **Hub landing** — `/` redirects here (Wave B1). |
-| `/manual` | Manual signals — Scalp / Stock / DCA sub-tabs |
-| `/manual/scout` | SCOUT discovery feed |
+| `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
+| `/stocks/scout` | SCOUT discovery feed |
 | `/intel` | Lessons / Journal / Similar / Calibration / Shadow / Downloads |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
@@ -40,9 +40,9 @@ App Router pages under `src/app/`, verified against the filesystem:
 - App-level files in `src/app/`: `layout.tsx` (shell), `error.tsx` (error boundary), `not-found.tsx` (404), `globals.css`.
 - Every page except `/login` is auth-gated by `middleware.ts`; an unauthenticated page request 302-redirects to `/login?from=<path>`, and unauthenticated `/api/*` calls get a 401.
 - Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
-- Legacy redirects in `middleware.ts` (308): `/trading` & `/scalp` → `/manual`, `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
+- Legacy redirects in `middleware.ts` (308): `/trading`, `/scalp` & `/manual` → `/stocks` (Wave C2 — direct single hop, no chaining), `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
-- Sub-tabs are `?tab=` query params only — no nested routes except `/manual/scout`. Per zone: manual → `scalp`/`stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
+- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
 
 ---
 
@@ -50,7 +50,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 77 `route.ts` files under `src/app/api/`, grouped by zone:
 
-- **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes; `dashboard/calibration` is kept — still consumed by the MANUAL zone's calibration section.)
+- **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
 - **Manual / Trades** — `signals`, `signals/unread-count`, `trades` + `trades/{add-position,close,close-status,command-status,edit-entry,flip,partial-close,tranches}`, `live-board` + `live-board/{enter,ticker}`, `watchlist`, `reminders`, `dca`.
 - **Intel** — `intel/{lessons,journal,similar,calibration,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`.
@@ -77,7 +77,7 @@ Conventions:
 | `ui/` | 20 | A4 + legacy primitives — `card`, `panel`, `pill`, `tab-bar`, `metric-tile`, `bottom-sheet`, `skeleton` |
 | `navigation/` | 4 | `bottom-nav`, `sidebar-rail`, `zone-sub-tabs`, `chat-fab` |
 | `autotrader-v2/` | 8 | `scalper-view`, `scalper-header`, `capital-hero`, `config-card`, `autotrader-toggle-card` |
-| `scalp/` | 10 | `scalp-zone-view`, `recent-signals-section`, `live-board-section`, `dca-section`, `stock-section` |
+| `stocks/` | 3 | `stocks-zone-view` (dispatcher), `stock-section`, `dca-section` (was `scalp/`; SCALP sections deleted, Wave C2) |
 | `scout/` | 14 | `scout-tabs`, `discovery-feed-v3`, `filings-stream`, `insider-heatmap`, `swing-signals-panel` |
 | `intel/` | 8 | `intel-zone-view`, `lessons-section`, `journal-section`, `similar-trades-section`, `shadow-section` |
 | `memory/` | 9 | `memory-zone-view`, `brain-section`, `chroma-section`, `health-section`, `killswitch-control-card` |
@@ -122,7 +122,7 @@ Invoked from `src/lib/api-helpers.ts`:
 - `/design-system` renders every `ui/` primitive live — review it before building a new one. Mobile-interaction hooks: `useLongPress`, `usePullToRefresh`, `useScrollDirection`.
 - The "live data" affordance is `live-pulse` + the `pulse-*` keyframes — reuse it rather than rolling a new indicator.
 - Mobile-first — verify every layout at **375 px** (the `xs` breakpoint) before calling it done.
-- Bottom nav: 4 zones — Auto, Manual, Intel, Memory (Wave B3 dropped the HOME slot). Chat is a floating action button, not a tab.
+- Bottom nav: 4 zones — Auto, Stocks, Intel, Memory (Wave B3 dropped the HOME slot; Wave C2 renamed Manual→Stocks). Chat is a floating action button, not a tab.
 
 ---
 
@@ -139,7 +139,7 @@ Live values, verified from `auto_config` on 2026-05-16:
 | `HUB_REDESIGN_DASHBOARD` | `true` | rebuilt `/dashboard` |
 | `HUB_REDESIGN_AUTO` | `true` | AutoTrader v2 (`autotrader-v2/`) |
 | `HUB_REDESIGN_AUTO_API` | `true` | consolidated `/api/auto/*` endpoints |
-| `HUB_REDESIGN_SCALP` | `true` | rebuilt MANUAL zone (`scalp/`) |
+| `HUB_REDESIGN_SCALP` | `true` | gates the `/stocks` page — legacy flag name kept (Wave C2 renamed the zone, not the inert `auto_config` key; additive-DB rule) |
 | `HUB_REDESIGN_INTEL` | `true` | rebuilt `/intel` sections |
 | `HUB_REDESIGN_MEMORY` | `true` | rebuilt `/memory` sections |
 | `HUB_REDESIGN_CHAT` | `false` | new chat surface |

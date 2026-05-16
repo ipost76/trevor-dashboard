@@ -34,9 +34,12 @@ export async function middleware(request: NextRequest) {
   // B1 — legacy nav-redesign redirects.
   // Old route names map to new canonical paths; redirects fire whether the
   // session is authed or not (the new path is then auth-gated normally).
+  // Each entry is a single 308 hop — no chaining (Wave C2: /scalp and
+  // /manual both point DIRECTLY at /stocks, not /scalp → /manual → /stocks).
   const legacyMap: Record<string, string> = {
-    "/trading": "/manual",
-    "/scalp": "/manual",
+    "/trading": "/stocks",
+    "/scalp": "/stocks",
+    "/manual": "/stocks", // Wave C2 — /manual route renamed to /stocks
     "/command": "/memory",
     "/intelligence": "/intel",
     "/dashboard": "/autotrader", // Wave B1 — HOME/dashboard page retired

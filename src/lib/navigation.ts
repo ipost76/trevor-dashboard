@@ -7,7 +7,7 @@
  *
  * Mobile bottom-nav order is the priority order:
  *   1. AUTO       (Scalper — front and center per Ghost crunch posture; Hub landing)
- *   2. MANUAL     (manual systems that display but never trade — was SCALP/TRADING)
+ *   2. STOCKS     (Stock discovery + DCA reminders — was MANUAL/SCALP/TRADING)
  *   3. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
  *   4. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
  *
@@ -24,7 +24,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "manual" | "intel" | "memory";
+export type ZoneId = "auto" | "stocks" | "intel" | "memory";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -55,18 +55,17 @@ export const ZONES: ReadonlyArray<Zone> = [
     accent: "green",
   },
   {
-    id: "manual",
-    href: "/manual",
-    label: "Manual",
-    shortLabel: "Manual",
+    id: "stocks",
+    href: "/stocks",
+    label: "Stocks",
+    shortLabel: "Stocks",
     icon: Activity,
     accent: "violet",
     subTabs: [
-      { key: "scalp", label: "Scalp" },
       { key: "stock", label: "Stock" },
       { key: "dca", label: "DCA" },
     ],
-    defaultSubTab: "scalp",
+    defaultSubTab: "stock",
   },
   {
     id: "intel",
@@ -113,8 +112,8 @@ export const CHAT_FAB = {
 };
 
 export const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
-  ["/trading", "/manual"],
-  ["/scalp", "/manual"],
+  ["/trading", "/stocks"],
+  ["/scalp", "/stocks"],
   ["/command", "/memory"],
   ["/intelligence", "/intel"],
 ] as const;

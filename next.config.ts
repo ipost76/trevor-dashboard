@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
       // COMMAND zone
       { source: '/control', destination: '/command?tab=control', permanent: true },
       { source: '/ghost', destination: '/command?tab=ghosthq', permanent: true },
-      { source: '/reminders', destination: '/manual?tab=dca', permanent: true },
+      { source: '/reminders', destination: '/stocks?tab=dca', permanent: true },
       { source: '/dev-tasks', destination: '/command?tab=devtasks', permanent: true },
       // D3 (2026-04-30) — AUTO API consolidation: legacy /api/auto-trader/*
       // routes redirect to the 3 consolidated /api/auto/* endpoints. The
