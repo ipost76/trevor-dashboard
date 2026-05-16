@@ -7,21 +7,8 @@ import { RecentTradesCard } from "./recent-trades-card";
 import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
 import { AutoTraderToggleCard } from "./autotrader-toggle-card";
-import { DegenSection } from "./degen-section";
 
-interface ScalperViewProps {
-  subtab?: string;
-}
-
-export function ScalperViewV2({ subtab = "scalper" }: ScalperViewProps) {
-  if (subtab === "degen") {
-    return (
-      <div className="flex flex-col gap-4 px-3 sm:px-4 pt-4 pb-8 animate-fade-in">
-        <DegenSection />
-      </div>
-    );
-  }
-
+export function ScalperViewV2() {
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
       <ScalperHeader />

@@ -67,9 +67,9 @@ export function ScalperHeader() {
         <div className="flex items-center gap-3">
           <Bot size={18} className={iconCls} aria-hidden />
           <div className="flex flex-col">
-            <span className="text-h3 font-bold tracking-wide">SCALPER</span>
+            <span className="text-h3 font-bold tracking-wide">AUTOTRADER</span>
             <span className="text-micro text-fg-muted">
-              AutoTrader · 5 tickers
+              5 tickers
             </span>
           </div>
         </div>

@@ -28,7 +28,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 | Path | Purpose |
 |---|---|
-| `/autotrader` | AutoTrader — Scalper + Degen views. **Hub landing** — `/` redirects here (Wave B1). |
+| `/autotrader` | AutoTrader — single-view Scalper board. **Hub landing** — `/` redirects here (Wave B1). |
 | `/manual` | Manual signals — Scalp / Stock / DCA sub-tabs |
 | `/manual/scout` | SCOUT discovery feed |
 | `/intel` | Lessons / Journal / Similar / Calibration / Shadow / Downloads |
@@ -42,7 +42,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
 - Legacy redirects in `middleware.ts` (308): `/trading` & `/scalp` → `/manual`, `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
-- Sub-tabs are `?tab=` query params only — no nested routes except `/manual/scout`. Per zone: autotrader → `scalper`/`degen`; manual → `scalp`/`stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`.
+- Sub-tabs are `?tab=` query params only — no nested routes except `/manual/scout`. Per zone: manual → `scalp`/`stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
 
 ---
 
@@ -60,7 +60,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 Conventions:
 - Handlers call `runPython()`, parse its stdout as JSON, and return that. Live-data routes set `export const dynamic = "force-dynamic"` to bypass caching; several wrap the call in try/catch and return a fail-safe JSON shape instead of throwing.
-- About 30 of the 81 accept `POST` (writes/actions); the rest are GET-only reads.
+- About 30 of the 77 accept `POST` (writes/actions); the rest are GET-only reads.
 - `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
 - `admin/*` routes are destructive resets (capital / P&L stats / XP / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
 - High-traffic reads: `live` (full dashboard payload), `status` (service state + XP + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
@@ -76,7 +76,7 @@ Conventions:
 |---|---|---|
 | `ui/` | 20 | A4 + legacy primitives — `card`, `panel`, `pill`, `tab-bar`, `metric-tile`, `bottom-sheet`, `skeleton` |
 | `navigation/` | 4 | `bottom-nav`, `sidebar-rail`, `zone-sub-tabs`, `chat-fab` |
-| `autotrader-v2/` | 9 | `scalper-view`, `capital-hero`, `config-card`, `degen-section`, `autotrader-toggle-card` |
+| `autotrader-v2/` | 8 | `scalper-view`, `scalper-header`, `capital-hero`, `config-card`, `autotrader-toggle-card` |
 | `scalp/` | 10 | `scalp-zone-view`, `recent-signals-section`, `live-board-section`, `dca-section`, `stock-section` |
 | `scout/` | 14 | `scout-tabs`, `discovery-feed-v3`, `filings-stream`, `insider-heatmap`, `swing-signals-panel` |
 | `intel/` | 8 | `intel-zone-view`, `lessons-section`, `journal-section`, `similar-trades-section`, `shadow-section` |

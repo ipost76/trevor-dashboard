@@ -7,7 +7,7 @@
  *
  * Mobile bottom-nav order is the priority order:
  *   1. DASHBOARD (home)
- *   2. AUTO       (Scalper + Degen — front and center per Ghost crunch posture)
+ *   2. AUTO       (Scalper — front and center per Ghost crunch posture)
  *   3. MANUAL     (manual systems that display but never trade — was SCALP/TRADING)
  *   4. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
  *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
@@ -63,11 +63,6 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Auto",
     icon: Bot,
     accent: "green",
-    subTabs: [
-      { key: "scalper", label: "Scalper" },
-      { key: "degen", label: "Degen" },
-    ],
-    defaultSubTab: "scalper",
   },
   {
     id: "manual",
