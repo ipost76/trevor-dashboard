@@ -2,16 +2,17 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { TabBar, type TabBarItem } from "@/components/ui";
+import { DownloadsSection } from "@/components/docs/downloads-section";
+import { LessonsSection } from "@/components/docs/lessons-section";
+import { JournalSection } from "@/components/docs/journal-section";
 
 /**
- * Wave D1 — placeholder /docs zone view.
+ * /docs zone view — Downloads / Lessons / Journal.
  *
- * Downloads / Lessons / Journal migrate here from /intel in Wave D2; until
- * then each tab renders a migration placeholder. The tab strip is rendered
- * locally with the shared `TabBar` primitive (the same component /intel's
- * strip uses via ZoneSubTabs) rather than the global AppShell ZoneSubTabs,
- * because /docs is intentionally not yet a registered zone in navigation.ts —
- * the DOCS nav slot lands in Wave D3.
+ * Wave D2 migrated these three sections here from /intel. The tab strip is
+ * rendered locally with the shared `TabBar` primitive rather than the global
+ * AppShell ZoneSubTabs, because /docs is not yet a registered zone in
+ * navigation.ts — the DOCS nav slot lands in Wave D3.
  */
 
 type DocsTab = "downloads" | "lessons" | "journal";
@@ -22,35 +23,16 @@ const DOCS_TABS: ReadonlyArray<TabBarItem<DocsTab>> = [
   { key: "journal", label: "Journal" },
 ];
 
-function MigrationPlaceholder({ label }: { label: string }) {
-  return (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-8 text-center font-mono">
-      <div className="text-micro uppercase tracking-[0.3em] text-accent-cyan/60">
-        {label}
-      </div>
-      <h2 className="text-h2 text-fg-primary">Migrating in Wave D2</h2>
-      <p className="max-w-md text-caption text-fg-muted">
-        Content coming soon — this section moves here from{" "}
-        <code className="rounded bg-bg-elevated px-2 py-0.5 text-accent-cyan">
-          /intel
-        </code>{" "}
-        in Wave D2.
-      </p>
-    </div>
-  );
-}
-
-/** D1 placeholder dispatcher — Wave D2 swaps each case for the real section. */
 function DocsPanel({ tab }: { tab: DocsTab }) {
   switch (tab) {
     case "downloads":
-      return <MigrationPlaceholder label="DOWNLOADS" />;
+      return <DownloadsSection />;
     case "lessons":
-      return <MigrationPlaceholder label="LESSONS" />;
+      return <LessonsSection />;
     case "journal":
-      return <MigrationPlaceholder label="JOURNAL" />;
+      return <JournalSection />;
     default:
-      return <MigrationPlaceholder label="DOWNLOADS" />;
+      return <DownloadsSection />;
   }
 }
 

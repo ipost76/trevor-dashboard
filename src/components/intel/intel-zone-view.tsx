@@ -1,11 +1,15 @@
 "use client";
 import * as React from "react";
-import { DownloadsSection } from "./downloads-section";
-import { LessonsSection } from "./lessons-section";
-import { JournalSection } from "./journal-section";
 import { SimilarTradesSection } from "./similar-trades-section";
 import { CalibrationSection } from "./calibration-section";
 import { ShadowSection } from "./shadow-section";
+
+/**
+ * /intel zone view — Similar / Calibration / Shadow.
+ *
+ * Wave D2 moved Downloads / Lessons / Journal out to /docs; this dispatcher
+ * now handles only the three analysis tabs that remain on /intel.
+ */
 
 interface IntelZoneViewProps {
   subtab: string;
@@ -13,19 +17,12 @@ interface IntelZoneViewProps {
 
 export function IntelZoneView({ subtab }: IntelZoneViewProps) {
   switch (subtab) {
-    case "downloads":
-      return <DownloadsSection />;
-    case "lessons":
-      return <LessonsSection />;
-    case "journal":
-      return <JournalSection />;
-    case "similar":
-      return <SimilarTradesSection />;
     case "calibration":
       return <CalibrationSection />;
     case "shadow":
       return <ShadowSection />;
+    case "similar":
     default:
-      return <DownloadsSection />;
+      return <SimilarTradesSection />;
   }
 }

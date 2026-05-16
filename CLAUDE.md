@@ -31,8 +31,8 @@ App Router pages under `src/app/`, verified against the filesystem:
 | `/autotrader` | AutoTrader — single-view Scalper board. **Hub landing** — `/` redirects here (Wave B1). |
 | `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
 | `/stocks/scout` | SCOUT discovery feed |
-| `/intel` | Lessons / Journal / Similar / Calibration / Shadow / Downloads |
-| `/docs` | Downloads / Lessons / Journal — Wave D1 scaffold (gated `HUB_REDESIGN_DOCS`, default off; placeholder tabs, content migrates from `/intel` in Wave D2) |
+| `/intel` | Similar / Calibration / Shadow (Downloads / Lessons / Journal moved to `/docs`, Wave D2) |
+| `/docs` | Downloads / Lessons / Journal — migrated from `/intel` (Wave D2); gated `HUB_REDESIGN_DOCS` (ON) |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
 | `/login` | Cookie auth |
@@ -43,7 +43,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
 - Legacy redirects in `middleware.ts` (308): `/trading`, `/scalp` & `/manual` → `/stocks` (Wave C2 — direct single hop, no chaining), `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
-- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `lessons`/`journal`/`similar`/`calibration`/`shadow`/`downloads`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
+- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `similar`/`calibration`/`shadow`; docs → `downloads`/`lessons`/`journal`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
 
 ---
 
@@ -71,7 +71,7 @@ Conventions:
 
 ## Component Map
 
-`src/components/` — 12 zone directories + 14 top-level files. Each redesigned zone has a `*-zone-view` (or `*-view`) dispatcher that the zone page renders and that swaps sections on the `?tab=` param.
+`src/components/` — 13 zone directories + 14 top-level files. Each redesigned zone has a `*-zone-view` (or `*-view`) dispatcher that the zone page renders and that swaps sections on the `?tab=` param.
 
 | Directory | Files | Key components |
 |---|---|---|
@@ -80,7 +80,8 @@ Conventions:
 | `autotrader-v2/` | 8 | `scalper-view`, `scalper-header`, `capital-hero`, `config-card`, `autotrader-toggle-card` |
 | `stocks/` | 3 | `stocks-zone-view` (dispatcher), `stock-section`, `dca-section` (was `scalp/`; SCALP sections deleted, Wave C2) |
 | `scout/` | 14 | `scout-tabs`, `discovery-feed-v3`, `filings-stream`, `insider-heatmap`, `swing-signals-panel` |
-| `intel/` | 8 | `intel-zone-view`, `lessons-section`, `journal-section`, `similar-trades-section`, `shadow-section` |
+| `intel/` | 4 | `intel-zone-view`, `similar-trades-section`, `calibration-section`, `shadow-section` |
+| `docs/` | 4 | `downloads-section`, `lessons-section`, `lesson-card`, `journal-section` (migrated from `intel/`, Wave D2) |
 | `memory/` | 9 | `memory-zone-view`, `brain-section`, `chroma-section`, `health-section`, `killswitch-control-card` |
 | `chat/` | 4 | `chat-panel`, `chat-modal`, `chat-message`, `chat-empty-state` |
 | `trades/` | 4 | `live-board`, `trade-form`, `history-table`, `journal-tab` |
@@ -144,10 +145,10 @@ Live values, verified from `auto_config` on 2026-05-16:
 | `HUB_REDESIGN_INTEL` | `true` | rebuilt `/intel` sections |
 | `HUB_REDESIGN_MEMORY` | `true` | rebuilt `/memory` sections |
 | `HUB_REDESIGN_CHAT` | `false` | new chat surface |
-| `HUB_REDESIGN_DOCS` | `false` | gates the `/docs` page — Wave D1 scaffold; flag-off → 404, content lands Wave D2 |
+| `HUB_REDESIGN_DOCS` | `true` | gates the `/docs` page — Downloads / Lessons / Journal live (Wave D2) |
 | `SCOUT_V3_FEED` | `true` | SCOUT discovery feed v3 |
 
-Seven wave flags are live; `MODE` (master), `CHAT`, and `DOCS` (Wave D1 scaffold) remain off. Note: `feature-flags.ts:readFlag()` is a leftover stub that always returns `false` — `/api/feature-flags` is the real source.
+Eight wave flags are live; `MODE` (master) and `CHAT` remain off. Note: `feature-flags.ts:readFlag()` is a leftover stub that always returns `false` — `/api/feature-flags` is the real source.
 
 ---
 
