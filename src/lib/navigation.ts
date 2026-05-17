@@ -1,15 +1,16 @@
 /**
  * TREVOR // NAVIGATION CONTRACT v1
  *
- * Single source of truth for the 4-zone navigation + per-zone sub-tabs.
+ * Single source of truth for the 5-zone navigation + per-zone sub-tabs.
  * Every nav-rendering component (BottomNav, SidebarRail, TabBar instances,
  * mobile long-press BottomSheet) imports from here. No bespoke zone arrays.
  *
  * Mobile bottom-nav order is the priority order:
  *   1. AUTO       (Scalper — front and center per Ghost crunch posture; Hub landing)
  *   2. STOCKS     (Stock discovery + DCA reminders — was MANUAL/SCALP/TRADING)
- *   3. INTEL      (learning surface — Lessons / Journal / Similar / Calibration / Shadow)
- *   4. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
+ *   3. INTEL      (analysis surface — Similar / Calibration / Shadow)
+ *   4. DOCS       (reference surface — Downloads / Lessons / Journal; migrated from INTEL, Wave D2)
+ *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
  * full-screen on mobile, side panel on desktop.
@@ -20,11 +21,12 @@ import {
   Bot,
   Activity,
   Brain,
+  BookOpen,
   Database,
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "stocks" | "intel" | "memory";
+export type ZoneId = "auto" | "stocks" | "intel" | "docs" | "memory";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -80,6 +82,20 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "shadow", label: "Shadow" },
     ],
     defaultSubTab: "similar",
+  },
+  {
+    id: "docs",
+    href: "/docs",
+    label: "Docs",
+    shortLabel: "Docs",
+    icon: BookOpen,
+    accent: "amber",
+    subTabs: [
+      { key: "downloads", label: "Downloads" },
+      { key: "lessons", label: "Lessons" },
+      { key: "journal", label: "Journal" },
+    ],
+    defaultSubTab: "downloads",
   },
   {
     id: "memory",

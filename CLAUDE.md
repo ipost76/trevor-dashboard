@@ -32,7 +32,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 | `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
 | `/stocks/scout` | SCOUT discovery feed |
 | `/intel` | Similar / Calibration / Shadow (Downloads / Lessons / Journal moved to `/docs`, Wave D2) |
-| `/docs` | Downloads / Lessons / Journal — migrated from `/intel` (Wave D2); gated `HUB_REDESIGN_DOCS` (ON) |
+| `/docs` | Downloads / Lessons / Journal — migrated from `/intel` (Wave D2); registered as a nav zone (Wave D3); gated `HUB_REDESIGN_DOCS` (ON) |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
 | `/login` | Cookie auth |
@@ -124,7 +124,7 @@ Invoked from `src/lib/api-helpers.ts`:
 - `/design-system` renders every `ui/` primitive live — review it before building a new one. Mobile-interaction hooks: `useLongPress`, `usePullToRefresh`, `useScrollDirection`.
 - The "live data" affordance is `live-pulse` + the `pulse-*` keyframes — reuse it rather than rolling a new indicator.
 - Mobile-first — verify every layout at **375 px** (the `xs` breakpoint) before calling it done.
-- Bottom nav: 4 zones — Auto, Stocks, Intel, Memory (Wave B3 dropped the HOME slot; Wave C2 renamed Manual→Stocks). Chat is a floating action button, not a tab.
+- Bottom nav: 5 zones — Auto, Stocks, Intel, Docs, Memory (Wave B3 dropped the HOME slot; Wave C2 renamed Manual→Stocks; Wave D3 added the Docs slot). Chat is a floating action button, not a tab.
 
 ---
 
