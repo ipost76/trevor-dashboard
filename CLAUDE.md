@@ -61,7 +61,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 Conventions:
 - Handlers call `runPython()`, parse its stdout as JSON, and return that. Live-data routes set `export const dynamic = "force-dynamic"` to bypass caching; several wrap the call in try/catch and return a fail-safe JSON shape instead of throwing.
-- About 30 of the 77 accept `POST` (writes/actions); the rest are GET-only reads.
+- About 30 of the 70 accept `POST` (writes/actions); the rest are GET-only reads.
 - `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
 - `admin/*` routes are destructive resets (capital / P&L stats / XP / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
 - High-traffic reads: `live` (full dashboard payload), `status` (service state + XP + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
@@ -201,3 +201,42 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 - **Never modify files under `/home/trevor/trevor/`** from a Hub prompt — only read its `trevor.db`.
 - Bot-side engineering rules — file protection, deploy discipline, the honesty protocol — live in `/home/trevor/trevor/BEHAVIOR_RULES.md` + `/home/trevor/trevor/CLAUDE.md`. Cross-reference them; do not copy them here.
 - Honesty protocol applies to Hub work too: never claim done / fixed / working without pasted command output.
+
+---
+
+## Hub Wave Changelog (additive — most recent at top)
+
+### 2026-05-16 — Wave E2 (Manual-scalp Python helpers + routes deleted)
+- 6 manual-scalp `query_*.py` helpers deleted
+- 7 manual-scalp API routes deleted (`live-board` ×3, `signals` parent, `trades/{add-position,partial-close,tranches}`)
+- `signals/unread-count` kept — backs the nav unread badges
+
+### 2026-05-16 — Wave D3 (DOCS nav slot)
+- 5-zone final nav: AUTO, STOCKS, INTEL, DOCS, MEMORY
+- grid-cols-5 mobile layout
+
+### 2026-05-16 — Wave D2 (Docs content migration)
+- Downloads + Lessons + Journal moved from /intel to /docs
+- /intel reduced to Similar + Calibration + Shadow
+- HUB_REDESIGN_DOCS flipped to true
+
+### 2026-05-16 — Wave D1 (Docs scaffold)
+- /docs route scaffolded with 3 placeholder tabs
+- HUB_REDESIGN_DOCS flag added (default false)
+
+### 2026-05-16 — Wave C2 (Stocks rename)
+- /manual → /stocks (308 redirect)
+- SCALP tab + scalp/* components deleted
+- /scalp also redirects to /stocks
+
+### 2026-05-16 — Wave B3 (HOME slot removed from bottom nav)
+- HOME slot removed from the bottom nav
+
+### 2026-05-16 — Wave B2 (DEGEN removal)
+- /autotrader single-view (Scalper renamed AUTOTRADER)
+- DEGEN tab + components deleted
+
+### 2026-05-16 — Wave B1 (HOME drop)
+- / redirects to /autotrader
+- /dashboard route + components deleted
+- Login post-auth → /autotrader
