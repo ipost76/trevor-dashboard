@@ -49,11 +49,11 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 ## API Routes
 
-77 `route.ts` files under `src/app/api/`, grouped by zone:
+70 `route.ts` files under `src/app/api/`, grouped by zone (Wave E2 deleted 7 manual-scalp routes):
 
 - **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
-- **Manual / Trades** — `signals`, `signals/unread-count`, `trades` + `trades/{add-position,close,close-status,command-status,edit-entry,flip,partial-close,tranches}`, `live-board` + `live-board/{enter,ticker}`, `watchlist`, `reminders`, `dca`.
+- **Manual / Trades** — `signals/unread-count`, `trades` + `trades/{close,close-status,command-status,edit-entry,flip}`, `watchlist`, `reminders`, `dca`. (Wave E2 deleted the `signals` parent route, `live-board` + `live-board/{enter,ticker}`, and `trades/{add-position,partial-close,tranches}` with the manual-scalp helper teardown — `signals/unread-count` kept, it backs the nav unread badges.)
 - **Intel** — `intel/{lessons,journal,similar,calibration,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`.
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
@@ -100,7 +100,7 @@ Conventions:
 
 The Hub has no direct SQLite binding — every DB read/write goes through Python scripts at the repo root. Verified counts:
 
-- **`query_*.py` × 48** — READ-ONLY (`trevor.db` opened `mode=ro`). Notable: `query_brain.py`, `query_trades.py`, `query_training.py`, `query_feature_flags.py` (the last backs `/api/feature-flags`).
+- **`query_*.py` × 42** — READ-ONLY (`trevor.db` opened `mode=ro`); Wave E2 deleted 6 manual-scalp query helpers. Notable: `query_brain.py`, `query_trades.py`, `query_training.py`, `query_feature_flags.py` (the last backs `/api/feature-flags`).
 - **`set_*.py` × 5** — WRITE: `set_killswitch.py`, `set_aggressive.py`, `set_autotrader_enabled.py`, `set_dca.py`, `set_reminders.py`.
 - **`write_*.py` × 2** — WRITE: `write_brain_file.py`, `write_chat_log.py`.
 - **`manage_*.py` / `chat_*.py`** — `manage_{brain,portfolio,schedule,watchlist}.py`, `chat_bridge.py`, `chat_ai.py`.
