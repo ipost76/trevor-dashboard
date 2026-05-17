@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
+import { runPython } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "manage_watchlist.py");
+// Rule 26 — user input reaches Python only as spawnSync argv via runPython()
+// (no shell, no string interpolation). The checks below are defense-in-depth
+// input validation layered on top of that argv bridge.
+const TICKER_RE = /^[A-Z0-9]{1,20}$/;
+const ALLOWED_MODES: string[] = ["scalp", "lt", "both"];
 
+export async function GET() {
   try {
-    const { execSync } = await import("child_process");
-    const raw = execSync(
-      `${pythonPath} ${scriptPath} list`,
-      { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    const raw = runPython("manage_watchlist.py", ["list"], { timeout: 10_000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ items: [], error: String(err) });
@@ -28,17 +26,23 @@ export async function POST(request: NextRequest) {
   if (!ticker) {
     return NextResponse.json({ error: "Ticker required" }, { status: 400 });
   }
-
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "manage_watchlist.py");
+  if (!TICKER_RE.test(ticker)) {
+    return NextResponse.json(
+      { error: "Invalid ticker — must match [A-Z0-9]{1,20}" },
+      { status: 400 }
+    );
+  }
+  if (!ALLOWED_MODES.includes(mode)) {
+    return NextResponse.json(
+      { error: "Invalid mode — must be one of: scalp, lt, both" },
+      { status: 400 }
+    );
+  }
 
   try {
-    const { execSync } = await import("child_process");
-    const raw = execSync(
-      `${pythonPath} ${scriptPath} add "${ticker}" "${mode}"`,
-      { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    const raw = runPython("manage_watchlist.py", ["add", ticker, mode], {
+      timeout: 10_000,
+    });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
@@ -53,17 +57,23 @@ export async function DELETE(request: NextRequest) {
   if (!ticker) {
     return NextResponse.json({ error: "Ticker required" }, { status: 400 });
   }
-
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "manage_watchlist.py");
+  if (!TICKER_RE.test(ticker)) {
+    return NextResponse.json(
+      { error: "Invalid ticker — must match [A-Z0-9]{1,20}" },
+      { status: 400 }
+    );
+  }
+  if (!ALLOWED_MODES.includes(mode)) {
+    return NextResponse.json(
+      { error: "Invalid mode — must be one of: scalp, lt, both" },
+      { status: 400 }
+    );
+  }
 
   try {
-    const { execSync } = await import("child_process");
-    const raw = execSync(
-      `${pythonPath} ${scriptPath} remove "${ticker}" "${mode}"`,
-      { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    const raw = runPython("manage_watchlist.py", ["remove", ticker, mode], {
+      timeout: 10_000,
+    });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
