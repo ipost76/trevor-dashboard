@@ -206,6 +206,13 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 
 ## Hub Wave Changelog (additive — most recent at top)
 
+### 2026-05-17 — Wave G (AutoTrader Consolidation roadmap closeout — Hub side)
+- Wave G1 full-system smoke verified the Hub: all 5 zones return 200 and the legacy redirects resolve correctly (Domain 5 PASS). Overall G1 verdict was **PARTIAL** — full report in the bot repo at `audits/wave_g1_full_system_smoke_2026-05-17.md`.
+- G1 flagged one **pre-existing Rule 26 violation** in `src/app/api/watchlist/route.ts` — its GET/POST/DELETE handlers interpolate user input into `execSync` template strings instead of using the `runPython` argv bridge. Pre-dates the A-G roadmap; a surgical fix prompt (convert to `runPython`) is scheduled. (`status/route.ts` also uses `execSync` but with no user input; `trades/route.ts` uses `execSync` with proper single-quote escaping — `watchlist` is the lone genuine violation.)
+- G2 — this Hub `CLAUDE.md` Wave G entry; bot `BEHAVIOR_RULES.md` + `CLAUDE.md` state lock-in. **No Hub code changed.**
+- Final 5-zone nav AUTO (landing) · STOCKS · INTEL · DOCS · MEMORY confirmed live; Hub-Only Control Doctrine (Rule 32) in effect.
+- AutoTrader Consolidation roadmap (Waves A-G) — functionally complete with the one open security item above.
+
 ### 2026-05-16 — Wave E2 (Manual-scalp Python helpers + routes deleted)
 - 6 manual-scalp `query_*.py` helpers deleted
 - 7 manual-scalp API routes deleted (`live-board` ×3, `signals` parent, `trades/{add-position,partial-close,tranches}`)
