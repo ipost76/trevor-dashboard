@@ -21,8 +21,12 @@ import {
   Gauge,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
   WifiOff,
-  HardDrive,
+  Container,
+  TrendingUp,
+  Clock,
+  HeartPulse,
 } from "lucide-react";
 
 // HB-04: Hub-side heartbeat view backed by Observatory's /api/heartbeat
@@ -38,14 +42,28 @@ interface ServiceItem {
   pid: string;
   uptime_seconds: number;
   status: Severity;
+  restart_count?: number;
+  restart_reason?: string;
 }
 interface PipelineCat {
   status: Severity;
   scanner_detail: string;
   scanner_ago_seconds: number;
+  scanner_last_cycle_ago_seconds?: number;
   scanner_cadence_seconds: number;
+  signals_scored_delta?: number;
   guard_passed: number;
   guard_blocked: number;
+  exit_events_delta?: number;
+  current_regime?: string;
+}
+interface OpenPosition {
+  id: number;
+  ticker: string;
+  direction: string;
+  entry_price: number;
+  leverage: number;
+  notional_usd: number;
 }
 interface AutotraderCat {
   status: Severity;
@@ -54,14 +72,41 @@ interface AutotraderCat {
   last_trade_ago_seconds: number;
   killswitch: boolean;
   details?: string[];
+  today_wins?: number;
+  today_losses?: number;
+  today_pnl_usd?: number;
+  today_avg_pnl_pct?: number;
+  open_count?: number;
+  open_positions?: OpenPosition[];
+  unrealized_pnl_usd?: number | null;
+}
+interface GatewayInfo {
+  blocks_in_last_2h: number;
+  max_block_seconds: number;
+  last_block_time: string | null;
+  block_details: unknown[];
 }
 interface ConnectivityCat {
   status: Severity;
+  details?: string[];
   hl_api_reachable: boolean;
   hl_api_latency_ms: number;
+  hl_api_error?: string | null;
   discord_ws_connected: boolean;
   discord_ws_latency_ms: number;
   discord_ws_reconnections_2h: number;
+  gateway?: GatewayInfo;
+}
+interface ContainerItem {
+  name: string;
+  status: string;
+  running: boolean;
+  criticality: string;
+}
+interface DockerCat {
+  status: Severity;
+  details?: string[];
+  containers: ContainerItem[];
 }
 interface SystemCat {
   status: Severity;
@@ -91,11 +136,46 @@ interface BackupCat {
   litestream_active: boolean;
   details?: string[];
 }
+interface BudgetBreakdown {
+  briefing?: number;
+  learning?: number;
+  swarm?: number;
+  other?: number;
+}
 interface BudgetCat {
   status: Severity;
   used_usd: number;
   budget_usd: number;
   pct: number;
+  budget_reset_seconds?: number;
+  budget_breakdown?: BudgetBreakdown;
+}
+interface StuckTrade {
+  id: number;
+  ticker: string;
+  direction: string;
+  entry_price: number;
+  held_hours: number;
+  trade_mode: string;
+}
+interface ComponentRate {
+  display_name: string;
+  current_count: number;
+  previous_count: number;
+  delta: number;
+  is_first_snapshot: boolean;
+}
+interface ComponentRatesCat {
+  status: Severity;
+  details?: string[];
+  rates: Record<string, ComponentRate>;
+  dead_components?: string[];
+}
+interface SelfHealthCat {
+  api_responsive: boolean;
+  db_accessible: boolean;
+  db_size_mb: number;
+  uptime_seconds: number;
 }
 interface StaleLoop {
   name: string;
@@ -112,11 +192,14 @@ interface HeartbeatData {
     pipeline: PipelineCat;
     autotrader: AutotraderCat;
     connectivity: ConnectivityCat;
+    docker?: DockerCat;
     system: SystemCat;
     database: DatabaseCat;
     backup: BackupCat;
     budget: BudgetCat;
-    stuck_trades: { status: Severity; trades: unknown[] };
+    stuck_trades: { status: Severity; trades: StuckTrade[] };
+    self_health?: SelfHealthCat;
+    component_rates?: ComponentRatesCat;
     stale_loops: StaleLoop[];
   };
 }
@@ -252,11 +335,22 @@ export function HeartbeatView() {
     ? (cats.system.memory_pss_mb / cats.system.memory_high_mb) * 100
     : 0;
 
-  const lastHeartbeatAgoMs = lastUpdated ? now - lastUpdated : -1;
+  // Countdown keys off the actual heartbeat post time (data.timestamp), not
+  // the 30s poll time — lastUpdated was reset every poll, so the old code
+  // never actually counted down (HB-04 bug).
+  const heartbeatTimeMs = new Date(data.timestamp).getTime();
+  const heartbeatAgoMs = now - heartbeatTimeMs;
   const nextHeartbeatSeconds = Math.max(
     0,
-    HEARTBEAT_CADENCE_SECONDS - Math.floor(lastHeartbeatAgoMs / 1000),
+    HEARTBEAT_CADENCE_SECONDS - Math.floor(heartbeatAgoMs / 1000),
   );
+
+  // self_health carries no status field — derive one for the card border.
+  const selfHealthStatus: Severity =
+    cats.self_health &&
+    (!cats.self_health.api_responsive || !cats.self_health.db_accessible)
+      ? "critical"
+      : "ok";
 
   const categoryCards: Array<{
     key: keyof typeof cats;
@@ -527,7 +621,7 @@ export function HeartbeatView() {
             />
             <Stat
               label="Last heartbeat"
-              value={lastUpdated ? formatAgo(now - lastUpdated) : "—"}
+              value={formatAgo(heartbeatAgoMs)}
               tone="ok"
             />
             <Stat
@@ -539,8 +633,8 @@ export function HeartbeatView() {
         </Card>
       </div>
 
-      {/* Connectivity (placeholder for HB-05) */}
-      <Card padding="md">
+      {/* Connectivity */}
+      <Card padding="md" className={severityCardClass(cats.connectivity.status)}>
         <CardHeader>
           <CardTitle>
             <span className="flex items-center gap-2">
@@ -549,21 +643,210 @@ export function HeartbeatView() {
             </span>
           </CardTitle>
         </CardHeader>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-          <div className="flex items-center justify-between rounded-md bg-bg-elevated px-3 py-2">
-            <span className="flex items-center gap-2 text-caption text-fg-muted">
-              <HardDrive size={14} /> Hyperliquid API
-            </span>
-            <Pill tone="neutral" size="sm">pending (HB-05)</Pill>
-          </div>
-          <div className="flex items-center justify-between rounded-md bg-bg-elevated px-3 py-2">
-            <span className="flex items-center gap-2 text-caption text-fg-muted">
-              <Wifi size={14} /> Discord WebSocket
-            </span>
-            <Pill tone="neutral" size="sm">pending (HB-05)</Pill>
-          </div>
+        <div className="space-y-2">
+          <StatusRow
+            icon={cats.connectivity.hl_api_reachable ? "🟢" : "🔴"}
+            label="Hyperliquid API"
+            value={
+              cats.connectivity.hl_api_reachable
+                ? `OK (${cats.connectivity.hl_api_latency_ms}ms)`
+                : (cats.connectivity.hl_api_error ?? "Unreachable")
+            }
+            tone={cats.connectivity.hl_api_reachable ? "ok" : "critical"}
+          />
+          <StatusRow
+            icon={cats.connectivity.discord_ws_connected ? "🟢" : "🔴"}
+            label="Discord WebSocket"
+            value={
+              cats.connectivity.discord_ws_connected
+                ? `Connected (${cats.connectivity.discord_ws_latency_ms}ms)`
+                : "Disconnected"
+            }
+            tone={cats.connectivity.discord_ws_connected ? "ok" : "critical"}
+          />
+          {cats.connectivity.discord_ws_reconnections_2h > 0 && (
+            <StatusRow
+              icon={cats.connectivity.discord_ws_reconnections_2h > 2 ? "🟡" : "🟢"}
+              label="WS Reconnections"
+              value={`${cats.connectivity.discord_ws_reconnections_2h}× in 2h`}
+              tone={cats.connectivity.discord_ws_reconnections_2h > 2 ? "warning" : "ok"}
+            />
+          )}
         </div>
       </Card>
+
+      {/* DETAIL CARDS — Docker · Component Rates · Stuck Trades · Stale Loops · Self-Health */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {/* Docker */}
+        <Card padding="md" className={severityCardClass(cats.docker?.status ?? "ok")}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <Container size={16} /> Docker
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.docker ? (
+            cats.docker.containers.length > 0 ? (
+              <div className="space-y-2">
+                {cats.docker.containers.map((c) => (
+                  <StatusRow
+                    key={c.name}
+                    icon={c.running ? "🟢" : "🔴"}
+                    label={c.name}
+                    value={c.status}
+                    tone={
+                      c.running
+                        ? "ok"
+                        : c.criticality === "critical"
+                          ? "critical"
+                          : "warning"
+                    }
+                  />
+                ))}
+              </div>
+            ) : (
+              <CardNote>No containers reported</CardNote>
+            )
+          ) : (
+            <CardNote>Data unavailable</CardNote>
+          )}
+        </Card>
+
+        {/* Component Rates */}
+        <Card
+          padding="md"
+          className={severityCardClass(cats.component_rates?.status ?? "ok")}
+        >
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <TrendingUp size={16} /> Component Rates
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.component_rates ? (
+            Object.keys(cats.component_rates.rates).length > 0 ? (
+              <div className="space-y-2">
+                {Object.entries(cats.component_rates.rates).map(([key, r]) => {
+                  const dead = (
+                    cats.component_rates?.dead_components ?? []
+                  ).includes(r.display_name);
+                  return (
+                    <StatusRow
+                      key={key}
+                      icon={dead ? "🟡" : r.delta > 0 ? "🟢" : "⚪"}
+                      label={r.display_name}
+                      value={dead ? "no events" : `+${r.delta} events`}
+                      tone={dead ? "warning" : "ok"}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <CardNote>No component rates reported</CardNote>
+            )
+          ) : (
+            <CardNote>Data unavailable</CardNote>
+          )}
+        </Card>
+
+        {/* Stuck Trades */}
+        <Card padding="md" className={severityCardClass(cats.stuck_trades.status)}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <AlertTriangle size={16} /> Stuck Trades
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.stuck_trades.trades.length > 0 ? (
+            <div className="space-y-2">
+              {cats.stuck_trades.trades.map((t) => (
+                <StatusRow
+                  key={t.id}
+                  icon="🔴"
+                  label={`${t.ticker} ${t.direction}`}
+                  value={`open ${t.held_hours.toFixed(1)}h`}
+                  tone="critical"
+                />
+              ))}
+            </div>
+          ) : (
+            <CardNote>No positions over 48h</CardNote>
+          )}
+        </Card>
+
+        {/* Stale Loops */}
+        <Card
+          padding="md"
+          className={severityCardClass(
+            cats.stale_loops.length > 0 ? "warning" : "ok",
+          )}
+        >
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <Clock size={16} /> Stale Loops
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.stale_loops.length > 0 ? (
+            <div className="space-y-2">
+              {cats.stale_loops.map((sl) => (
+                <StatusRow
+                  key={sl.name}
+                  icon="🟡"
+                  label={sl.name}
+                  value={`stale ${formatCountdown(sl.ago_seconds)} · cadence ${sl.cadence_seconds}s`}
+                  tone="warning"
+                />
+              ))}
+            </div>
+          ) : (
+            <CardNote>All loops healthy</CardNote>
+          )}
+        </Card>
+
+        {/* Observatory Self-Health */}
+        <Card padding="md" className={severityCardClass(selfHealthStatus)}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <HeartPulse size={16} /> Observatory Self-Health
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.self_health ? (
+            <div className="space-y-2">
+              <StatusRow
+                icon={cats.self_health.api_responsive ? "🟢" : "🔴"}
+                label="API responsive"
+                value={cats.self_health.api_responsive ? "Yes" : "No"}
+                tone={cats.self_health.api_responsive ? "ok" : "critical"}
+              />
+              <StatusRow
+                icon={cats.self_health.db_accessible ? "🟢" : "🔴"}
+                label="DB accessible"
+                value={cats.self_health.db_accessible ? "Yes" : "No"}
+                tone={cats.self_health.db_accessible ? "ok" : "critical"}
+              />
+              <StatusRow
+                icon="📊"
+                label="Observatory DB"
+                value={`${cats.self_health.db_size_mb} MB`}
+              />
+              <StatusRow
+                icon="⏱️"
+                label="Uptime"
+                value={formatUptime(cats.self_health.uptime_seconds)}
+              />
+            </div>
+          ) : (
+            <CardNote>Data unavailable</CardNote>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
@@ -612,4 +895,33 @@ function Stat(props: { label: string; value: string; tone: "ok" | "warning" | "c
       <dd className={`font-mono ${valueClass}`}>{props.value}</dd>
     </div>
   );
+}
+
+function StatusRow(props: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone?: "ok" | "warning" | "critical";
+}) {
+  const valueClass =
+    props.tone === "critical"
+      ? "text-accent-red"
+      : props.tone === "warning"
+        ? "text-accent-amber"
+        : "text-fg-primary";
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md bg-bg-elevated px-3 py-2">
+      <span className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
+        <span aria-hidden>{props.icon}</span>
+        <span className="truncate">{props.label}</span>
+      </span>
+      <span className={`shrink-0 font-mono text-caption ${valueClass}`}>
+        {props.value}
+      </span>
+    </div>
+  );
+}
+
+function CardNote(props: { children: React.ReactNode }) {
+  return <p className="text-caption text-fg-muted">{props.children}</p>;
 }
