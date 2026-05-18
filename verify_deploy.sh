@@ -71,6 +71,7 @@ for path in \
   "/stocks" "/stocks?tab=stock" "/stocks?tab=dca" \
   "/autotrader" "/autotrader?tab=scalper" "/autotrader?tab=degen" \
   "/intel" "/intel?tab=lessons" "/intel?tab=journal" "/intel?tab=similar" "/intel?tab=calibration" "/intel?tab=shadow" \
+  "/docs" \
   "/memory" "/memory?tab=brain" "/memory?tab=memory" "/memory?tab=chromadb" "/memory?tab=health" "/memory?tab=aggressive" \
 ; do
   CODE=$(http_code_auth "$HUB$path")
