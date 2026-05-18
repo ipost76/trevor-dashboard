@@ -3,8 +3,7 @@ import { execSync } from "child_process";
 
 // /api/aggressive — Aggressive Mode toggle + status (legacy GET, flag-gated POST)
 //
-// GET  → 15s in-memory cache, calls query_aggressive_mode.py status (read-only,
-//        used by live-board / chat-empty-state / lesson-card displays)
+// GET  → 15s in-memory cache, calls query_aggressive_mode.py status (read-only)
 // POST → writes AGGRESSIVE_ON / AGGRESSIVE_OFF / AGGRESSIVE_EXTEND to hub_commands.
 //        G2 (2026-05-01): now gated by HUB_AGGRESSIVE_TOGGLE_ENABLED — same
 //        flag enforced by /api/memory/aggressive. Single contract for any
