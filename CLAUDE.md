@@ -206,6 +206,14 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 
 ## Hub Wave Changelog (additive — most recent at top)
 
+### 2026-05-18 — Heartbeat view parity (HB-05/06/07 catch-up)
+- `src/components/memory/heartbeat-view.tsx` (HB-04 vintage) had drifted behind the HB-05/06/07 Observatory collector extensions — surgical single-file fix; view renders at `/memory?tab=health`.
+- **`HeartbeatData` interface extended** — added `docker` / `component_rates` / `self_health` categories (all optional → graceful "Data unavailable" fallback) plus `OpenPosition`/`GatewayInfo`/`BudgetBreakdown`/`StuckTrade`/`ContainerItem`/`ComponentRate` types and missing sub-fields on `services`, `pipeline`, `autotrader`, `connectivity`, `budget`; `stuck_trades.trades` retyped `unknown[]` → `StuckTrade[]`.
+- **Connectivity card** — hardcoded `pending (HB-05)` pills replaced with live HL-API / Discord-WS reachability + latency + reconnection data.
+- **5 new cards** — Docker, Component Rates, Stuck Trades, Stale Loops, Observatory Self-Health — full-width `grid-cols-1 md:grid-cols-2`, mobile-first.
+- **Countdown fix** — "Next/Last heartbeat" now key off the API `timestamp` (real post time), not `lastUpdated` (the 30s poll time, which reset every cycle).
+- New local `StatusRow` + `CardNote` components. Verified: `tsc --noEmit` clean, `npm run build` OK, `trevor-dashboard.service` restarted 2026-05-18 17:16 UTC (clean boot), `/memory?tab=health` 200, `/api/heartbeat` 200 (13 categories). Only `heartbeat-view.tsx` touched.
+
 ### 2026-05-17 — Wave G (AutoTrader Consolidation roadmap closeout — Hub side)
 - Wave G1 full-system smoke verified the Hub: all 5 zones return 200 and the legacy redirects resolve correctly (Domain 5 PASS). Overall G1 verdict was **PARTIAL** — full report in the bot repo at `audits/wave_g1_full_system_smoke_2026-05-17.md`.
 - G1 flagged one **pre-existing Rule 26 violation** in `src/app/api/watchlist/route.ts` — its GET/POST/DELETE handlers interpolate user input into `execSync` template strings instead of using the `runPython` argv bridge. Pre-dates the A-G roadmap; a surgical fix prompt (convert to `runPython`) is scheduled. (`status/route.ts` also uses `execSync` but with no user input; `trades/route.ts` uses `execSync` with proper single-quote escaping — `watchlist` is the lone genuine violation.)
