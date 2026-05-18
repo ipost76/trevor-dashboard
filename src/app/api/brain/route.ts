@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -8,17 +7,9 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const scope = searchParams.get("scope") || "xp";
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const dashboardDir = process.cwd();
-  const scriptPath = join(dashboardDir, "query_brain.py");
-
   try {
-    const { execSync } = await import("child_process");
-    const raw = execSync(
-      `${pythonPath} ${scriptPath} ${scope}`,
-      { encoding: "utf-8", timeout: 30000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    // Rule 26 — scope crosses to Python as a spawnSync argv element via runPython(), never a shell string.
+    const raw = runPython("query_brain.py", [scope], { timeout: 30000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     const errMsg = String(err);

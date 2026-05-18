@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { join } from "path";
-import { runPythonInline } from "@/lib/api-helpers";
+import { runPython, runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -47,11 +47,12 @@ export async function GET(request: NextRequest) {
       if (direction) filters.direction = direction;
       if (search) filters.search = search;
 
-      const filtersJson = JSON.stringify(filters).replace(/'/g, "'\"'\"'");
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} history ${limit} ${offset} '${filtersJson}'`,
-        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      // Rule 26 — args (incl. user filters) cross as a spawnSync argv array via runPython(), never a shell string.
+      const raw = runPython(
+        "query_trades.py",
+        ["history", String(limit), String(offset), JSON.stringify(filters)],
+        { timeout: 15000 }
+      );
       const data = JSON.parse(raw);
       return NextResponse.json({ ...data, limit, offset });
     }
@@ -85,17 +86,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Missing trade id" }, { status: 400 });
   }
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "query_trades.py");
   const payload = JSON.stringify({ id, notes, training_status });
 
   try {
-    const { execSync } = await import("child_process");
-    const raw = execSync(
-      `${pythonPath} ${scriptPath} annotate '${payload.replace(/'/g, "'\"'\"'")}'`,
-      { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    // Rule 26 — payload crosses as a spawnSync argv element via runPython(), never a shell string.
+    const raw = runPython("query_trades.py", ["annotate", payload], { timeout: 10000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
@@ -106,29 +101,20 @@ export async function DELETE(request: NextRequest) {
   const body = await request.json();
   const { id, ids, trade_id } = body;
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const scriptPath = join(process.cwd(), "query_trades.py");
-
   try {
-    const { execSync } = await import("child_process");
-
+    // Rule 26 — ids / deleteId cross as spawnSync argv elements via runPython(), never a shell string.
     if (Array.isArray(ids) && ids.length > 0) {
-      const idsJson = JSON.stringify(ids).replace(/'/g, "'\"'\"'");
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} bulk_update '${idsJson}' EXCLUDE`,
-        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = runPython(
+        "query_trades.py",
+        ["bulk_update", JSON.stringify(ids), "EXCLUDE"],
+        { timeout: 15000 }
+      );
       return NextResponse.json(JSON.parse(raw));
     }
 
     const deleteId = trade_id || id;
     if (deleteId != null) {
-      const safeId = String(deleteId).replace(/'/g, "'\"'\"'");
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} delete_trade '${safeId}'`,
-        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = runPython("query_trades.py", ["delete_trade", String(deleteId)], { timeout: 15000 });
       return NextResponse.json(JSON.parse(raw));
     }
 

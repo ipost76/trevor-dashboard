@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 
 // /api/optuna — Optuna A/B Shadow Mode status + recent comparisons
 //
@@ -16,10 +16,14 @@ const CACHE_TTL = 60_000;
 
 const _cache: Map<string, { data: unknown; ts: number }> = new Map();
 
-function runHelper(args: string): unknown {
-  const cmd = `${PY} ${HELPER} ${args}`;
-  const raw = execSync(cmd, { timeout: 15_000, encoding: "utf-8" });
-  return JSON.parse(raw);
+function runHelper(args: string[]): unknown {
+  // Rule 26 — spawnSync argv array, no shell. Args cross as argv, never a shell string.
+  const proc = spawnSync(PY, [HELPER, ...args], { timeout: 15_000, encoding: "utf-8" });
+  if (proc.error) throw proc.error;
+  if (proc.status !== 0) {
+    throw new Error(`query_optuna_shadow exit=${proc.status}: ${(proc.stderr || "").slice(0, 500)}`);
+  }
+  return JSON.parse(proc.stdout);
 }
 
 export async function GET(request: Request) {
@@ -35,10 +39,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ cached: true, ...(cached.data as object) });
     }
 
-    let args = "status";
+    let args: string[] = ["status"];
     if (scope === "recent") {
       const n = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
-      args = `recent ${n}`;
+      args = ["recent", String(n)];
     } else if (scope !== "status") {
       return NextResponse.json(
         { error: `unknown scope: ${scope}` },

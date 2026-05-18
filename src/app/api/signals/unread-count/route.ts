@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
     const since = request.nextUrl.searchParams.get("since") || "";
+    // Rule 26 — `since` crosses to Python via the env map (SINCE), never a shell string.
     const code = `
-import sqlite3, json, os, sys
+import sqlite3, json, os
 db = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
-since = sys.argv[1] if len(sys.argv) > 1 else ""
+since = os.environ.get("SINCE", "")
 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
 if since:
     row = conn.execute("SELECT COUNT(*) as cnt FROM trade_insights WHERE created_at > ?", (since,)).fetchone()
@@ -17,11 +19,7 @@ else:
 conn.close()
 print(json.dumps({"count": row[0] if row else 0}))
 `;
-    const { execSync } = require("child_process");
-    const raw = execSync(
-      `${process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor"}/venv/bin/python3 - ${since}`,
-      { input: code, encoding: "utf-8", timeout: 5000, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    const raw = runPythonInline(code, { env: { SINCE: since }, timeout: 5000 });
     return NextResponse.json(JSON.parse(raw));
   } catch {
     return NextResponse.json({ count: 0 });

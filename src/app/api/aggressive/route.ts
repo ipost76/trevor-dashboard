@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 
 // /api/aggressive — Aggressive Mode toggle + status (legacy GET, flag-gated POST)
 //
@@ -20,9 +20,14 @@ const GATE_HELPER = "/home/trevor/trevor-dashboard/query_aggressive.py";
 let _cache: { data: unknown; ts: number } | null = null;
 const CACHE_TTL = 15_000; // 15s — matches /api/circuit-breaker
 
-function shellQuote(s: string): string {
-  // Escape single quotes for safe inclusion in single-quoted shell strings
-  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+function runHelper(args: string[]): unknown {
+  // Rule 26 — spawnSync argv array, no shell. User input crosses as argv, never a shell string.
+  const proc = spawnSync(PY, [HELPER, ...args], { timeout: 10_000, encoding: "utf-8" });
+  if (proc.error) throw proc.error;
+  if (proc.status !== 0) {
+    throw new Error(`query_aggressive_mode exit=${proc.status}: ${(proc.stderr || "").slice(0, 500)}`);
+  }
+  return JSON.parse(proc.stdout);
 }
 
 function isToggleEnabled(): boolean {
@@ -79,24 +84,18 @@ export async function POST(request: Request) {
       const delta = parseInt(String(body.delta ?? -5), 10);
       const hours = parseFloat(String(body.hours ?? 48));
       const reason = String(body.reason || "hub_toggle");
-      const cmd = `${PY} ${HELPER} enable ${delta} ${hours} ${shellQuote(reason)}`;
-      const raw = execSync(cmd, { timeout: 10_000, encoding: "utf-8" });
-      return NextResponse.json(JSON.parse(raw));
+      return NextResponse.json(runHelper(["enable", String(delta), String(hours), reason]));
     }
 
     if (action === "disable") {
       const reason = String(body.reason || "hub_toggle");
-      const cmd = `${PY} ${HELPER} disable ${shellQuote(reason)}`;
-      const raw = execSync(cmd, { timeout: 10_000, encoding: "utf-8" });
-      return NextResponse.json(JSON.parse(raw));
+      return NextResponse.json(runHelper(["disable", reason]));
     }
 
     if (action === "extend") {
       const hours = parseFloat(String(body.hours ?? 24));
       const reason = String(body.reason || "hub_extend");
-      const cmd = `${PY} ${HELPER} extend ${hours} ${shellQuote(reason)}`;
-      const raw = execSync(cmd, { timeout: 10_000, encoding: "utf-8" });
-      return NextResponse.json(JSON.parse(raw));
+      return NextResponse.json(runHelper(["extend", String(hours), reason]));
     }
 
     return NextResponse.json(

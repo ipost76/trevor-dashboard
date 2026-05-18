@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { spawnSync } from "child_process";
 
 // /api/quality/[id] — approve or reject a quality pattern
 //
@@ -35,9 +35,13 @@ export async function POST(
       );
     }
 
-    const cmd = `${PY} ${HELPER} ${action} ${pid}`;
-    const raw = execSync(cmd, { timeout: 10_000, encoding: "utf-8" });
-    const result = JSON.parse(raw);
+    // Rule 26 — spawnSync argv array, no shell. action/pid cross as argv, never a shell string.
+    const proc = spawnSync(PY, [HELPER, action, String(pid)], { timeout: 10_000, encoding: "utf-8" });
+    if (proc.error) throw proc.error;
+    if (proc.status !== 0) {
+      throw new Error(`query_quality exit=${proc.status}: ${(proc.stderr || "").slice(0, 500)}`);
+    }
+    const result = JSON.parse(proc.stdout);
 
     return NextResponse.json(result);
   } catch (e) {
