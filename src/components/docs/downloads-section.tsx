@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 import type { SegmentedToggleOption } from "@/components/ui";
 import { Download, FolderOpen, Archive, RotateCcw, Trash2 } from "lucide-react";
+import { CategoryTabs, UNCATEGORIZED_KEY, type DocsCategory } from "./category-tabs";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ interface DownloadFile {
   archived_at: string | null;
   discord_msg_id: number | null;
   file_type: string;
+  /** Category folder id, or null when the file is Uncategorized (Wave B1). */
+  category_id: string | null;
 }
 
 interface DownloadStats {
@@ -255,6 +258,17 @@ export function DownloadsSection() {
   const [filter, setFilter] = React.useState<DownloadFilter>("all");
   const [archiving, setArchiving] = React.useState<Set<string>>(new Set());
   const [deleting, setDeleting] = React.useState<Set<string>>(new Set());
+  // Category folders (Wave B1). `null` = the categories fetch has not resolved
+  // yet; `[]` = resolved empty / endpoint unavailable → a lone Uncategorized
+  // tab. `activeCategory` holds a category id or UNCATEGORIZED_KEY; it stays
+  // null until the first load picks a default (see the init effect below).
+  const [categories, setCategories] = React.useState<
+    ReadonlyArray<DocsCategory> | null
+  >(null);
+  const [activeCategory, setActiveCategory] = React.useState<string | null>(
+    null,
+  );
+  const categoryInitRef = React.useRef(false);
 
   const fetchData = React.useCallback(async (status: DownloadFilter) => {
     try {
@@ -269,11 +283,78 @@ export function DownloadsSection() {
     }
   }, []);
 
+  // Category list — fetched once on mount. A 404/500 (e.g. before the Wave B1
+  // build lands the /api/docs/categories route) degrades to `[]`: the strip
+  // then shows only the Uncategorized tab and every file falls under it.
+  const fetchCategories = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/docs/categories", { cache: "no-store" });
+      if (res.ok) {
+        const json = (await res.json()) as { categories?: DocsCategory[] };
+        setCategories(json.categories ?? []);
+      } else {
+        setCategories([]);
+      }
+    } catch {
+      setCategories([]);
+    }
+  }, []);
+
   React.useEffect(() => {
     void fetchData(filter);
     const id = setInterval(() => void fetchData(filter), 60_000);
     return () => clearInterval(id);
   }, [filter, fetchData]);
+
+  React.useEffect(() => {
+    void fetchCategories();
+  }, [fetchCategories]);
+
+  // Single-fetch design: the status-filtered listing already carries every
+  // file's category_id, so tab switches filter in-memory — no extra request.
+  const files = React.useMemo(() => data?.files ?? [], [data]);
+
+  // Per-tab counts — keyed by category id, plus UNCATEGORIZED_KEY. Derived
+  // from the current listing so each badge matches exactly what its tab shows.
+  const counts = React.useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const f of files) {
+      const key = f.category_id ?? UNCATEGORIZED_KEY;
+      m[key] = (m[key] ?? 0) + 1;
+    }
+    return m;
+  }, [files]);
+
+  // First load picks the default tab: the first category (by sort_order) that
+  // has files, else Uncategorized. Runs once — later polls and filter changes
+  // must not yank the user off the tab they selected. Keyed off `loading` (not
+  // `data`) so a failed listing still resolves the tab to Uncategorized.
+  React.useEffect(() => {
+    if (categoryInitRef.current) return;
+    if (loading || categories === null) return;
+    const fileList = data?.files ?? [];
+    const firstWithFiles = [...categories]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .find((c) => fileList.some((f) => f.category_id === c.id));
+    setActiveCategory(firstWithFiles ? firstWithFiles.id : UNCATEGORIZED_KEY);
+    categoryInitRef.current = true;
+  }, [loading, categories, data]);
+
+  const activeKey = activeCategory ?? UNCATEGORIZED_KEY;
+  const isUncategorized = activeKey === UNCATEGORIZED_KEY;
+
+  // Files for the selected tab — client-side filter on the single listing.
+  const visibleFiles = React.useMemo(
+    () =>
+      isUncategorized
+        ? files.filter((f) => f.category_id == null)
+        : files.filter((f) => f.category_id === activeKey),
+    [files, activeKey, isUncategorized],
+  );
+
+  const activeCategoryName = isUncategorized
+    ? "Uncategorized"
+    : (categories?.find((c) => c.id === activeKey)?.name ?? activeKey);
 
   const handleDownload = (filename: string) => {
     const link = document.createElement("a");
@@ -340,7 +421,9 @@ export function DownloadsSection() {
   };
 
   const stats = data?.stats;
-  const files = data?.files ?? [];
+  // Initial paint waits for the listing AND the default-tab pick so the file
+  // list never flashes Uncategorized before resolving to the chosen tab.
+  const initializing = loading || activeCategory === null;
 
   return (
     <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
@@ -378,8 +461,21 @@ export function DownloadsSection() {
         />
       </Card>
 
+      {/* Category tabs — Reports / Audits / Monitor / Uncategorized (Wave B1).
+          Rendered once the categories fetch resolves; selects which files show
+          below. The DOWNLOADS / LESSONS / JOURNAL zone strip is separate
+          (global ZoneSubTabs) and untouched. */}
+      {categories !== null && (
+        <CategoryTabs
+          categories={categories}
+          counts={counts}
+          active={activeKey}
+          onChange={setActiveCategory}
+        />
+      )}
+
       {/* Initial-load skeleton */}
-      {loading && (
+      {initializing && (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28 w-full" />
@@ -388,35 +484,31 @@ export function DownloadsSection() {
       )}
 
       {/* Backend error */}
-      {!loading && data?.error && (
+      {!initializing && data?.error && (
         <EmptyState title="Failed to load downloads" body={data.error} />
       )}
 
-      {/* Empty state */}
-      {!loading && data && !data.error && files.length === 0 && (
+      {/* Empty state — scoped to the selected category */}
+      {!initializing && data && !data.error && visibleFiles.length === 0 && (
         <EmptyState
           icon={<FolderOpen size={24} />}
-          title={
-            filter === "all"
-              ? "No downloads yet"
-              : filter === "active"
-                ? "No active downloads"
-                : "No archived downloads"
-          }
+          title={`No files in ${activeCategoryName}`}
           body={
-            filter === "all"
-              ? "Files delivered to #downloads will appear here automatically. React 📦 in Discord on a delivered message to archive it."
-              : filter === "active"
-                ? "All downloads are archived. Switch to 'Archived' to view them."
-                : "No downloads have been archived yet. React 📦 in Discord to archive."
+            filter === "active"
+              ? "No active files in this category — switch to All or Archived."
+              : filter === "archived"
+                ? "No archived files in this category."
+                : isUncategorized
+                  ? "Files delivered to #downloads land here until they are sorted into a category."
+                  : "No files have been assigned to this category yet."
           }
         />
       )}
 
-      {/* File list */}
-      {!loading && files.length > 0 && (
+      {/* File list — selected category */}
+      {!initializing && visibleFiles.length > 0 && (
         <ul className="space-y-3">
-          {files.map((f) => (
+          {visibleFiles.map((f) => (
             <li key={f.filename}>
               <DownloadFileCard
                 file={f}
