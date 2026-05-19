@@ -11,7 +11,7 @@ import {
   HapticButton,
 } from "@/components/ui";
 import type { SegmentedToggleOption } from "@/components/ui";
-import { Download, FolderOpen, Archive, RotateCcw } from "lucide-react";
+import { Download, FolderOpen, Archive, RotateCcw, Trash2 } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,20 +84,63 @@ function fileTypePillTone(
 interface FileCardProps {
   file: DownloadFile;
   archiving: boolean;
+  deleting: boolean;
   onDownload: (filename: string) => void;
   onArchiveToggle: (filename: string, currentlyArchived: boolean) => void;
+  onDelete: (filename: string) => Promise<boolean>;
 }
 
 function DownloadFileCard({
   file,
   archiving,
+  deleting,
   onDownload,
   onArchiveToggle,
+  onDelete,
 }: FileCardProps) {
   const ext = file.file_type || "";
   const tone = fileTypePillTone(ext);
   const handleDownload = () => onDownload(file.filename);
   const handleToggle = () => onArchiveToggle(file.filename, file.archived);
+
+  // Delete is a two-tap confirm: the first tap arms "Confirm Delete" for 3s,
+  // a second tap within that window fires the delete. Guards accidental
+  // mobile taps. A failed delete shows "Failed" for 2s, then reverts.
+  const [deletePhase, setDeletePhase] = React.useState<
+    "idle" | "confirm" | "error"
+  >("idle");
+  const deleteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearDeleteTimer = () => {
+    if (deleteTimer.current) {
+      clearTimeout(deleteTimer.current);
+      deleteTimer.current = null;
+    }
+  };
+  React.useEffect(() => {
+    return () => {
+      if (deleteTimer.current) clearTimeout(deleteTimer.current);
+    };
+  }, []);
+
+  const handleDeleteClick = async () => {
+    if (deletePhase === "idle") {
+      clearDeleteTimer();
+      setDeletePhase("confirm");
+      deleteTimer.current = setTimeout(() => setDeletePhase("idle"), 3000);
+      return;
+    }
+    if (deletePhase === "confirm") {
+      clearDeleteTimer();
+      const ok = await onDelete(file.filename);
+      // On success the parent drops this card from the list (it unmounts);
+      // on failure, surface a brief error state, then revert.
+      if (!ok) {
+        setDeletePhase("error");
+        deleteTimer.current = setTimeout(() => setDeletePhase("idle"), 2000);
+      }
+    }
+  };
 
   return (
     <Card
@@ -171,6 +214,33 @@ function DownloadFileCard({
             {file.archived ? <RotateCcw size={14} /> : <Archive size={14} />}
             {archiving ? "..." : file.archived ? "Unarchive" : "Archive"}
           </HapticButton>
+          <HapticButton
+            variant="ghost"
+            size="sm"
+            disabled={deleting}
+            onClick={() => void handleDeleteClick()}
+            aria-label={
+              deletePhase === "confirm"
+                ? `Confirm permanent deletion of ${file.filename}`
+                : `Delete ${file.filename}`
+            }
+            className={
+              deletePhase === "confirm"
+                ? "animate-pulse border border-accent-red/60 bg-accent-red/25 text-accent-red hover:bg-accent-red/35 hover:text-accent-red disabled:opacity-50"
+                : deletePhase === "error"
+                  ? "border border-accent-red/30 bg-accent-red/10 text-fg-muted disabled:opacity-50"
+                  : "border border-accent-red/30 bg-accent-red/10 text-accent-red hover:bg-accent-red/20 hover:text-accent-red disabled:opacity-50"
+            }
+          >
+            <Trash2 size={14} />
+            {deleting
+              ? "..."
+              : deletePhase === "confirm"
+                ? "Confirm Delete"
+                : deletePhase === "error"
+                  ? "Failed"
+                  : "Delete"}
+          </HapticButton>
         </div>
       </div>
     </Card>
@@ -184,6 +254,7 @@ export function DownloadsSection() {
   const [loading, setLoading] = React.useState(true);
   const [filter, setFilter] = React.useState<DownloadFilter>("all");
   const [archiving, setArchiving] = React.useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = React.useState<Set<string>>(new Set());
 
   const fetchData = React.useCallback(async (status: DownloadFilter) => {
     try {
@@ -232,6 +303,35 @@ export function DownloadsSection() {
       // swallow; refetch will surface server-side state on next poll
     } finally {
       setArchiving((prev) => {
+        const next = new Set(prev);
+        next.delete(filename);
+        return next;
+      });
+    }
+  };
+
+  const handleDelete = async (filename: string): Promise<boolean> => {
+    setDeleting((prev) => new Set(prev).add(filename));
+    try {
+      const res = await fetch("/api/intel/downloads/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      const result = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+      };
+      const ok = res.ok && result.success === true;
+      if (ok) {
+        // Refetch — the file drops from the list and the stats (active /
+        // archived counts + total size) refresh from server truth.
+        await fetchData(filter);
+      }
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      setDeleting((prev) => {
         const next = new Set(prev);
         next.delete(filename);
         return next;
@@ -321,8 +421,10 @@ export function DownloadsSection() {
               <DownloadFileCard
                 file={f}
                 archiving={archiving.has(f.filename)}
+                deleting={deleting.has(f.filename)}
                 onDownload={handleDownload}
                 onArchiveToggle={handleArchiveToggle}
+                onDelete={handleDelete}
               />
             </li>
           ))}

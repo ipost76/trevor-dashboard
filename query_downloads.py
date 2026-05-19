@@ -1,13 +1,15 @@
 """Hub API helper — queries download_manager for file listing and operations.
 
-Invoked by /api/intel/downloads/{list,archive,unarchive,path}.
-READ + WRITE: archive/unarchive mutate the manifest + move files between
-active/ and archive/. List/path are READ-ONLY.
+Invoked by /api/intel/downloads/{list,archive,unarchive,delete,path}.
+READ + WRITE: archive/unarchive/delete mutate the manifest. archive/unarchive
+move files between active/ and archive/; delete removes the file from disk, the
+manifest, and the #downloads Discord message. List/path are READ-ONLY.
 
 Usage:
     python3 query_downloads.py list [all|active|archived]
     python3 query_downloads.py archive <filename>
     python3 query_downloads.py unarchive <filename>
+    python3 query_downloads.py delete <filename>
     python3 query_downloads.py path <filename>
 """
 import json
@@ -17,6 +19,7 @@ sys.path.insert(0, "/home/trevor/trevor")
 
 from download_manager import (  # noqa: E402
     archive_file,
+    delete_download,
     get_file_path,
     get_stats,
     list_downloads,
@@ -49,6 +52,19 @@ elif action == "unarchive":
     filename = sys.argv[2]
     result = unarchive_file(filename)
     print(json.dumps({"success": bool(result), "filename": filename}))
+
+elif action == "delete":
+    if len(sys.argv) < 3:
+        print(json.dumps({"error": "delete requires filename"}))
+        sys.exit(0)
+    filename = sys.argv[2]
+    result = delete_download(filename)
+    print(json.dumps({
+        "success": bool(result.get("deleted")),
+        "filename": filename,
+        "discord_deleted": bool(result.get("discord_deleted")),
+        "error": result.get("error"),
+    }))
 
 elif action == "path":
     if len(sys.argv) < 3:
