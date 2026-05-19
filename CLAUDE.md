@@ -55,6 +55,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
 - **Manual / Trades** — `signals/unread-count`, `trades` + `trades/{close,close-status,command-status,edit-entry,flip}`, `watchlist`, `reminders`, `dca`. (Wave E2 deleted the `signals` parent route, `live-board` + `live-board/{enter,ticker}`, and `trades/{add-position,partial-close,tranches}` with the manual-scalp helper teardown — `signals/unread-count` kept, it backs the nav unread badges.)
 - **Intel** — `intel/{lessons,journal,similar,calibration,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`.
+- **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
 - **Control / Admin** — `killswitch`, `kill-switch`, `admin/{current-state,reset-capital,reset-history,reset-pnl-stats,reset-xp}`, `feature-flags`, `commits`, `auth`, `health`.
@@ -65,7 +66,7 @@ Conventions:
 - `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
 - `admin/*` routes are destructive resets (capital / P&L stats / XP / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
 - High-traffic reads: `live` (full dashboard payload), `status` (service state + XP + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
-- Dynamic segments: `intel/journal/[source]/[id]`, `intel/similar/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`.
+- Dynamic segments: `intel/journal/[source]/[id]`, `intel/similar/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`, `docs/categories/[id]`, `docs/downloads/[filename]/move`.
 
 ---
 
@@ -205,6 +206,13 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ---
 
 ## Hub Wave Changelog (additive — most recent at top)
+
+### 2026-05-19 — Docs category system: backend + API routes (frontend deferred to B1)
+- **Bot side** (`download_manager.py`, repo `trevor` / `main`) — new `downloads/categories.json` (folder defs: `id` slug · `name` · `sort_order` · `created_at`) and a `category_id` field on every `manifest.json` entry (`null` = Uncategorized; 19 existing entries backfilled). 8 new functions — `load_categories` / `save_categories` / `create_category` / `rename_category` / `delete_category` / `reorder_categories` / `move_file_to_category` / `list_downloads_by_category` — atomic tmp-rename writes + the existing module lock.
+- **New dispatcher `query_docs_categories.py`** at the Hub repo root (beside `query_downloads.py`) — actions `categories-list` / `category-create` / `category-rename` / `category-delete` / `category-reorder` / `file-move` / `list-by-category`; always emits one JSON object and exits 0.
+- **4 new API routes** under `src/app/api/docs/` — `categories/route.ts` (GET list + uncategorized_count, POST create), `categories/[id]/route.ts` (PUT rename, DELETE), `categories/reorder/route.ts` (PUT), `downloads/[filename]/move/route.ts` (PUT). Auth is `middleware.ts`-global — no per-route auth code, matching the existing downloads routes. Status codes 400 / 404 / 500.
+- **`src/app/api/intel/downloads/route.ts`** extended — optional `?category=<id>` / `?category=uncategorized` filter (via `list-by-category`); no param → unchanged behavior. Every file in the response now carries `category_id`.
+- Verified: `npx tsc --noEmit` clean; `query_docs_categories.py` exercised for all 7 actions + negative cases. **Live `curl` checks + the Hub build/restart are deferred to Wave B1** — this wave ships no frontend and triggers no restart. Bot `main` carries the `download_manager.py` / `categories.json` / `manifest.json` commit; Hub `master` carries the routes + dispatcher + this entry.
 
 ### 2026-05-19 — Downloads: delete button (confirm-to-delete + Discord cleanup)
 - **New API route `src/app/api/intel/downloads/delete/route.ts`** — `POST {filename}`, mirrors `archive/route.ts` exactly: filename validation (rejects empty / `/` / `..`), `runPython("query_downloads.py", ["delete", filename])`, returns the result JSON — `200` success, `404` not-found, `400` bad input, `500` on a Python error.
