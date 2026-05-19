@@ -206,6 +206,14 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 
 ## Hub Wave Changelog (additive — most recent at top)
 
+### 2026-05-19 — Heartbeat view: AutoTrader / Pipeline / Services detail cards + budget breakdown
+- The HB-05/06/07 catch-up (entry below) extended `HeartbeatData` with sub-fields on `autotrader` / `pipeline` / `services` / `connectivity` / `budget`, but added detail cards only for Docker / Component Rates / Stuck Trades / Stale Loops / Self-Health — leaving those sub-fields typed-but-not-rendered. This fills the gap.
+- **3 new detail cards** in the `grid-cols-1 md:grid-cols-2` strip: **AutoTrader** (status · trades today · today's P&L when `trades_today>0` · open positions when `open_count>0`, `unrealized_pnl_usd` shown only when non-null), **Pipeline** (scanner · regime · signals scored · guard pass/block · exit events), **Services** (per-service uptime + `↻ N (reason)` when `restart_count>0`).
+- **Budget breakdown** — one-line `swarm $X · briefing $Y · …` (categories > $0.01, descending) under the Budget `ResourceBar` in System Resources. **Gateway blocks** — a `StatusRow` in the Connectivity card, shown only when `blocks_in_last_2h>0`.
+- Graceful degradation throughout — every new render is conditional (zero/null/undefined → nothing shown, never a crash); `UNKNOWN` regime is gated out (collector miss-fallback). All optional fields handled TS-strict-safe (`?? 0` / null-narrowing) — `npx tsc --noEmit` clean, `next build` clean.
+- ⚠️ Phase 0 gate notes: the prompt's Phase 1-4 assumed pre-existing AUTOTRADER/PIPELINE/SERVICES detail cards — they did not exist (only one-line summary tiles), so they were built fresh as detail cards (Ghost-approved Option A). The prompt's `git push origin main` was corrected to **`master`**.
+- Single-file change: `src/components/memory/heartbeat-view.tsx`. `trevor-dashboard.service` restarted 2026-05-19 03:39:48 UTC; `/memory?tab=health` → 307 (auth gate), `/login` → 200, 0 startup errors.
+
 ### 2026-05-18 — Heartbeat view parity (HB-05/06/07 catch-up)
 - `src/components/memory/heartbeat-view.tsx` (HB-04 vintage) had drifted behind the HB-05/06/07 Observatory collector extensions — surgical single-file fix; view renders at `/memory?tab=health`.
 - **`HeartbeatData` interface extended** — added `docker` / `component_rates` / `self_health` categories (all optional → graceful "Data unavailable" fallback) plus `OpenPosition`/`GatewayInfo`/`BudgetBreakdown`/`StuckTrade`/`ContainerItem`/`ComponentRate` types and missing sub-fields on `services`, `pipeline`, `autotrader`, `connectivity`, `budget`; `stuck_trades.trades` retyped `unknown[]` → `StuckTrade[]`.

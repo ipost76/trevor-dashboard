@@ -574,12 +574,24 @@ export function HeartbeatView() {
               pct={cats.system.disk_pct}
               warnAt={85}
             />
-            <ResourceBar
-              label="Budget"
-              valueText={`$${cats.budget.used_usd.toFixed(2)} / $${cats.budget.budget_usd.toFixed(2)}`}
-              pct={cats.budget.pct}
-              warnAt={80}
-            />
+            <div>
+              <ResourceBar
+                label="Budget"
+                valueText={`$${cats.budget.used_usd.toFixed(2)} / $${cats.budget.budget_usd.toFixed(2)}`}
+                pct={cats.budget.pct}
+                warnAt={80}
+              />
+              {cats.budget.budget_breakdown &&
+                Object.keys(cats.budget.budget_breakdown).length > 0 && (
+                  <div className="mt-1 text-caption text-fg-muted">
+                    {Object.entries(cats.budget.budget_breakdown)
+                      .filter(([, v]) => (v ?? 0) > 0.01)
+                      .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
+                      .map(([k, v]) => `${k} $${(v ?? 0).toFixed(2)}`)
+                      .join(" · ")}
+                  </div>
+                )}
+            </div>
             <div className="flex items-center justify-between text-caption text-fg-muted">
               <span>CPU load (1m)</span>
               <span className="font-mono text-fg-primary">
@@ -672,11 +684,175 @@ export function HeartbeatView() {
               tone={cats.connectivity.discord_ws_reconnections_2h > 2 ? "warning" : "ok"}
             />
           )}
+          {cats.connectivity.gateway &&
+            cats.connectivity.gateway.blocks_in_last_2h > 0 && (
+              <StatusRow
+                icon={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "🟡" : "🟢"}
+                label="Gateway blocks"
+                value={`${cats.connectivity.gateway.blocks_in_last_2h}× in 2h · max ${cats.connectivity.gateway.max_block_seconds}s`}
+                tone={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "warning" : "ok"}
+              />
+            )}
         </div>
       </Card>
 
-      {/* DETAIL CARDS — Docker · Component Rates · Stuck Trades · Stale Loops · Self-Health */}
+      {/* DETAIL CARDS — AutoTrader · Pipeline · Services · Docker · Component Rates · Stuck Trades · Stale Loops · Self-Health */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {/* AutoTrader */}
+        <Card padding="md" className={severityCardClass(cats.autotrader.status)}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <Bot size={16} /> AutoTrader
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <div className="space-y-2">
+            <StatusRow
+              icon={
+                cats.autotrader.killswitch
+                  ? "🔴"
+                  : cats.autotrader.enabled
+                    ? "🟢"
+                    : "⚪"
+              }
+              label="Status"
+              value={
+                cats.autotrader.killswitch
+                  ? "Killswitch ON"
+                  : cats.autotrader.enabled
+                    ? "Enabled"
+                    : "Disabled"
+              }
+              tone={
+                cats.autotrader.killswitch
+                  ? "critical"
+                  : cats.autotrader.enabled
+                    ? "ok"
+                    : "warning"
+              }
+            />
+            <StatusRow
+              icon="🔁"
+              label="Trades today"
+              value={String(cats.autotrader.trades_today)}
+            />
+            {cats.autotrader.today_pnl_usd !== undefined &&
+              cats.autotrader.trades_today > 0 && (
+                <StatusRow
+                  icon={cats.autotrader.today_pnl_usd >= 0 ? "💰" : "💸"}
+                  label={"Today's P&L"}
+                  value={`${cats.autotrader.today_pnl_usd >= 0 ? "+" : ""}$${cats.autotrader.today_pnl_usd.toFixed(2)} (${cats.autotrader.today_wins ?? 0}W/${cats.autotrader.today_losses ?? 0}L · ${(cats.autotrader.today_avg_pnl_pct ?? 0).toFixed(1)}% avg)`}
+                  tone={cats.autotrader.today_pnl_usd >= 0 ? "ok" : "warning"}
+                />
+              )}
+            {(cats.autotrader.open_count ?? 0) > 0 && (
+              <StatusRow
+                icon="📈"
+                label="Open positions"
+                value={`${cats.autotrader.open_count} position${
+                  (cats.autotrader.open_count ?? 0) > 1 ? "s" : ""
+                }${
+                  cats.autotrader.unrealized_pnl_usd != null
+                    ? ` (${cats.autotrader.unrealized_pnl_usd >= 0 ? "+" : ""}$${cats.autotrader.unrealized_pnl_usd.toFixed(2)} unrealized)`
+                    : ""
+                }`}
+              />
+            )}
+          </div>
+        </Card>
+
+        {/* Pipeline */}
+        <Card padding="md" className={severityCardClass(cats.pipeline.status)}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <Radio size={16} /> Pipeline
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <div className="space-y-2">
+            <StatusRow
+              icon={severityIcon(cats.pipeline.status)}
+              label="Scanner"
+              value={cats.pipeline.scanner_detail}
+              tone={cats.pipeline.status}
+            />
+            {cats.pipeline.current_regime &&
+              cats.pipeline.current_regime !== "UNKNOWN" && (
+                <StatusRow
+                  icon={
+                    cats.pipeline.current_regime === "TRENDING"
+                      ? "📈"
+                      : cats.pipeline.current_regime === "VOLATILE"
+                        ? "⚡"
+                        : "↔️"
+                  }
+                  label="Regime"
+                  value={cats.pipeline.current_regime}
+                />
+              )}
+            {(cats.pipeline.signals_scored_delta ?? 0) > 0 && (
+              <StatusRow
+                icon="📊"
+                label="Signals scored"
+                value={String(cats.pipeline.signals_scored_delta)}
+              />
+            )}
+            <StatusRow
+              icon="🛡️"
+              label="Guard"
+              value={`${cats.pipeline.guard_passed} passed · ${cats.pipeline.guard_blocked} blocked`}
+            />
+            {(cats.pipeline.exit_events_delta ?? 0) > 0 && (
+              <StatusRow
+                icon="🚪"
+                label="Exit events"
+                value={String(cats.pipeline.exit_events_delta)}
+              />
+            )}
+          </div>
+        </Card>
+
+        {/* Services */}
+        <Card
+          padding="md"
+          className={severityCardClass(
+            cats.services.items.some((s) => s.status === "critical")
+              ? "critical"
+              : cats.services.items.some((s) => s.status === "warning")
+                ? "warning"
+                : "ok",
+          )}
+        >
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                <Activity size={16} /> Services
+              </span>
+            </CardTitle>
+          </CardHeader>
+          {cats.services.items.length > 0 ? (
+            <div className="space-y-2">
+              {cats.services.items.map((svc) => (
+                <StatusRow
+                  key={svc.name}
+                  icon={svc.active ? "🟢" : "🔴"}
+                  label={svc.name.replace(".service", "")}
+                  value={`${svc.active ? formatUptime(svc.uptime_seconds) : "DOWN"}${
+                    (svc.restart_count ?? 0) > 0
+                      ? ` · ↻ ${svc.restart_count} (${svc.restart_reason ?? "unknown"})`
+                      : ""
+                  }`}
+                  tone={svc.status}
+                />
+              ))}
+            </div>
+          ) : (
+            <CardNote>No services reported</CardNote>
+          )}
+        </Card>
+
         {/* Docker */}
         <Card padding="md" className={severityCardClass(cats.docker?.status ?? "ok")}>
           <CardHeader>
