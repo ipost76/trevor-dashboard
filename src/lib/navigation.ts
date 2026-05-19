@@ -8,8 +8,8 @@
  * Mobile bottom-nav order is the priority order:
  *   1. AUTO       (Scalper — front and center per Ghost crunch posture; Hub landing)
  *   2. STOCKS     (Stock discovery + DCA reminders — was MANUAL/SCALP/TRADING)
- *   3. INTEL      (analysis surface — Similar / Calibration / Shadow)
- *   4. DOCS       (reference surface — Downloads / Lessons / Journal; migrated from INTEL, Wave D2)
+ *   3. INTEL      (analysis surface — Similar / Calibration / Shadow / Lessons / Journal)
+ *   4. DOCS       (reference surface — Downloads file browser with category tabs; single-view zone)
  *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
@@ -80,6 +80,8 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "similar", label: "Similar" },
       { key: "calibration", label: "Calibration" },
       { key: "shadow", label: "Shadow" },
+      { key: "lessons", label: "Lessons" },
+      { key: "journal", label: "Journal" },
     ],
     defaultSubTab: "similar",
   },
@@ -90,12 +92,6 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Docs",
     icon: BookOpen,
     accent: "amber",
-    subTabs: [
-      { key: "downloads", label: "Downloads" },
-      { key: "lessons", label: "Lessons" },
-      { key: "journal", label: "Journal" },
-    ],
-    defaultSubTab: "downloads",
   },
   {
     id: "memory",

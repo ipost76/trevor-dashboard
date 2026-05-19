@@ -556,8 +556,8 @@ export function DownloadsSection() {
 
       {/* Category tabs — Reports / Audits / Monitor / Uncategorized (Wave B1).
           Rendered once the categories fetch resolves; selects which files show
-          below. The DOWNLOADS / LESSONS / JOURNAL zone strip is separate
-          (global ZoneSubTabs) and untouched. */}
+          below. /docs is a single-view zone (no zone-level sub-tab strip
+          above — Lessons / Journal moved back to /intel 2026-05-19). */}
       {categories !== null && (
         <CategoryTabs
           categories={categories}
