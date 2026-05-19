@@ -11,8 +11,18 @@ import {
   HapticButton,
 } from "@/components/ui";
 import type { SegmentedToggleOption } from "@/components/ui";
-import { Download, FolderOpen, Archive, RotateCcw, Trash2 } from "lucide-react";
+import {
+  Download,
+  FolderOpen,
+  Archive,
+  RotateCcw,
+  Trash2,
+  FolderInput,
+  Settings,
+} from "lucide-react";
 import { CategoryTabs, UNCATEGORIZED_KEY, type DocsCategory } from "./category-tabs";
+import { MoveToSheet } from "./move-to-sheet";
+import { CategorySettingsSheet } from "./category-settings-sheet";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,18 +98,22 @@ interface FileCardProps {
   file: DownloadFile;
   archiving: boolean;
   deleting: boolean;
+  moving: boolean;
   onDownload: (filename: string) => void;
   onArchiveToggle: (filename: string, currentlyArchived: boolean) => void;
   onDelete: (filename: string) => Promise<boolean>;
+  onMove: (file: DownloadFile) => void;
 }
 
 function DownloadFileCard({
   file,
   archiving,
   deleting,
+  moving,
   onDownload,
   onArchiveToggle,
   onDelete,
+  onMove,
 }: FileCardProps) {
   const ext = file.file_type || "";
   const tone = fileTypePillTone(ext);
@@ -201,6 +215,17 @@ function DownloadFileCard({
           <HapticButton
             variant="ghost"
             size="sm"
+            disabled={moving}
+            onClick={() => onMove(file)}
+            aria-label={`Move ${file.filename} to another category`}
+            className="border border-accent-violet/30 bg-accent-violet/10 text-accent-violet hover:bg-accent-violet/20 hover:text-accent-violet disabled:opacity-50"
+          >
+            <FolderInput size={14} />
+            {moving ? "..." : "Move"}
+          </HapticButton>
+          <HapticButton
+            variant="ghost"
+            size="sm"
             disabled={archiving}
             onClick={handleToggle}
             aria-label={
@@ -258,6 +283,14 @@ export function DownloadsSection() {
   const [filter, setFilter] = React.useState<DownloadFilter>("all");
   const [archiving, setArchiving] = React.useState<Set<string>>(new Set());
   const [deleting, setDeleting] = React.useState<Set<string>>(new Set());
+  // In-flight set for the MOVE button (Wave B2). Mirrors `archiving`/`deleting`.
+  const [moving, setMoving] = React.useState<Set<string>>(new Set());
+  // The file currently targeted by the Move-to sheet. `null` = sheet closed.
+  const [moveSheetFile, setMoveSheetFile] = React.useState<DownloadFile | null>(
+    null,
+  );
+  // Settings (category management) sheet visibility — Wave B2.
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   // Category folders (Wave B1). `null` = the categories fetch has not resolved
   // yet; `[]` = resolved empty / endpoint unavailable → a lone Uncategorized
   // tab. `activeCategory` holds a category id or UNCATEGORIZED_KEY; it stays
@@ -309,6 +342,16 @@ export function DownloadsSection() {
   React.useEffect(() => {
     void fetchCategories();
   }, [fetchCategories]);
+
+  // If the active tab's category gets deleted (via the settings sheet), fall
+  // back to Uncategorized so the file list / count badges don't reference a
+  // stale id. Runs whenever the categories array changes (Wave B2).
+  React.useEffect(() => {
+    if (categories === null || activeCategory === null) return;
+    if (activeCategory === UNCATEGORIZED_KEY) return;
+    if (categories.some((c) => c.id === activeCategory)) return;
+    setActiveCategory(UNCATEGORIZED_KEY);
+  }, [categories, activeCategory]);
 
   // Single-fetch design: the status-filtered listing already carries every
   // file's category_id, so tab switches filter in-memory — no extra request.
@@ -391,6 +434,43 @@ export function DownloadsSection() {
     }
   };
 
+  const handleMove = async (
+    filename: string,
+    category_id: string | null,
+  ): Promise<boolean> => {
+    setMoving((prev) => new Set(prev).add(filename));
+    try {
+      const res = await fetch(
+        `/api/docs/downloads/${encodeURIComponent(filename)}/move`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category_id }),
+        },
+      );
+      const result = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+      };
+      const ok = res.ok && result.success !== false;
+      if (ok) {
+        // Single-fetch design (Wave B1): one refetch yields the moved file's
+        // new category_id, which the counts useMemo derives — tab badges
+        // increment/decrement automatically and the card drops from the
+        // current tab.
+        await fetchData(filter);
+      }
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      setMoving((prev) => {
+        const next = new Set(prev);
+        next.delete(filename);
+        return next;
+      });
+    }
+  };
+
   const handleDelete = async (filename: string): Promise<boolean> => {
     setDeleting((prev) => new Set(prev).add(filename));
     try {
@@ -436,19 +516,32 @@ export function DownloadsSection() {
               DOWNLOADS
             </span>
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-1.5 text-micro text-fg-muted">
-            {stats && (
-              <>
-                <Pill tone="cyan" size="sm">
-                  {stats.active_count} active
-                </Pill>
-                <Pill tone="amber" size="sm">
-                  {stats.archive_count} archived
-                </Pill>
-                <span className="text-fg-faint">·</span>
-                <span>{stats.total_size_mb.toFixed(1)} MB</span>
-              </>
-            )}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 text-micro text-fg-muted">
+              {stats && (
+                <>
+                  <Pill tone="cyan" size="sm">
+                    {stats.active_count} active
+                  </Pill>
+                  <Pill tone="amber" size="sm">
+                    {stats.archive_count} archived
+                  </Pill>
+                  <span className="text-fg-faint">·</span>
+                  <span>{stats.total_size_mb.toFixed(1)} MB</span>
+                </>
+              )}
+            </div>
+            {/* Settings gear — opens the category management sheet (Wave B2). */}
+            <HapticButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Manage categories"
+              title="Manage categories"
+              className="border border-border-subtle bg-bg-elevated/30 text-fg-muted hover:border-accent-magenta/40 hover:bg-accent-magenta/10 hover:text-accent-magenta"
+            >
+              <Settings size={14} aria-hidden />
+            </HapticButton>
           </div>
         </CardHeader>
 
@@ -514,14 +607,43 @@ export function DownloadsSection() {
                 file={f}
                 archiving={archiving.has(f.filename)}
                 deleting={deleting.has(f.filename)}
+                moving={moving.has(f.filename)}
                 onDownload={handleDownload}
                 onArchiveToggle={handleArchiveToggle}
                 onDelete={handleDelete}
+                onMove={setMoveSheetFile}
               />
             </li>
           ))}
         </ul>
       )}
+
+      {/* Move-to sheet — one shared instance; opens for whichever file's MOVE
+          button was tapped (Wave B2). Categories list is the same one the
+          tab strip uses, so the destination list always matches the tabs. */}
+      <MoveToSheet
+        open={moveSheetFile !== null}
+        onClose={() => setMoveSheetFile(null)}
+        file={moveSheetFile}
+        categories={categories ?? []}
+        onMove={handleMove}
+      />
+
+      {/* Category management sheet — opened by the ⚙️ gear in the header
+          (Wave B2). On every successful create/rename/delete we re-fetch both
+          the categories array (drives the tab strip + Move-to destinations)
+          and the file listing (delete moves files to Uncategorized → counts
+          and category_ids change). */}
+      <CategorySettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        categories={categories ?? []}
+        counts={counts}
+        onCategoriesChanged={() => {
+          void fetchCategories();
+          void fetchData(filter);
+        }}
+      />
     </div>
   );
 }
