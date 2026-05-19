@@ -31,8 +31,8 @@ App Router pages under `src/app/`, verified against the filesystem:
 | `/autotrader` | AutoTrader — single-view Scalper board. **Hub landing** — `/` redirects here (Wave B1). |
 | `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
 | `/stocks/scout` | SCOUT discovery feed |
-| `/intel` | Similar / Calibration / Shadow (Downloads / Lessons / Journal moved to `/docs`, Wave D2) |
-| `/docs` | Downloads / Lessons / Journal — migrated from `/intel` (Wave D2); registered as a nav zone (Wave D3); gated `HUB_REDESIGN_DOCS` (ON) |
+| `/intel` | Similar / Calibration / Shadow / Lessons / Journal (Lessons + Journal moved back from `/docs` 2026-05-19; Downloads stayed on `/docs`) |
+| `/docs` | Downloads file browser with category tabs — single-view zone since Lessons / Journal moved back to `/intel` 2026-05-19; gated `HUB_REDESIGN_DOCS` (ON) |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
 | `/login` | Cookie auth |
@@ -43,7 +43,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
 - Legacy redirects in `middleware.ts` (308): `/trading`, `/scalp` & `/manual` → `/stocks` (Wave C2 — direct single hop, no chaining), `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
-- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `similar`/`calibration`/`shadow`; docs → `downloads`/`lessons`/`journal`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader is single-view — no sub-tabs as of Wave B2.)
+- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `similar`/`calibration`/`shadow`/`lessons`/`journal`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader and docs are single-view — no zone-level sub-tabs; docs has its own internal category tab strip inside the Downloads section from Wave B1.)
 
 ---
 
@@ -206,6 +206,16 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ---
 
 ## Hub Wave Changelog (additive — most recent at top)
+
+### 2026-05-19 — Lessons + Journal moved back to /intel, /docs becomes single-view
+- **Reversed Wave D2's split for Lessons/Journal.** They're back on `/intel` as tabs 4 and 5; `/docs` becomes a single-view zone showing only the Downloads category browser (B1/B2). Component source files stay under `components/docs/` per Ghost direction; only dispatcher routing changes. The API namespace (`/api/intel/lessons`, `/api/intel/journal/...`) was already on `/intel` from Wave D2 and required no change.
+- **`src/lib/navigation.ts`** — Intel zone `subTabs` extended to `[similar, calibration, shadow, lessons, journal]` (`defaultSubTab` unchanged: `similar`; magenta accent unchanged). Docs zone `subTabs` + `defaultSubTab` dropped entirely (matches `/autotrader` single-view pattern — `<ZoneSubTabs />` auto-hides on zones without subTabs, line 17). File-header comment (lines 11–12) corrected to reflect the new zone layout.
+- **`src/components/intel/intel-zone-view.tsx`** — added `LessonsSection` + `JournalSection` imports from `@/components/docs/...` and the two new `case "lessons"` / `case "journal"` branches. The Wave-D2-history comment was rewritten to record the 2026-05-19 reversal.
+- **`src/app/docs/docs-zone-view.tsx`** — removed `LessonsSection` + `JournalSection` imports and the `case "lessons"` / `case "journal"` branches; the file-header comment now records the single-view state. Switch shape is retained on purpose so a stale `/docs?tab=lessons` bookmark falls through to the default `DownloadsSection` (no broken state, no console error).
+- **`src/components/docs/downloads-section.tsx`** — corrected one now-stale JSX comment near the category-tabs render that referenced a "DOWNLOADS / LESSONS / JOURNAL zone strip" that no longer exists.
+- **Untouched on purpose:** the component files themselves (`lessons-section.tsx`, `lesson-card.tsx`, `journal-section.tsx`) stay under `components/docs/` — only the dispatcher routes them differently now. No new primitives, no new design tokens, no new npm deps. Auto, Stocks, Memory, design-system, and all Python under `/home/trevor/trevor/` are untouched.
+- **Verified live post-deploy:** `npx tsc --noEmit` clean (0 errors, both phase checkpoints); `next build` clean — `/intel` route **7.73 kB** (up from prior baseline; +2 sections), `/docs` route **6.7 kB** (down from B2's 10.2 kB; −2 sections — bundle redistribution visible). `trevor-dashboard.service` restarted 2026-05-19 22:11:23 UTC PID 1936180 → `[HUB] TREVOR Hub ready on http://127.0.0.1:3333` in 1 s, 0 boot errors / warnings (`journalctl --since "2 minutes ago"` grep `error|warning|fail|fatal|exception` returned empty). Cookie-auth SSR probes: `GET /intel` 200 (26.7 kB) — all 5 tab labels present (`Similar`/`Calibration`/`Shadow`/`Lessons`/`Journal`); `GET /intel?tab=lessons` 200 (28.8 kB) renders the `LESSONS` card; `GET /intel?tab=journal` 200 (27.4 kB) renders the `JOURNAL` card; `GET /docs` 200 (26.4 kB) — zone strip absent (no `Lessons`/`Journal`/`Downloads` outer labels), Downloads section header `DOWNLOADS` present, B1 category `tablist` + B1/B2 controls (`Filter downloads`, `Manage categories`) intact. Sacred 9/9 byte-identical to Phase 0 capture (md5 match); `guard_recurring_bugs.sh` 14/14 PASS.
+- Hub commit `3b99307` on `master` (4 code files, +44/−45). This `CLAUDE.md` entry is a separate `docs:` commit. Bot side: a parallel `docs:` commit refreshes `/home/trevor/trevor/BEHAVIOR_RULES.md` Sections 2 + 3 + `/home/trevor/trevor/CLAUDE.md` Hub zone description — no Python touched.
 
 ### 2026-05-19 — Docs page: Move-to + category settings (Wave B2)
 - **Move-to file controls + ⚙️ settings modal** on the `/docs?tab=downloads` page, completing the A1 backend + B1 tab strip. Every file card gains a fourth button (**MOVE**, violet `accent-violet`, `FolderInput` lucide icon) that opens a `<BottomSheet>` listing every category (sort_order) + Uncategorized; tap → `PUT /api/docs/downloads/[filename]/move` → list refetches, the card drops from the current tab, count badges recompute via the existing `useMemo` (no extra plumbing — single-fetch design from B1 already feeds the counts). The DOWNLOADS `<CardHeader>` gains a ⚙️ `Settings` gear (top-right next to the stats pills, magenta hover accent) opening a second `<BottomSheet>` titled MANAGE CATEGORIES.
