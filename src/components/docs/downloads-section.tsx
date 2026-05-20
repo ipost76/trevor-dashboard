@@ -6,16 +6,12 @@ import {
   CardTitle,
   EmptyState,
   Skeleton,
-  SegmentedToggle,
   Pill,
   HapticButton,
 } from "@/components/ui";
-import type { SegmentedToggleOption } from "@/components/ui";
 import {
   Download,
   FolderOpen,
-  Archive,
-  RotateCcw,
   Trash2,
   FolderInput,
   Settings,
@@ -48,17 +44,12 @@ interface DownloadStats {
 interface DownloadsResponse {
   files: ReadonlyArray<DownloadFile>;
   stats: DownloadStats;
-  filter: string;
+  /** Kept for backend-response parity; the UI no longer filters by status
+   *  (the All/Active/Archived toggle was removed 2026-05-20 — categories
+   *  replaced the archive concept). */
+  filter?: string;
   error?: string;
 }
-
-type DownloadFilter = "all" | "active" | "archived";
-
-const FILTER_OPTIONS: ReadonlyArray<SegmentedToggleOption<DownloadFilter>> = [
-  { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "archived", label: "Archived" },
-];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,29 +87,24 @@ function fileTypePillTone(
 
 interface FileCardProps {
   file: DownloadFile;
-  archiving: boolean;
   deleting: boolean;
   moving: boolean;
   onDownload: (filename: string) => void;
-  onArchiveToggle: (filename: string, currentlyArchived: boolean) => void;
   onDelete: (filename: string) => Promise<boolean>;
   onMove: (file: DownloadFile) => void;
 }
 
 function DownloadFileCard({
   file,
-  archiving,
   deleting,
   moving,
   onDownload,
-  onArchiveToggle,
   onDelete,
   onMove,
 }: FileCardProps) {
   const ext = file.file_type || "";
   const tone = fileTypePillTone(ext);
   const handleDownload = () => onDownload(file.filename);
-  const handleToggle = () => onArchiveToggle(file.filename, file.archived);
 
   // Delete is a two-tap confirm: the first tap arms "Confirm Delete" for 3s,
   // a second tap within that window fires the delete. Guards accidental
@@ -160,10 +146,7 @@ function DownloadFileCard({
   };
 
   return (
-    <Card
-      padding="sm"
-      className={file.archived ? "opacity-70 border-border-amber/40" : ""}
-    >
+    <Card padding="sm">
       <div className="flex flex-col gap-3">
         {/* Filename + badges row */}
         <div className="flex flex-wrap items-start gap-2">
@@ -181,11 +164,6 @@ function DownloadFileCard({
             {ext && (
               <Pill tone={tone} size="sm">
                 {ext}
-              </Pill>
-            )}
-            {file.archived && (
-              <Pill tone="amber" size="sm">
-                <span aria-hidden>📦</span> Archived
               </Pill>
             )}
           </div>
@@ -226,25 +204,6 @@ function DownloadFileCard({
           <HapticButton
             variant="ghost"
             size="sm"
-            disabled={archiving}
-            onClick={handleToggle}
-            aria-label={
-              file.archived
-                ? `Unarchive ${file.filename}`
-                : `Archive ${file.filename}`
-            }
-            className={
-              file.archived
-                ? "border border-accent-green/30 bg-accent-green/10 text-accent-green hover:bg-accent-green/20 hover:text-accent-green disabled:opacity-50"
-                : "border border-accent-amber/30 bg-accent-amber/10 text-accent-amber hover:bg-accent-amber/20 hover:text-accent-amber disabled:opacity-50"
-            }
-          >
-            {file.archived ? <RotateCcw size={14} /> : <Archive size={14} />}
-            {archiving ? "..." : file.archived ? "Unarchive" : "Archive"}
-          </HapticButton>
-          <HapticButton
-            variant="ghost"
-            size="sm"
             disabled={deleting}
             onClick={() => void handleDeleteClick()}
             aria-label={
@@ -280,10 +239,10 @@ function DownloadFileCard({
 export function DownloadsSection() {
   const [data, setData] = React.useState<DownloadsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [filter, setFilter] = React.useState<DownloadFilter>("all");
-  const [archiving, setArchiving] = React.useState<Set<string>>(new Set());
   const [deleting, setDeleting] = React.useState<Set<string>>(new Set());
-  // In-flight set for the MOVE button (Wave B2). Mirrors `archiving`/`deleting`.
+  // In-flight set for the MOVE button (Wave B2). Mirrors the `deleting` set
+  // pattern (the parallel `archiving` set was removed 2026-05-20 along with
+  // the Archive button).
   const [moving, setMoving] = React.useState<Set<string>>(new Set());
   // The file currently targeted by the Move-to sheet. `null` = sheet closed.
   const [moveSheetFile, setMoveSheetFile] = React.useState<DownloadFile | null>(
@@ -303,9 +262,13 @@ export function DownloadsSection() {
   );
   const categoryInitRef = React.useRef(false);
 
-  const fetchData = React.useCallback(async (status: DownloadFilter) => {
+  // Archive concept retired 2026-05-20 — categories replaced it, so the
+  // listing now requests the full set (no `?status=` filter). The backend
+  // route still accepts `?status=` and returns `stats.archive_count` for
+  // backend-response parity; the UI just no longer surfaces either.
+  const fetchData = React.useCallback(async () => {
     try {
-      const res = await fetch(`/api/intel/downloads?status=${status}`, {
+      const res = await fetch(`/api/intel/downloads`, {
         cache: "no-store",
       });
       if (res.ok) setData((await res.json()) as DownloadsResponse);
@@ -334,10 +297,10 @@ export function DownloadsSection() {
   }, []);
 
   React.useEffect(() => {
-    void fetchData(filter);
-    const id = setInterval(() => void fetchData(filter), 60_000);
+    void fetchData();
+    const id = setInterval(() => void fetchData(), 60_000);
     return () => clearInterval(id);
-  }, [filter, fetchData]);
+  }, [fetchData]);
 
   React.useEffect(() => {
     void fetchCategories();
@@ -408,32 +371,6 @@ export function DownloadsSection() {
     document.body.removeChild(link);
   };
 
-  const handleArchiveToggle = async (
-    filename: string,
-    currentlyArchived: boolean,
-  ) => {
-    setArchiving((prev) => new Set(prev).add(filename));
-    try {
-      const endpoint = currentlyArchived
-        ? "/api/intel/downloads/unarchive"
-        : "/api/intel/downloads/archive";
-      await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename }),
-      });
-      await fetchData(filter);
-    } catch {
-      // swallow; refetch will surface server-side state on next poll
-    } finally {
-      setArchiving((prev) => {
-        const next = new Set(prev);
-        next.delete(filename);
-        return next;
-      });
-    }
-  };
-
   const handleMove = async (
     filename: string,
     category_id: string | null,
@@ -457,7 +394,7 @@ export function DownloadsSection() {
         // new category_id, which the counts useMemo derives — tab badges
         // increment/decrement automatically and the card drops from the
         // current tab.
-        await fetchData(filter);
+        await fetchData();
       }
       return ok;
     } catch {
@@ -484,9 +421,9 @@ export function DownloadsSection() {
       };
       const ok = res.ok && result.success === true;
       if (ok) {
-        // Refetch — the file drops from the list and the stats (active /
-        // archived counts + total size) refresh from server truth.
-        await fetchData(filter);
+        // Refetch — the file drops from the list and the stats (file count +
+        // total size) refresh from server truth.
+        await fetchData();
       }
       return ok;
     } catch {
@@ -520,11 +457,12 @@ export function DownloadsSection() {
             <div className="flex flex-wrap items-center gap-1.5 text-micro text-fg-muted">
               {stats && (
                 <>
+                  {/* Archive pill removed 2026-05-20 — archive concept is gone
+                      from the UI; categories replace it. `active_count` now
+                      equals the total file count (archive_count is always 0)
+                      so we label the pill "files" rather than "active". */}
                   <Pill tone="cyan" size="sm">
-                    {stats.active_count} active
-                  </Pill>
-                  <Pill tone="amber" size="sm">
-                    {stats.archive_count} archived
+                    {stats.active_count} files
                   </Pill>
                   <span className="text-fg-faint">·</span>
                   <span>{stats.total_size_mb.toFixed(1)} MB</span>
@@ -544,14 +482,6 @@ export function DownloadsSection() {
             </HapticButton>
           </div>
         </CardHeader>
-
-        <SegmentedToggle<DownloadFilter>
-          ariaLabel="Filter downloads"
-          options={FILTER_OPTIONS}
-          value={filter}
-          onChange={setFilter}
-          full
-        />
       </Card>
 
       {/* Category tabs — Reports / Audits / Monitor / Uncategorized (Wave B1).
@@ -587,13 +517,9 @@ export function DownloadsSection() {
           icon={<FolderOpen size={24} />}
           title={`No files in ${activeCategoryName}`}
           body={
-            filter === "active"
-              ? "No active files in this category — switch to All or Archived."
-              : filter === "archived"
-                ? "No archived files in this category."
-                : isUncategorized
-                  ? "Files delivered to #downloads land here until they are sorted into a category."
-                  : "No files have been assigned to this category yet."
+            isUncategorized
+              ? "Files delivered to #downloads land here until they are sorted into a category."
+              : "No files have been assigned to this category yet."
           }
         />
       )}
@@ -605,11 +531,9 @@ export function DownloadsSection() {
             <li key={f.filename}>
               <DownloadFileCard
                 file={f}
-                archiving={archiving.has(f.filename)}
                 deleting={deleting.has(f.filename)}
                 moving={moving.has(f.filename)}
                 onDownload={handleDownload}
-                onArchiveToggle={handleArchiveToggle}
                 onDelete={handleDelete}
                 onMove={setMoveSheetFile}
               />
@@ -641,7 +565,7 @@ export function DownloadsSection() {
         counts={counts}
         onCategoriesChanged={() => {
           void fetchCategories();
-          void fetchData(filter);
+          void fetchData();
         }}
       />
     </div>

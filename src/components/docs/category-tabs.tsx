@@ -51,15 +51,16 @@ export function CategoryTabs({
         label: c.name,
         badge: counts[c.id] ?? 0,
       }));
-    // Uncategorized is always last and always present — it is not an API
-    // category, it is the bucket for files with category_id === null.
+    // Uncategorized is always FIRST (2026-05-20) — newly-delivered files land
+    // here, so it is the default landing tab for the docs page. It is not an
+    // API category, it is the bucket for files with category_id === null.
     return [
-      ...categoryItems,
       {
         key: UNCATEGORIZED_KEY,
         label: "Uncategorized",
         badge: counts[UNCATEGORIZED_KEY] ?? 0,
       },
+      ...categoryItems,
     ];
   }, [categories, counts]);
 
