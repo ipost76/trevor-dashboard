@@ -31,7 +31,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 | `/autotrader` | AutoTrader — single-view Scalper board. **Hub landing** — `/` redirects here (Wave B1). |
 | `/stocks` | Stock signals + DCA reminders — Stock / DCA sub-tabs (was `/manual`, Wave C2) |
 | `/stocks/scout` | SCOUT discovery feed |
-| `/intel` | Similar / Calibration / Shadow / Lessons / Journal (Lessons + Journal moved back from `/docs` 2026-05-19; Downloads stayed on `/docs`) |
+| `/intel` | Notes / Shadow / Lessons / Journal (Lessons + Journal moved back from `/docs` 2026-05-19; Similar + Calibration removed and Notes added as default 2026-05-20 — Notes is a client-side notepad, localStorage `trevor-hub-notes`, no API) |
 | `/docs` | Downloads file browser with category tabs — single-view zone since Lessons / Journal moved back to `/intel` 2026-05-19; gated `HUB_REDESIGN_DOCS` (ON) |
 | `/memory` | Brain / Memory / ChromaDB / System Health / Aggressive |
 | `/chat` | TREVOR chat (direct Anthropic API) |
@@ -43,7 +43,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - Redirect-only pages: `/` → `/autotrader`; `/brain` → `/control` (chains through to `/memory`).
 - Legacy redirects in `middleware.ts` (308): `/trading`, `/scalp` & `/manual` → `/stocks` (Wave C2 — direct single hop, no chaining), `/command` → `/memory`, `/intelligence` → `/intel`, `/dashboard` → `/autotrader` (HOME page retired, Wave B1).
 - Legacy redirects in `next.config.ts` (308): `/trades` `/holdings` `/signals` `/research` `/training` `/control` `/ghost` `/dev-tasks` `/reminders` → a retired zone path + `?tab=` (then re-chained by `middleware.ts`); plus 3 `/api/auto-trader/*` → `/api/auto/*`.
-- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `similar`/`calibration`/`shadow`/`lessons`/`journal`; memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader and docs are single-view — no zone-level sub-tabs; docs has its own internal category tab strip inside the Downloads section from Wave B1.)
+- Sub-tabs are `?tab=` query params only — no nested routes except `/stocks/scout`. Per zone: stocks → `stock`/`dca`; intel → `notes`/`shadow`/`lessons`/`journal` (`notes` default); memory → `brain`/`memory`/`chroma`/`health`/`aggressive`. (autotrader and docs are single-view — no zone-level sub-tabs; docs has its own internal category tab strip inside the Downloads section from Wave B1.)
 
 ---
 
@@ -54,7 +54,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
 - **Manual / Trades** — `signals/unread-count`, `trades` + `trades/{close,close-status,command-status,edit-entry,flip}`, `watchlist`, `reminders`, `dca`. (Wave E2 deleted the `signals` parent route, `live-board` + `live-board/{enter,ticker}`, and `trades/{add-position,partial-close,tranches}` with the manual-scalp helper teardown — `signals/unread-count` kept, it backs the nav unread badges.)
-- **Intel** — `intel/{lessons,journal,similar,calibration,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`.
+- **Intel** — `intel/{lessons,journal,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`. (Wave 2026-05-20 deleted `intel/similar/[source]/[id]` and `intel/calibration`; Notes is client-side and has no API.)
 - **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
@@ -66,7 +66,7 @@ Conventions:
 - `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
 - `admin/*` routes are destructive resets (capital / P&L stats / XP / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
 - High-traffic reads: `live` (full dashboard payload), `status` (service state + XP + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
-- Dynamic segments: `intel/journal/[source]/[id]`, `intel/similar/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`, `docs/categories/[id]`, `docs/downloads/[filename]/move`.
+- Dynamic segments: `intel/journal/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`, `docs/categories/[id]`, `docs/downloads/[filename]/move`.
 
 ---
 
@@ -81,7 +81,7 @@ Conventions:
 | `autotrader-v2/` | 8 | `scalper-view`, `scalper-header`, `capital-hero`, `config-card`, `autotrader-toggle-card` |
 | `stocks/` | 3 | `stocks-zone-view` (dispatcher), `stock-section`, `dca-section` (was `scalp/`; SCALP sections deleted, Wave C2) |
 | `scout/` | 14 | `scout-tabs`, `discovery-feed-v3`, `filings-stream`, `insider-heatmap`, `swing-signals-panel` |
-| `intel/` | 4 | `intel-zone-view`, `similar-trades-section`, `calibration-section`, `shadow-section` |
+| `intel/` | 3 | `intel-zone-view`, `notes-section`, `shadow-section` (`similar-trades-section` + `calibration-section` removed 2026-05-20; Lessons / Journal sections live under `components/docs/`) |
 | `docs/` | 4 | `downloads-section`, `lessons-section`, `lesson-card`, `journal-section` (migrated from `intel/`, Wave D2) |
 | `memory/` | 9 | `memory-zone-view`, `brain-section`, `chroma-section`, `health-section`, `killswitch-control-card` |
 | `chat/` | 4 | `chat-panel`, `chat-modal`, `chat-message`, `chat-empty-state` |
@@ -206,6 +206,16 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ---
 
 ## Hub Wave Changelog (additive — most recent at top)
+
+### 2026-05-20 — Intel: Similar + Calibration removed, Notes tab added as default
+- **Final Intel tab order: NOTES | SHADOW | LESSONS | JOURNAL.** Notes is the new default. The Similar tab + the Calibration deep-dive tab were retired in full (component files + their exclusive API routes deleted); no other consumers existed.
+- **New `src/components/intel/notes-section.tsx`** (~165 lines, `"use client"`) — pure client-side notepad. State shape `interface Note { id: string; text: string; createdAt: string }`; persistence keyed `localStorage["trevor-hub-notes"]`; SSR-safe (loads in a hydration `useEffect`, never writes until after the bootstrap read). No API call, no Python bridge, no DB. UI: a `Card`-wrapped 4-row textarea with cyan-focus border (placeholder `"jot something down..."`) + a terminal-green `+ ADD NOTE` `tap-target` button (44×44 enforced) using the `bg-accent-green/10 / text-accent-green / border-accent-green/40` token pattern; Ctrl/⌘+Enter submits. Below: an `<EmptyState title="No notes yet" …/>` when empty, else a newest-first `<ul>` of `Card`-wrapped note rows — `whitespace-pre-wrap` text, relative timestamp (`just now` / `Ns/m/h/d ago` / `Mon D` / `Mon D, YYYY` cross-year) and a small ✕ delete button (`tap-target -m-2`, red on hover, no confirm). `crypto.randomUUID()` IDs with a `Date.now()` fallback; `JSON.parse` wrapped in try/catch (corrupt → `[]`); `localStorage.setItem` wrapped in try/catch (quota / private-mode → in-memory only). No new design tokens, no new npm deps.
+- **Deleted (`git rm`):** `src/components/intel/similar-trades-section.tsx` (203 lines), `src/components/intel/calibration-section.tsx` (144 lines), `src/app/api/intel/similar/[source]/[id]/route.ts`, `src/app/api/intel/calibration/route.ts` — and their now-empty parent directories.
+- **Modified:** `src/lib/navigation.ts` (Intel `subTabs` → `[notes, shadow, lessons, journal]`, `defaultSubTab: "notes"`, file-header comment); `src/components/intel/intel-zone-view.tsx` (drop Similar + Calibration imports + cases; add `NotesSection` import; `case "notes"` is the default fall-through; switch order rewritten to match the new tab order; the dispatcher comment now documents the Notes-as-default state and flags the orphan Python helpers); `src/app/intel/page.tsx` (server fallback `tab ?? "notes"`).
+- **Unchanged on purpose:** `<ZoneSubTabs/>` is navigation-driven and auto-rerenders from `navigation.ts` — no manual tab-strip edits needed. The `/api/intel/journal` route is shared (Journal tab still uses it; Similar's base-trade picker was the only other consumer) and stays. The `HUB_REDESIGN_INTEL` flag stays `true` — no flag flip this wave. `HUB_REDESIGN_INTEL=false` IntelDisabled state untouched.
+- **Orphan Python helpers (flagged, NOT deleted):** `query_similar_trades.py` + `query_calibration_deep.py` are now dead code. They live in the **Hub repo** (`/home/trevor/trevor-dashboard/query_*.py`, ~8.0 kB + 3.2 kB), not under `/home/trevor/trevor/` (`runPython` resolves scripts relative to its cwd, which `api-helpers.ts` sets to `TREVOR_DIR=/home/trevor/trevor` — so the prior routes were already broken at the disk-resolution layer; deleting the JS routes makes that a non-issue). They stay on disk because the bot's `monitor_center/monitors/11_hub_api.py:454,456` lists both in `TRACKED_HELPERS` (`_make_helper_exists` → CRIT on missing); cleaning them up requires a bot-side wave that simultaneously `git rm`s the scripts AND prunes the `TRACKED_HELPERS` list — out of scope from a Hub-only prompt. Matches the established `dashboard/calibration` orphan pattern. Flag for a paired Hub + bot cleanup wave.
+- **Verified live post-deploy:** `npx tsc --noEmit` clean (0 errors after pruning the stale `.next/types/app/api/intel/{similar,calibration}` cache); `next build` clean — `/intel` route **7.67 kB** (down from 7.73 kB pre-change; net smaller after subtracting two heavy components and adding the lighter Notes component). `trevor-dashboard.service` restarted 2026-05-20 05:09:58 UTC → `[HUB] TREVOR Hub ready on http://127.0.0.1:3333` in 2 s, 0 boot errors / warnings (10 s journalctl error scan empty). Cookie-auth SSR probes: `GET /intel` 200 (27325 B) — tab strip shows exactly `Notes`/`Shadow`/`Lessons`/`Journal` (no `Similar`, no `Calibration`); `GET /intel?tab=notes` 200 (27363 B) — `NOTES` header, `Add Note` button, `jot something down` placeholder all present in the SSR HTML. Auto-close canary on `discord_bot.py` empty (PASS).
+- Pre-deploy GCS snapshot SKIPPED (`gcloud compute disks snapshot` → `ACCESS_TOKEN_SCOPE_INSUFFICIENT` — the default compute SA lacks snapshot scope; matches the prompt's `|| echo "SNAPSHOT SKIPPED"` fallback). Hub commit on `master`; bot side has no commit this wave (no Python touched). Bot CLAUDE.md line 78 + `BEHAVIOR_RULES.md` Hub-wave changelog updated as part of this wave.
 
 ### 2026-05-20 — Docs cleanup: Uncategorized first, archive UI removed
 - **Uncategorized is now the FIRST tab** in the Docs category strip — newly-delivered files land in Uncategorized, so it is the default landing tab. `src/components/docs/category-tabs.tsx`: the `items` useMemo prepends Uncategorized to `categoryItems` instead of appending; the surrounding comment is updated to reflect the new ordering.
