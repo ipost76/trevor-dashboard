@@ -194,9 +194,9 @@ function RegimeBadge({ label }: { label: string }) {
     <div
       className={cn(
         "rounded-md border-2 px-4 py-3 text-center font-bold tracking-widest",
-        tone === "green" && "border-accent-green bg-accent-green/10 text-accent-green shadow-glow-green",
-        tone === "red" && "border-accent-red bg-accent-red/10 text-accent-red shadow-glow-red",
-        tone === "amber" && "border-accent-amber bg-accent-amber/10 text-accent-amber shadow-glow-amber",
+        tone === "green" && "border-accent-mint bg-accent-mint/10 text-accent-mint-strong shadow-glow-subtle-mint",
+        tone === "red" && "border-accent-red bg-accent-red/10 text-accent-red shadow-glow-subtle-red",
+        tone === "amber" && "border-accent-gold bg-accent-gold/10 text-accent-gold-strong shadow-glow-subtle-gold",
         tone === "neutral" && "border-border-subtle bg-bg-elevated text-fg-muted",
       )}
     >

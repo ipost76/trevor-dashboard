@@ -114,7 +114,7 @@ function BottomNavItem({
         onTouchCancel={longPress.onTouchCancel}
       >
         <Icon size={22} strokeWidth={isActive ? 2.4 : 1.8} />
-        <span className="text-micro tracking-wider">{zone.shortLabel}</span>
+        <span className="text-label-ui" style={{ fontSize: "10px" }}>{zone.shortLabel}</span>
         {isActive && (
           <span
             className={cn(

@@ -1,8 +1,9 @@
 # TREVOR Hub Design Tokens — Refined Dark Cyber (A4 v1.1)
 
-> **Created 2026-05-21** during the Hub Design Foundation wave.
+> **Created 2026-05-21** during the Hub Design Foundation wave (A1). **Finalized 2026-05-21** after C1 (login + password + nav + cross-page + mobile). The Hub visual revamp is now end-to-end refined.
 > Source of truth: `src/app/globals.css @theme inline` (A4 v1.1 — REFINED TOKENS block).
 > The refined family is **additive** — A4 v1 tokens (`--color-accent-cyan`, `--shadow-glow-cyan`, the legacy `--neon-*`/`--glow-*`) stay defined and continue to work. Page-level redesigns (B1/B2/C1) opt into the refined family.
+> **Standing preference (C1):** Hub aesthetic is refined dark cyber — desaturated accents, subtle glows, mono for data, sans-serif for UI labels, professional polish over arcade neon. Future surfaces should opt into refined tokens.
 
 ## Direction
 
@@ -190,3 +191,14 @@ Existing `<Pill tone="cyan">…` callers keep rendering as today. Migration is p
 - **B1/B2/C1 adopt refined tokens page-by-page** — this foundation prompt only adds the tokens, the tab fade, and the new card/pill primitives.
 - **Body font default stays `var(--font-mono)`.** Geist Sans (`font-sans` utility) is opt-in. Existing surfaces render identically until a future prompt switches a specific label or heading to `font-sans`.
 - **Never delete an A4 v1 token without a paired A4-revision prompt** that removes every consumer first.
+
+---
+
+## Conventions established during C1 (2026-05-21)
+
+- **Auth surfaces** (login, password modal, error / not-found boundaries): wrapper `card-elevated`, inline `border: 1px solid var(--color-accent-cyan-soft-subtle)` on inputs with focus `border-color: var(--color-accent-cyan-soft)` + `box-shadow: var(--shadow-glow-focus)`; submit button background `rgba(95,180,204,0.1)`, border `var(--color-accent-cyan-soft)`, color `var(--color-accent-cyan-soft-strong)`, `minHeight: 44px` (iOS HIG). Labels use `.text-label-ui`. Error messages use `text-accent-red` + `.text-caption-ui`. Success uses refined mint (`text-accent-mint-strong` + subtle mint disc).
+- **Bottom nav / sidebar rail active-zone glow** uses refined `shadow-glow-active-{cyan,mint,plum,gold}` (10px @ 25-28% alpha) — not the legacy heavy `shadow-glow-{cyan,green,magenta,amber}` (16px @ 40% alpha). The `accentTextClass` / `accentGlowClass` helpers in `src/lib/navigation.ts` are the single source of truth — refine there, not at the call sites.
+- **Zone-accent mapping (refined):** `cyan → cyan-soft`, `green → mint`, `violet → plum`, `magenta → plum`, `amber → gold`. Plum substitutes both violet AND magenta for restrained UI; mint replaces electric green for financial / LIVE / ACTIVE / RUNNING semantics; gold replaces amber for non-critical warnings.
+- **Mobile tap-target floor:** 44×44 (iOS HIG), enforced via the `.tap-target` class (`globals.css`). Auth submit buttons set `style={{ minHeight: 44 }}` explicitly; icon-only buttons (close X, eye toggle, header icons) sit inside a `flex h-9 w-9 items-center justify-center` wrapper.
+- **Standalone `/chat` page distinct from chat modal/FAB** (the latter polished in B2). `/chat` page uses a Termius-blue ambient theme (`#0d1117` bg, `#58a6ff` user accent) — kept distinct intentionally, but TREVOR-side accents refined to mint (`#5fcc99`) to match the wider refined aesthetic.
+- **Status pills sized smaller than the original A4 v1 chrome.** Default `size="sm"` (8 × 2 px padding) reads as the new normal across Hub pages; reserve `size="md"` for hero/landing surfaces where the pill is the visual anchor.

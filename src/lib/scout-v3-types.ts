@@ -81,6 +81,6 @@ export const CATALYST_PILL_CONFIG: Record<
   new_8k_filing:   { label: "NEW 8-K",        colorClass: "text-amber-300 border-amber-300/50 bg-amber-300/10" },
   earnings_8k:     { label: "EARNINGS",       colorClass: "text-emerald-400 border-emerald-400/50 bg-emerald-400/10" },
   new_52wk_high:   { label: "52WK HIGH",      colorClass: "text-emerald-300 border-emerald-300/50 bg-emerald-300/10" },
-  volume_breakout: { label: "VOL BREAKOUT",   colorClass: "text-cyan-400 border-cyan-400/50 bg-cyan-400/10" },
+  volume_breakout: { label: "VOL BREAKOUT",   colorClass: "text-accent-cyan-soft-strong border-accent-cyan-soft/50 bg-accent-cyan-soft/10" },
   none:            { label: "",               colorClass: "" },
 };

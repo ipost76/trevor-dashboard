@@ -97,12 +97,12 @@ export default function ChatPage() {
       <div className="flex-1 overflow-hidden flex flex-col" style={{ background: "#0d1117" }}>
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b sticky top-0 z-40" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(6,7,10,0.95)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
-          <span style={{ color: "#00ff88", fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, letterSpacing: "0.04em" }}>
+          <span style={{ color: "#5fcc99", fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 600, letterSpacing: "0.04em" }}>
             &gt;_ TREVOR CHAT
           </span>
           <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full animate-[pulseLive_2s_ease-in-out_infinite]" style={{ background: "#00ff88", boxShadow: "0 0 4px #00ff88" }} />
-            <span style={{ color: "#00ff88", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>ONLINE</span>
+            <div className="w-1.5 h-1.5 rounded-full animate-[pulseLive_2s_ease-in-out_infinite]" style={{ background: "#5fcc99", boxShadow: "0 0 4px #5fcc99" }} />
+            <span style={{ color: "#5fcc99", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>ONLINE</span>
           </div>
         </div>
         {/* Blue accent line */}
@@ -130,7 +130,7 @@ export default function ChatPage() {
               <div className="max-w-[85%] md:max-w-[70%]">
                 <div className="mb-1" style={{
                   fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const,
-                  color: m.role === "assistant" ? "#00ff88" : "#58a6ff",
+                  color: m.role === "assistant" ? "#5fcc99" : "#58a6ff",
                   textAlign: m.role === "user" ? "right" : "left",
                   fontFamily: "'JetBrains Mono', monospace",
                 }}>
@@ -139,7 +139,7 @@ export default function ChatPage() {
                 <div className="px-3.5 py-2.5" style={{
                   background: m.role === "user" ? "rgba(0,100,200,0.08)" : "rgba(10,11,16,0.8)",
                   border: `1px solid ${m.role === "user" ? "rgba(0,150,255,0.12)" : "rgba(255,255,255,0.06)"}`,
-                  borderLeft: m.role === "assistant" ? "3px solid #00ff88" : undefined,
+                  borderLeft: m.role === "assistant" ? "3px solid #5fcc99" : undefined,
                   borderRight: m.role === "user" ? "3px solid rgba(0,150,255,0.4)" : undefined,
                   borderRadius: m.role === "assistant" ? "2px 10px 10px 10px" : "10px 2px 10px 10px",
                   color: "#e0e0e0",
@@ -160,8 +160,8 @@ export default function ChatPage() {
           {sending && (
             <div className="flex justify-start">
               <div className="max-w-[85%] md:max-w-[70%]">
-                <div className="mb-1" style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#00ff88", fontFamily: "'JetBrains Mono', monospace" }}>&gt;_ TREVOR</div>
-                <div className="px-3.5 py-2.5" style={{ background: "rgba(10,11,16,0.8)", border: "1px solid rgba(255,255,255,0.06)", borderLeft: "3px solid #00ff88", borderRadius: "2px 10px 10px 10px", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+                <div className="mb-1" style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#5fcc99", fontFamily: "'JetBrains Mono', monospace" }}>&gt;_ TREVOR</div>
+                <div className="px-3.5 py-2.5" style={{ background: "rgba(10,11,16,0.8)", border: "1px solid rgba(255,255,255,0.06)", borderLeft: "3px solid #5fcc99", borderRadius: "2px 10px 10px 10px", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
                   <TypingDots size="sm" className="text-[#58a6ff]" />
                 </div>
               </div>
@@ -172,7 +172,7 @@ export default function ChatPage() {
         {/* Input — fixed above mobile tab bar */}
         <div className="shrink-0 p-2 pb-14 md:pb-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "rgba(6,7,10,0.95)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}>
           <div className="flex items-center gap-2">
-            <span style={{ color: "#00ff88", fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>&gt;</span>
+            <span style={{ color: "#5fcc99", fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>&gt;</span>
             <input
               ref={inputRef}
               value={input}
@@ -193,7 +193,7 @@ export default function ChatPage() {
                 fontFamily: "'JetBrains Mono', 'IBM Plex Mono', monospace",
                 minHeight: 44,
               }}
-              onFocus={e => { (e.target as HTMLInputElement).style.borderColor = "rgba(0,255,136,0.3)"; (e.target as HTMLInputElement).style.boxShadow = "0 0 0 2px rgba(0,255,136,0.06), inset 0 1px 2px rgba(0,0,0,0.2)"; }}
+              onFocus={e => { (e.target as HTMLInputElement).style.borderColor = "rgba(95,204,153,0.3)"; (e.target as HTMLInputElement).style.boxShadow = "0 0 0 2px rgba(95,204,153,0.06), inset 0 1px 2px rgba(0,0,0,0.2)"; }}
               onBlur={e => { (e.target as HTMLInputElement).style.borderColor = "rgba(255,255,255,0.08)"; (e.target as HTMLInputElement).style.boxShadow = "none"; }}
             />
             <button
@@ -201,7 +201,7 @@ export default function ChatPage() {
               disabled={sending || !input.trim()}
               className="flex items-center justify-center disabled:opacity-30 transition-all shrink-0 active:scale-95"
               style={{
-                background: "linear-gradient(135deg, #00cc66 0%, #00ff88 100%)",
+                background: "linear-gradient(135deg, #4ab384 0%, #5fcc99 100%)",
                 color: "#06070a",
                 border: "none",
                 borderRadius: 10,
@@ -210,7 +210,7 @@ export default function ChatPage() {
                 fontSize: 14,
                 fontWeight: 700,
                 cursor: sending || !input.trim() ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 6px rgba(0,255,136,0.2)",
+                boxShadow: "0 2px 6px rgba(95,204,153,0.2)",
               }}>
               <Send className="h-4 w-4" />
             </button>

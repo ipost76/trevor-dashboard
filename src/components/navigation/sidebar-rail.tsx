@@ -53,7 +53,7 @@ export function SidebarRail() {
                 title={zone.label}
               >
                 <Icon size={20} strokeWidth={isActive ? 2.4 : 1.8} />
-                <span className="hidden xl:inline text-caption tracking-wide">
+                <span className="hidden xl:inline text-label-ui">
                   {zone.label}
                 </span>
                 {isActive && (

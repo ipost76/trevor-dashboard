@@ -47,10 +47,10 @@ export function SegmentedToggle<T extends string>({
             aria-selected={active}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "tap-target flex-1 rounded-sm font-mono uppercase tracking-wider transition-colors duration-fast",
-              size === "sm" ? "px-2 py-1 text-micro" : "px-3 py-1.5 text-caption",
+              "tap-target flex-1 rounded-sm text-label-ui transition-colors duration-fast",
+              size === "sm" ? "px-2 py-1" : "px-3 py-1.5",
               active
-                ? "bg-bg-elevated text-fg-primary shadow-glow-cyan"
+                ? "bg-bg-elevated text-accent-cyan-soft-strong shadow-glow-active-cyan"
                 : "text-fg-muted hover:text-fg-primary",
             )}
           >

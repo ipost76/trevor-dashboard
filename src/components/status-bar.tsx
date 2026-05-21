@@ -38,10 +38,10 @@ export function StatusBar() {
   }, []);
 
   return (
-    <div className="hidden md:flex h-6 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel-header)] px-3 text-[9px] font-mono text-muted-foreground">
+    <div className="hidden md:flex h-6 shrink-0 items-center justify-between border-t border-border-subtle bg-[var(--panel-header)] px-3 text-[9px] font-mono text-fg-muted">
       <div className="flex items-center gap-4">
         <span>TREVOR V3</span>
-        <span className={stats.uptime === "ONLINE" ? "text-[var(--neon-green)] opacity-80" : "text-[var(--neon-red)] opacity-80"}>
+        <span className={stats.uptime === "ONLINE" ? "text-accent-mint-strong opacity-90" : "text-accent-red opacity-90"}>
           {stats.uptime || "..."}
         </span>
         {stats.trades !== undefined && <span>SIGNALS: {stats.signals}</span>}

@@ -137,32 +137,38 @@ export function zoneFromPath(pathname: string): Zone | null {
   );
 }
 
+// A4 v1.1 refined accent mapping (C1).
+// cyan   → cyan-soft   (default UI accent)
+// green  → mint        (financial green, ACTIVE/LIVE/RUNNING)
+// violet → plum        (mid-cap accent — plum replaces violet)
+// magenta→ plum        (plum substitutes magenta for restrained UI)
+// amber  → gold        (refined amber)
 export function accentTextClass(accent: ZoneAccent): string {
   switch (accent) {
     case "cyan":
-      return "text-accent-cyan";
+      return "text-accent-cyan-soft-strong";
     case "green":
-      return "text-accent-green";
+      return "text-accent-mint-strong";
     case "violet":
-      return "text-accent-violet";
+      return "text-accent-plum-strong";
     case "magenta":
-      return "text-accent-magenta";
+      return "text-accent-plum-strong";
     case "amber":
-      return "text-accent-amber";
+      return "text-accent-gold-strong";
   }
 }
 
 export function accentGlowClass(accent: ZoneAccent): string {
   switch (accent) {
     case "cyan":
-      return "shadow-glow-cyan";
+      return "shadow-glow-active-cyan";
     case "green":
-      return "shadow-glow-green";
+      return "shadow-glow-active-mint";
     case "violet":
-      return "shadow-glow-magenta";
+      return "shadow-glow-active-plum";
     case "magenta":
-      return "shadow-glow-magenta";
+      return "shadow-glow-active-plum";
     case "amber":
-      return "shadow-glow-amber";
+      return "shadow-glow-active-gold";
   }
 }
