@@ -101,7 +101,7 @@ export function DownloadFormatSheet({
           <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-bg-elevated/40 px-3 py-2">
             <FileText
               size={14}
-              className="mt-0.5 shrink-0 text-accent-cyan"
+              className="mt-0.5 shrink-0 text-accent-cyan-soft"
               aria-hidden
             />
             <span className="break-all font-mono text-caption text-fg-primary">
@@ -117,13 +117,13 @@ export function DownloadFormatSheet({
                 size="sm"
                 onClick={handleMd}
                 aria-label={`Download ${filename} as Markdown`}
-                className="flex w-full items-center justify-between gap-3 border border-accent-cyan/40 bg-accent-cyan/10 px-3 py-2 text-left text-accent-cyan hover:bg-accent-cyan/20"
+                className="flex w-full items-center justify-between gap-3 border border-accent-cyan-soft/40 bg-accent-cyan-soft/10 px-3 py-2 text-left text-accent-cyan-soft-strong hover:bg-accent-cyan-soft/20"
               >
-                <span className="flex items-center gap-2 text-caption">
+                <span className="flex items-center gap-2 font-sans text-caption">
                   <FileText size={14} className="shrink-0" aria-hidden />
                   <span>Download .md</span>
                 </span>
-                <span className="shrink-0 text-micro text-fg-muted">
+                <span className="shrink-0 font-sans text-micro text-fg-muted">
                   Original markdown
                 </span>
               </HapticButton>
@@ -143,11 +143,11 @@ export function DownloadFormatSheet({
                   pdfPhase === "pending" ? "opacity-60" : "",
                 ].join(" ")}
               >
-                <span className="flex items-center gap-2 text-caption">
+                <span className="flex items-center gap-2 font-sans text-caption">
                   <FileDown size={14} className="shrink-0" aria-hidden />
                   <span>Download PDF</span>
                 </span>
-                <span className="shrink-0 text-micro text-fg-muted">
+                <span className="shrink-0 font-sans text-micro text-fg-muted">
                   {pdfPhase === "pending"
                     ? "Converting… (up to ~60 s for large files)"
                     : pdfPhase === "error"

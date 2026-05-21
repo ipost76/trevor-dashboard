@@ -96,7 +96,7 @@ export function RecentTradesCard() {
             >
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <Pill
-                  tone={t.trade_mode === "live" ? "green" : "amber"}
+                  intent={t.trade_mode === "live" ? "live" : "warn"}
                   size="sm"
                 >
                   {t.trade_mode}
@@ -117,7 +117,7 @@ export function RecentTradesCard() {
                   {fmtHold(t.hold_duration_minutes)}
                 </span>
                 {t.exit_reason && (
-                  <span className="text-fg-faint">· {t.exit_reason}</span>
+                  <span className="font-sans text-fg-faint">· {t.exit_reason}</span>
                 )}
               </div>
               <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />

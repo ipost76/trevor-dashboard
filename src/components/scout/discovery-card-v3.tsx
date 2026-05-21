@@ -38,19 +38,19 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
 
   return (
     <article
-      className={`relative rounded-lg border bg-zinc-950/80 p-4 transition ${
+      className={`relative card-elevated p-4 ${
         isMultiEngine
-          ? "border-amber-400/40 shadow-[0_0_24px_-8px_rgba(251,191,36,0.4)]"
-          : "border-cyan-400/30 shadow-[0_0_24px_-12px_rgba(0,240,255,0.35)]"
+          ? "border-accent-gold/40 shadow-[var(--shadow-card),var(--shadow-glow-subtle-gold)]"
+          : ""
       }`}
       data-ticker={item.ticker}
     >
       {/* Header */}
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
-        <span className="text-cyan-300 text-lg">🔍</span>
-        <h3 className="font-mono text-xl font-bold tracking-wide text-white">{item.ticker}</h3>
+        <span className="text-accent-gold text-lg">🔍</span>
+        <h3 className="font-mono text-xl font-bold tracking-wide text-fg-primary">{item.ticker}</h3>
         {item.company_name && (
-          <span className="text-zinc-400 text-sm truncate max-w-[200px]">
+          <span className="font-sans text-sm text-fg-muted truncate max-w-[200px]">
             — {item.company_name}
           </span>
         )}
@@ -58,7 +58,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
           {engineBadges.map((b) => (
             <span
               key={b}
-              className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-cyan-400/40 text-cyan-300"
+              className="font-sans text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded border border-accent-cyan-soft/40 text-accent-cyan-soft-strong"
             >
               {b}
             </span>
@@ -66,20 +66,21 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
         </div>
       </header>
 
-      <div className="text-xs text-zinc-500 mb-3">
-        POSTED {formattedPostedAt}
+      <div className="font-sans text-xs text-fg-muted mb-3">
+        POSTED <span className="font-mono">{formattedPostedAt}</span>
         {item.surfaced_count > 1 && (
-          <span className="ml-3 text-zinc-400">
-            ↑ Surfaced {item.surfaced_count}× since {item.first_seen_at.split("T")[0]}
+          <span className="ml-3 text-fg-muted">
+            ↑ Surfaced {item.surfaced_count}× since{" "}
+            <span className="font-mono">{item.first_seen_at.split("T")[0]}</span>
           </span>
         )}
         {item.material_change_log && (
-          <span className="ml-3 text-amber-400">→ {item.material_change_log}</span>
+          <span className="ml-3 text-accent-gold">→ {item.material_change_log}</span>
         )}
       </div>
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-3 gap-2 mb-3 border-y border-zinc-800 py-3">
+      <div className="grid grid-cols-3 gap-2 mb-3 border-y border-border-subtle py-3">
         <Metric
           label="PRICE"
           value={item.metrics.price != null ? `$${item.metrics.price.toFixed(2)}` : "—"}
@@ -89,7 +90,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
         <Metric
           label="RS"
           value={item.metrics.rs != null ? String(Math.round(item.metrics.rs)) : "—"}
-          valueClass="text-emerald-400"
+          valueClass="text-accent-mint"
         />
         <Metric label="TREND" value={item.metrics.trend || "—"} />
         <Metric
@@ -99,7 +100,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
       </div>
 
       {/* Bull thesis — always visible (primary signal Ghost scans) */}
-      <Section title="WHY THIS MIGHT MOVE" accentClass="border-cyan-400/40">
+      <Section title="WHY THIS MIGHT MOVE" accentClass="border-accent-cyan-soft/40">
         <BulletList items={item.narrative.bull_thesis} accent="cyan" />
       </Section>
 
@@ -107,17 +108,17 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
       {expanded && (
         <>
           {item.narrative.triggers_to_watch?.length > 0 && (
-            <Section title="TRIGGERS TO WATCH" accentClass="border-amber-400/40">
-              <BulletList items={item.narrative.triggers_to_watch} accent="amber" />
+            <Section title="TRIGGERS TO WATCH" accentClass="border-accent-gold/40">
+              <BulletList items={item.narrative.triggers_to_watch} accent="gold" />
             </Section>
           )}
           {item.narrative.research_priorities?.length > 0 && (
-            <Section title="RESEARCH NEXT" accentClass="border-fuchsia-400/40">
-              <BulletList items={item.narrative.research_priorities} accent="fuchsia" />
+            <Section title="RESEARCH NEXT" accentClass="border-accent-plum/40">
+              <BulletList items={item.narrative.research_priorities} accent="plum" />
             </Section>
           )}
           {item.narrative.risk_flags?.length > 0 && (
-            <Section title="RISK FLAGS" accentClass="border-red-400/40">
+            <Section title="RISK FLAGS" accentClass="border-accent-red/40">
               <BulletList items={item.narrative.risk_flags} accent="red" />
             </Section>
           )}
@@ -128,7 +129,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
-        className="mt-3 w-full text-center text-xs font-mono uppercase tracking-wider text-zinc-400 hover:text-cyan-300 transition py-2 border-t border-zinc-800"
+        className="mt-3 w-full text-center font-sans text-xs uppercase tracking-wider text-fg-muted hover:text-accent-cyan-soft-strong transition py-2 border-t border-border-subtle"
         aria-expanded={expanded}
       >
         {expanded ? "▲ Show less" : "▼ Triggers · Research · Risks"}
@@ -142,11 +143,11 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
             href={link.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-zinc-800 hover:border-cyan-400/50 hover:bg-cyan-400/5 transition min-h-[44px]"
+            className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-border-subtle hover:border-accent-cyan-soft/50 hover:bg-accent-cyan-soft/5 transition min-h-[44px]"
             title={link.url}
           >
             <span className="text-lg leading-none">{link.icon}</span>
-            <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-400 text-center">
+            <span className="font-sans text-[9px] font-medium uppercase tracking-wider text-fg-muted text-center">
               {link.label}
             </span>
           </a>
@@ -154,12 +155,12 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
         <button
           type="button"
           onClick={onMoreClick}
-          className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-zinc-800 hover:border-fuchsia-400/50 hover:bg-fuchsia-400/5 transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-fuchsia-400"
+          className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded border border-border-subtle hover:border-accent-plum/50 hover:bg-accent-plum/5 transition min-h-[44px] focus:outline-none focus:ring-2 focus:ring-accent-plum"
           title={`More research sources for ${item.ticker}`}
           aria-label={`Open more research sources for ${item.ticker}`}
         >
           <span className="text-lg leading-none">➕</span>
-          <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-300">More</span>
+          <span className="font-sans text-[9px] font-medium uppercase tracking-wider text-fg-primary">More</span>
         </button>
       </div>
 
@@ -174,7 +175,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
             </span>
           )}
         </div>
-        <div className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-fg-muted">
           SCORE {item.unified_score.toFixed(1)}
         </div>
       </div>
@@ -185,7 +186,7 @@ export function DiscoveryCardV3({ item, onMoreClick }: Props) {
 function Metric({
   label,
   value,
-  valueClass = "text-white",
+  valueClass = "text-fg-primary",
 }: {
   label: string;
   value: string;
@@ -194,7 +195,7 @@ function Metric({
   return (
     <div className="flex flex-col items-center text-center">
       <span className={`font-mono text-base font-semibold ${valueClass}`}>{value}</span>
-      <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500 mt-0.5">
+      <span className="font-sans text-[10px] font-medium uppercase tracking-wider text-fg-muted mt-0.5">
         {label}
       </span>
     </div>
@@ -212,7 +213,7 @@ function Section({
 }) {
   return (
     <div className={`mt-3 pl-3 border-l-2 ${accentClass}`}>
-      <h4 className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-2">
+      <h4 className="font-sans text-[10px] font-semibold uppercase tracking-[0.15em] text-fg-muted mb-2">
         {title}
       </h4>
       {children}
@@ -225,19 +226,19 @@ function BulletList({
   accent,
 }: {
   items: string[];
-  accent: "cyan" | "amber" | "fuchsia" | "red";
+  accent: "cyan" | "gold" | "plum" | "red";
 }) {
   const dotColor = {
-    cyan: "bg-cyan-400",
-    amber: "bg-amber-400",
-    fuchsia: "bg-fuchsia-400",
-    red: "bg-red-400",
+    cyan: "bg-accent-cyan-soft",
+    gold: "bg-accent-gold",
+    plum: "bg-accent-plum",
+    red: "bg-accent-red",
   }[accent];
 
   return (
     <ul className="space-y-1.5">
       {items.map((bullet, i) => (
-        <li key={i} className="flex items-start gap-2 text-sm leading-snug text-zinc-200">
+        <li key={i} className="flex items-start gap-2 font-sans text-sm leading-relaxed text-fg-primary">
           <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} />
           <span>{bullet}</span>
         </li>

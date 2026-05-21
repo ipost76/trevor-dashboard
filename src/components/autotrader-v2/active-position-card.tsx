@@ -156,7 +156,7 @@ export function ActivePositionCard() {
                 <div className="flex flex-wrap items-center gap-2">
                   {p.trade_mode && (
                     <Pill
-                      tone={p.trade_mode === "live" ? "green" : "amber"}
+                      intent={p.trade_mode === "live" ? "live" : "warn"}
                       size="sm"
                     >
                       {p.trade_mode}
@@ -214,9 +214,9 @@ export function ActivePositionCard() {
               </div>
 
               {p.exit_signals_log && (
-                <div className="text-micro text-fg-muted">
+                <div className="font-sans text-micro text-fg-muted">
                   exit hint:{" "}
-                  <span className="text-accent-cyan">
+                  <span className="font-mono text-accent-cyan-soft">
                     {p.exit_signals_log.slice(0, 80)}
                   </span>
                 </div>

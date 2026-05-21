@@ -54,7 +54,11 @@ export function ConfigCard() {
           </span>
         </CardTitle>
         {perTickerOn && (
-          <Pill tone="cyan" size="sm">
+          <Pill
+            tone="cyan"
+            size="sm"
+            className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+          >
             PER-TICKER ✓
           </Pill>
         )}
@@ -93,15 +97,15 @@ export function ConfigCard() {
             />
           </div>
 
-          <div className="mt-3 text-caption text-fg-muted">
+          <div className="mt-3 font-sans text-caption text-fg-muted">
             Per-ticker thresholds:{" "}
             {perTickerOn ? (
-              <span className="text-accent-green">enabled</span>
+              <span className="text-accent-mint">enabled</span>
             ) : (
-              <span className="text-accent-amber">disabled (using floor)</span>
+              <span className="text-accent-gold">disabled (using floor)</span>
             )}{" "}
             · edit via{" "}
-            <code className="text-accent-cyan">!filter</code> in Discord
+            <code className="font-mono text-accent-cyan-soft">!filter</code> in Discord
           </div>
         </>
       )}

@@ -291,17 +291,17 @@ export function DCASection() {
   return (
     <>
       {/* Header card */}
-      <Card glow="magenta" padding="md">
+      <Card padding="md" className="card-elevated">
         <CardHeader className="mb-0 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-accent-magenta" aria-hidden />
+            <DollarSign className="h-5 w-5 text-accent-plum" aria-hidden />
             <CardTitle>DCA SCHEDULE</CardTitle>
           </div>
-          <Pill tone={summary.total_active > 0 ? "green" : "neutral"} size="sm">
+          <Pill intent={summary.total_active > 0 ? "active" : undefined} tone={summary.total_active > 0 ? undefined : "neutral"} size="sm">
             {summary.total_active} active
           </Pill>
         </CardHeader>
-        <p className="mt-2 text-micro text-fg-muted">
+        <p className="mt-2 font-sans text-micro text-fg-muted">
           Robinhood · 9:00 PM ET daily fire window
         </p>
       </Card>
@@ -338,7 +338,7 @@ export function DCASection() {
                 onChange={(e) => setAddTicker(e.target.value.toUpperCase())}
                 placeholder="BTC"
                 maxLength={20}
-                className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption uppercase text-fg-primary outline-none focus:border-accent-magenta"
+                className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption uppercase text-fg-primary outline-none focus:border-accent-cyan-soft"
               />
             </label>
             <label className="flex flex-col gap-1">
@@ -353,7 +353,7 @@ export function DCASection() {
                 value={addAmount}
                 onChange={(e) => setAddAmount(e.target.value)}
                 placeholder="25.00"
-                className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-magenta"
+                className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft"
               />
             </label>
           </div>
@@ -409,7 +409,7 @@ export function DCASection() {
               onChange={(e) => setAddNotes(e.target.value)}
               placeholder="e.g. core position"
               maxLength={200}
-              className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-magenta"
+              className="tap-target rounded-sm border border-border-subtle bg-bg-elevated px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft"
             />
           </label>
 
@@ -465,7 +465,7 @@ export function DCASection() {
                           min="0"
                           value={editAmount}
                           onChange={(ev) => setEditAmount(ev.target.value)}
-                          className="tap-target rounded-sm border border-border-subtle bg-bg-card px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-magenta"
+                          className="tap-target rounded-sm border border-border-subtle bg-bg-card px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -503,7 +503,7 @@ export function DCASection() {
                         onChange={(ev) => setEditNotes(ev.target.value)}
                         placeholder="Notes"
                         maxLength={200}
-                        className="tap-target rounded-sm border border-border-subtle bg-bg-card px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-magenta"
+                        className="tap-target rounded-sm border border-border-subtle bg-bg-card px-3 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft"
                       />
                       <div className="flex gap-2">
                         <HapticButton
@@ -652,7 +652,7 @@ export function DCASection() {
       >
         <div className="flex flex-col gap-4 p-4">
           <p className="font-mono text-body text-fg-primary">
-            Remove <span className="text-accent-magenta">{confirmRemove}</span> from
+            Remove <span className="text-accent-plum">{confirmRemove}</span> from
             DCA schedule?
           </p>
           <p className="text-caption text-fg-muted">

@@ -27,10 +27,10 @@ interface PricesResponse {
   prices: Record<string, { price: number; source: string; stale: boolean }>;
 }
 
-const TIER_TONE: Record<Tier, "cyan" | "violet" | "magenta"> = {
-  BLUE_CHIP: "cyan",
-  MID_CAP: "violet",
-  MEME: "magenta",
+const TIER_INTENT: Record<Tier, "blue-chip" | "mid-cap" | "meme"> = {
+  BLUE_CHIP: "blue-chip",
+  MID_CAP: "mid-cap",
+  MEME: "meme",
 };
 
 const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN"];
@@ -115,13 +115,13 @@ export function WatchlistGrid() {
             return (
               <li
                 key={t.ticker}
-                className="flex flex-col gap-1.5 rounded-md border border-border-subtle bg-bg-elevated p-3"
+                className="flex flex-col gap-1.5 rounded-md border border-accent-cyan-soft-subtle bg-bg-elevated p-3"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-h3 font-bold tabular-nums">
+                  <span className="font-mono text-h3 font-bold tabular-nums">
                     {t.ticker}
                   </span>
-                  <Pill tone={TIER_TONE[t.tier]} size="sm">
+                  <Pill intent={TIER_INTENT[t.tier]} size="sm">
                     {t.tier}
                   </Pill>
                 </div>
@@ -136,16 +136,16 @@ export function WatchlistGrid() {
 
                 <div className="grid grid-cols-3 gap-1 pt-1 text-micro tabular-nums">
                   <div className="text-center">
-                    <div className="text-fg-faint">QUIET</div>
-                    <div className="text-fg-primary">{t.quiet.toFixed(0)}</div>
+                    <div className="font-sans uppercase tracking-wider text-fg-faint">QUIET</div>
+                    <div className="font-mono text-fg-primary">{t.quiet.toFixed(0)}</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-fg-faint">NORMAL</div>
-                    <div className="text-fg-primary">{t.normal.toFixed(0)}</div>
+                    <div className="font-sans uppercase tracking-wider text-fg-faint">NORMAL</div>
+                    <div className="font-mono text-fg-primary">{t.normal.toFixed(0)}</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-fg-faint">ACTIVE</div>
-                    <div className="text-fg-primary">{t.active.toFixed(0)}</div>
+                    <div className="font-sans uppercase tracking-wider text-fg-faint">ACTIVE</div>
+                    <div className="font-mono text-fg-primary">{t.active.toFixed(0)}</div>
                   </div>
                 </div>
               </li>

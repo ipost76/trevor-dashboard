@@ -61,10 +61,10 @@ export function DiscoveryFeedV3() {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between mb-2">
-        <h2 className="font-mono text-sm uppercase tracking-[0.2em] text-fuchsia-400 drop-shadow-[0_0_8px_rgba(232,121,249,0.5)]">
+        <h2 className="font-sans text-sm font-semibold uppercase tracking-[0.15em] text-accent-plum">
           🧭 SCOUT DISCOVERIES · v3
         </h2>
-        <span className="font-mono text-[10px] text-zinc-500">
+        <span className="font-sans text-micro text-fg-muted">
           {loading
             ? "loading…"
             : data
@@ -78,16 +78,16 @@ export function DiscoveryFeedV3() {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="rounded-lg border border-zinc-800 bg-zinc-950/40 h-[420px] animate-pulse"
+              className="rounded-lg border border-border-subtle bg-bg-card/40 h-[420px] animate-pulse"
             />
           ))}
         </div>
       ) : error ? (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-4 text-red-300 font-mono text-sm">
+        <div className="rounded-lg border border-accent-red/40 bg-accent-red/5 p-4 font-sans text-sm text-accent-red">
           Failed to load discoveries: {error}
         </div>
       ) : !data || data.discoveries.length === 0 ? (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-8 text-center text-zinc-500 font-mono text-sm">
+        <div className="rounded-lg border border-border-subtle bg-bg-card/40 p-8 text-center font-sans text-sm text-fg-muted">
           No discoveries in window.
         </div>
       ) : (

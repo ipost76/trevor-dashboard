@@ -123,7 +123,7 @@ export function MoveToSheet({
           <div className="flex items-start gap-2 rounded-md border border-border-subtle bg-bg-elevated/40 px-3 py-2">
             <FolderInput
               size={14}
-              className="mt-0.5 shrink-0 text-accent-violet"
+              className="mt-0.5 shrink-0 text-accent-plum"
               aria-hidden
             />
             <span className="break-all font-mono text-caption text-fg-primary">
@@ -154,14 +154,14 @@ export function MoveToSheet({
                     className={[
                       "flex w-full items-center justify-between gap-3 border px-3 py-2 text-left",
                       isCurrent
-                        ? "border-accent-cyan/40 bg-accent-cyan/10 text-accent-cyan"
+                        ? "border-accent-cyan-soft/40 bg-accent-cyan-soft/10 text-accent-cyan-soft-strong"
                         : isError
                           ? "border-accent-red/40 bg-accent-red/10 text-accent-red"
-                          : "border-border-subtle bg-bg-elevated/30 text-fg-primary hover:border-accent-violet/40 hover:bg-accent-violet/10 hover:text-accent-violet",
+                          : "border-border-subtle bg-bg-elevated/30 text-fg-primary hover:border-accent-plum/40 hover:bg-accent-plum/10 hover:text-accent-plum-strong",
                       isPending ? "opacity-60" : "",
                     ].join(" ")}
                   >
-                    <span className="flex items-center gap-2 text-caption">
+                    <span className="flex items-center gap-2 font-sans text-caption">
                       {isCurrent && (
                         <Check
                           size={14}
@@ -171,7 +171,7 @@ export function MoveToSheet({
                       )}
                       <span className="truncate">{row.label}</span>
                     </span>
-                    <span className="shrink-0 text-micro text-fg-muted">
+                    <span className="shrink-0 font-sans text-micro text-fg-muted">
                       {isPending
                         ? "Moving…"
                         : isError

@@ -269,7 +269,7 @@ export function CategorySettingsSheet({
                         autoFocus
                         disabled={isSaving}
                         aria-label={`Rename ${cat.name}`}
-                        className="min-w-0 flex-1 rounded border border-accent-cyan/40 bg-bg-card px-2 py-1 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan focus:shadow-glow-cyan"
+                        className="min-w-0 flex-1 rounded border border-accent-cyan-soft/40 bg-bg-card px-2 py-1 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft focus:shadow-glow-focus"
                       />
                       <HapticButton
                         variant="ghost"
@@ -397,7 +397,7 @@ export function CategorySettingsSheet({
                   disabled={addSaving}
                   placeholder="New category name"
                   aria-label="New category name"
-                  className="min-w-0 flex-1 rounded border border-accent-cyan/40 bg-bg-card px-2 py-1 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan focus:shadow-glow-cyan"
+                  className="min-w-0 flex-1 rounded border border-accent-cyan-soft/40 bg-bg-card px-2 py-1 font-mono text-caption text-fg-primary outline-none focus:border-accent-cyan-soft focus:shadow-glow-focus"
                 />
                 <HapticButton
                   variant="ghost"
@@ -433,7 +433,7 @@ export function CategorySettingsSheet({
               size="sm"
               onClick={startAdd}
               aria-label="Add a new category"
-              className="w-full border border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20"
+              className="w-full border border-accent-cyan-soft/30 bg-accent-cyan-soft/10 text-accent-cyan-soft-strong hover:bg-accent-cyan-soft/20"
             >
               <Plus size={14} />
               Add Category

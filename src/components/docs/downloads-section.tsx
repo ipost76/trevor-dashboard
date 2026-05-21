@@ -171,12 +171,12 @@ function DownloadFileCard({
         </div>
 
         {/* Metadata row */}
-        <div className="flex flex-wrap items-center gap-3 text-micro text-fg-muted">
+        <div className="flex flex-wrap items-center gap-3 font-sans text-micro text-fg-muted">
           <span title={new Date(file.created_at).toLocaleString()}>
             {formatRelativeDate(file.created_at)}
           </span>
           <span className="text-fg-faint">·</span>
-          <span>{formatFileSize(file.size_bytes)}</span>
+          <span className="font-mono">{formatFileSize(file.size_bytes)}</span>
         </div>
 
         {/* Action buttons */}
@@ -186,7 +186,7 @@ function DownloadFileCard({
             size="sm"
             onClick={handleDownload}
             aria-label={`Download ${file.filename}`}
-            className="border border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 hover:text-accent-cyan"
+            className="border border-accent-cyan-soft/30 bg-accent-cyan-soft/10 text-accent-cyan-soft-strong hover:bg-accent-cyan-soft/20 hover:text-accent-cyan-soft-strong"
           >
             <Download size={14} />
             Download
@@ -197,7 +197,7 @@ function DownloadFileCard({
             disabled={moving}
             onClick={() => onMove(file)}
             aria-label={`Move ${file.filename} to another category`}
-            className="border border-accent-violet/30 bg-accent-violet/10 text-accent-violet hover:bg-accent-violet/20 hover:text-accent-violet disabled:opacity-50"
+            className="border border-accent-plum/30 bg-accent-plum/10 text-accent-plum-strong hover:bg-accent-plum/20 hover:text-accent-plum-strong disabled:opacity-50"
           >
             <FolderInput size={14} />
             {moving ? "..." : "Move"}
@@ -216,8 +216,8 @@ function DownloadFileCard({
               deletePhase === "confirm"
                 ? "animate-pulse border border-accent-red/60 bg-accent-red/25 text-accent-red hover:bg-accent-red/35 hover:text-accent-red disabled:opacity-50"
                 : deletePhase === "error"
-                  ? "border border-accent-red/30 bg-accent-red/10 text-fg-muted disabled:opacity-50"
-                  : "border border-accent-red/30 bg-accent-red/10 text-accent-red hover:bg-accent-red/20 hover:text-accent-red disabled:opacity-50"
+                  ? "border border-accent-red-subtle bg-accent-red/10 text-fg-muted disabled:opacity-50"
+                  : "border border-accent-red-subtle bg-accent-red/10 text-accent-red hover:bg-accent-red/20 hover:text-accent-red disabled:opacity-50"
             }
           >
             <Trash2 size={14} />
@@ -449,8 +449,8 @@ export function DownloadsSection() {
 
   return (
     <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
-      {/* Header card — magenta glow (INTEL zone accent) */}
-      <Card padding="md" glow="magenta">
+      {/* Header card — refined plum-subtle border (A4 v1.1) */}
+      <Card padding="md" className="card-elevated">
         <CardHeader>
           <CardTitle>
             <span className="flex items-center gap-2">
@@ -459,18 +459,22 @@ export function DownloadsSection() {
             </span>
           </CardTitle>
           <div className="flex items-center gap-2">
-            <div className="flex flex-wrap items-center gap-1.5 text-micro text-fg-muted">
+            <div className="flex flex-wrap items-center gap-1.5 font-sans text-micro text-fg-muted">
               {stats && (
                 <>
                   {/* Archive pill removed 2026-05-20 — archive concept is gone
                       from the UI; categories replace it. `active_count` now
                       equals the total file count (archive_count is always 0)
                       so we label the pill "files" rather than "active". */}
-                  <Pill tone="cyan" size="sm">
+                  <Pill
+                    tone="cyan"
+                    size="sm"
+                    className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+                  >
                     {stats.active_count} files
                   </Pill>
                   <span className="text-fg-faint">·</span>
-                  <span>{stats.total_size_mb.toFixed(1)} MB</span>
+                  <span className="font-mono">{stats.total_size_mb.toFixed(1)} MB</span>
                 </>
               )}
             </div>
@@ -481,7 +485,7 @@ export function DownloadsSection() {
               onClick={() => setSettingsOpen(true)}
               aria-label="Manage categories"
               title="Manage categories"
-              className="border border-border-subtle bg-bg-elevated/30 text-fg-muted hover:border-accent-magenta/40 hover:bg-accent-magenta/10 hover:text-accent-magenta"
+              className="border border-border-subtle bg-bg-elevated/30 text-fg-muted hover:border-accent-plum/40 hover:bg-accent-plum/10 hover:text-accent-plum-strong"
             >
               <Settings size={14} aria-hidden />
             </HapticButton>

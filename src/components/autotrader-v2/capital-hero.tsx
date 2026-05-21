@@ -50,13 +50,17 @@ export function CapitalHero() {
   const openCount = data?.open_positions_count ?? 0;
 
   return (
-    <Card padding="lg" glow="cyan" className="space-y-4">
+    <Card padding="lg" className="card-elevated space-y-4">
       <div className="flex items-center justify-between">
-        <span className="flex items-center gap-2 text-micro uppercase tracking-wider text-fg-muted">
+        <span className="flex items-center gap-2 font-sans text-micro uppercase tracking-wider text-fg-muted">
           <TrendingUp size={12} aria-hidden />
           Auto Capital
         </span>
-        <Pill tone="cyan" size="sm">
+        <Pill
+          tone="cyan"
+          size="sm"
+          className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+        >
           EQUITY
         </Pill>
       </div>
@@ -69,7 +73,7 @@ export function CapitalHero() {
               ${equity.toFixed(2)}
             </span>
             {liveCap > 0 && (
-              <span className="text-micro text-fg-muted">
+              <span className="font-sans text-micro italic text-fg-muted">
                 of ${liveCap.toFixed(0)} cap
               </span>
             )}

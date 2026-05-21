@@ -9,7 +9,6 @@ import {
   Skeleton,
   HapticButton,
   BottomSheet,
-  LivePulse,
 } from "@/components/ui";
 import { Power, PauseCircle, PlayCircle, Lock, AlertTriangle, Clock, ShieldOff } from "lucide-react";
 
@@ -125,22 +124,22 @@ export function AutoTraderToggleCard() {
   const killswitchOn = !!data?.killswitch_enabled;
 
   return (
-    <Card padding="md" glow={enabled ? "green" : "amber"}>
+    <Card padding="md" className="card-elevated">
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Power
               size={18}
-              className={enabled ? "text-accent-green" : "text-accent-amber"}
+              className={enabled ? "text-accent-mint" : "text-accent-gold"}
               aria-hidden
             />
             <CardTitle>AutoTrader Control</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             {enabled ? (
-              <LivePulse tone="green" label="RUNNING" />
+              <Pill intent="running" size="sm">RUNNING</Pill>
             ) : (
-              <Pill tone="amber" size="sm">PAUSED</Pill>
+              <Pill intent="warn" size="sm">PAUSED</Pill>
             )}
           </div>
         </div>
@@ -148,15 +147,17 @@ export function AutoTraderToggleCard() {
 
       {/* Last change line */}
       {data?.audit && data.audit.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 text-micro text-fg-muted">
+        <div className="mb-3 flex items-center gap-2 font-sans text-micro text-fg-muted">
           <Clock size={12} />
-          Last change: {data.audit[0].action} · {data.audit[0].timestamp} · {data.audit[0].source}
+          Last change: {data.audit[0].action} ·{" "}
+          <span className="font-mono">{data.audit[0].timestamp}</span> ·{" "}
+          {data.audit[0].source}
         </div>
       )}
 
       {/* Killswitch advisory (informational; does NOT block the toggle) */}
       {killswitchOn && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-amber/40 bg-accent-amber/10 p-3 text-caption text-accent-amber">
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
           <ShieldOff size={16} className="shrink-0 mt-0.5" aria-hidden />
           <div>
             <div className="font-semibold">Killswitch is ENGAGED</div>
@@ -170,16 +171,16 @@ export function AutoTraderToggleCard() {
 
       {/* Gate-locked notice */}
       {!toggleEnabled && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-amber/40 bg-accent-amber/10 p-3 text-caption text-accent-amber">
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
           <Lock size={16} className="shrink-0 mt-0.5" aria-hidden />
           <div>
             <div className="font-semibold">Toggle locked</div>
             <div className="text-micro text-fg-muted">
               Set{" "}
-              <code className="rounded bg-bg-elevated px-1 text-accent-cyan">
+              <code className="rounded bg-bg-elevated px-1 font-mono text-accent-cyan-soft">
                 HUB_AUTOTRADER_TOGGLE_ENABLED=true
               </code>{" "}
-              in <code>auto_config</code> to unlock.
+              in <code className="font-mono">auto_config</code> to unlock.
             </div>
           </div>
         </div>
@@ -211,7 +212,7 @@ export function AutoTraderToggleCard() {
         </HapticButton>
       </div>
 
-      <p className="mt-3 text-micro text-fg-muted">
+      <p className="mt-3 font-sans text-micro text-fg-muted">
         Pausing stops NEW AutoTrader entries only. Open positions stay
         monitored — exits run on their own merits. Manual signal cards in
         #scalp-signals are not affected.
@@ -220,9 +221,9 @@ export function AutoTraderToggleCard() {
       {result && (
         <div
           className={
-            "mt-3 flex items-start gap-2 rounded-md border p-3 text-caption " +
+            "mt-3 flex items-start gap-2 rounded-md border p-3 font-sans text-caption " +
             (result.tone === "ok"
-              ? "border-accent-green/40 bg-accent-green/10 text-accent-green"
+              ? "border-accent-mint/40 bg-accent-mint/10 text-accent-mint-strong"
               : "border-accent-red/40 bg-accent-red/10 text-accent-red")
           }
         >
@@ -233,25 +234,25 @@ export function AutoTraderToggleCard() {
       {/* Recent toggles */}
       {data?.audit && data.audit.length > 0 && (
         <div className="mt-4">
-          <div className="mb-2 text-caption uppercase tracking-wider text-fg-muted">
+          <div className="mb-2 font-sans text-caption uppercase tracking-wider text-fg-muted">
             Recent Toggles
           </div>
-          <ul className="space-y-2">
+          <ul className="divide-y divide-border-subtle">
             {data.audit.map((row) => {
               const isStart = row.action === "start";
               return (
                 <li
                   key={row.id}
-                  className="flex flex-wrap items-center gap-2 rounded-md border border-border-subtle bg-bg-card px-3 py-2 text-micro"
+                  className="flex flex-wrap items-center gap-2 px-1 py-2 text-micro"
                 >
-                  <Pill tone={isStart ? "green" : "amber"} size="sm">
+                  <Pill intent={isStart ? "running" : "warn"} size="sm">
                     {row.action}
                   </Pill>
-                  <span className="text-fg-muted">
+                  <span className="font-sans text-fg-muted">
                     {row.prev_value} → {row.new_value}
                   </span>
-                  <span className="text-fg-muted ml-auto">{row.timestamp}</span>
-                  <span className="basis-full text-micro text-fg-muted">
+                  <span className="font-mono text-fg-muted ml-auto">{row.timestamp}</span>
+                  <span className="basis-full font-sans text-micro text-fg-faint">
                     {row.source}
                   </span>
                 </li>
@@ -278,7 +279,7 @@ export function AutoTraderToggleCard() {
         title={`Confirm ${confirmTarget === "start" ? "Resume" : "Pause"} AutoTrader`}
       >
         <div className="space-y-4 p-4">
-          <div className="flex items-start gap-2 rounded-md border border-accent-amber/40 bg-accent-amber/10 p-3 text-caption text-accent-amber">
+          <div className="flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
             <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden />
             <div className="space-y-1">
               <div className="font-semibold">
@@ -293,9 +294,9 @@ export function AutoTraderToggleCard() {
               </div>
             </div>
           </div>
-          <div className="text-micro text-fg-muted">
+          <div className="font-sans text-micro text-fg-muted">
             Author: <span className="text-fg-primary">ghost</span> · Audit row
-            will be written to <code>autotrader_state_audit</code>.
+            will be written to <code className="font-mono">autotrader_state_audit</code>.
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <HapticButton
