@@ -217,7 +217,7 @@ function severityTone(s: Severity): "green" | "amber" | "red" {
 
 function severityCardClass(s: Severity): string {
   if (s === "critical") return "border-l-4 border-accent-red";
-  if (s === "warning") return "border-l-4 border-accent-amber";
+  if (s === "warning") return "border-l-4 border-accent-gold";
   return "";
 }
 
@@ -307,7 +307,7 @@ export function HeartbeatView() {
 
   if (!data) {
     return (
-      <Card padding="md" glow="red">
+      <Card padding="md" className="card-warn">
         <EmptyState
           icon={<AlertCircle size={32} />}
           title="Observatory unreachable"
@@ -1038,8 +1038,8 @@ function ResourceBar(props: {
     clamped >= 95
       ? "bg-accent-red"
       : clamped >= props.warnAt
-        ? "bg-accent-amber"
-        : "bg-accent-green";
+        ? "bg-accent-gold"
+        : "bg-accent-mint";
   return (
     <div>
       <div className="flex items-baseline justify-between text-caption">
@@ -1061,11 +1061,11 @@ function Stat(props: { label: string; value: string; tone: "ok" | "warning" | "c
     props.tone === "critical"
       ? "text-accent-red"
       : props.tone === "warning"
-        ? "text-accent-amber"
+        ? "text-accent-gold"
         : "text-fg-primary";
   return (
     <div className="flex items-baseline justify-between rounded-md bg-bg-elevated px-3 py-2">
-      <dt className="text-micro uppercase tracking-wider text-fg-muted">
+      <dt className="font-sans text-micro uppercase tracking-wider text-fg-muted">
         {props.label}
       </dt>
       <dd className={`font-mono ${valueClass}`}>{props.value}</dd>
@@ -1083,11 +1083,11 @@ function StatusRow(props: {
     props.tone === "critical"
       ? "text-accent-red"
       : props.tone === "warning"
-        ? "text-accent-amber"
+        ? "text-accent-gold"
         : "text-fg-primary";
   return (
     <div className="flex items-center justify-between gap-2 rounded-md bg-bg-elevated px-3 py-2">
-      <span className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
+      <span className="flex min-w-0 items-center gap-2 font-sans text-caption text-fg-muted">
         <span aria-hidden>{props.icon}</span>
         <span className="truncate">{props.label}</span>
       </span>

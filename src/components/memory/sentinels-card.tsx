@@ -23,10 +23,12 @@ interface HealthResponse {
 
 const POLL_MS = 30_000;
 
-function pillToneForLevel(lv: string): "amber" | "red" | "magenta" {
-  if (lv === "ERROR") return "red";
-  if (lv === "CRITICAL") return "magenta";
-  return "amber";
+function intentForLevel(lv: string): "error" | "warn" {
+  // Per Ghost B2 decision (c): CRITICAL maps to intent="error" (red) for
+  // semantic clarity — the magenta-vs-red distinction is sacrificed for a
+  // single severe-state color.
+  if (lv === "ERROR" || lv === "CRITICAL") return "error";
+  return "warn";
 }
 
 export function SentinelsCard() {
@@ -52,9 +54,9 @@ export function SentinelsCard() {
       <CardHeader>
         <CardTitle>Recent Sentinels</CardTitle>
       </CardHeader>
-      <div className="mb-3 text-micro text-fg-muted">
-        Last {data?.sentinels?.length ?? 0} WARNING+ lines from{" "}
-        <code className="text-accent-cyan">trevor.log</code> (64KB tail).
+      <div className="mb-3 font-sans text-micro text-fg-muted">
+        Last <span className="font-mono">{data?.sentinels?.length ?? 0}</span> WARNING+ lines from{" "}
+        <code className="font-mono text-accent-cyan-soft">trevor.log</code> (64KB tail).
       </div>
       {(data?.sentinels?.length ?? 0) === 0 ? (
         <EmptyState
@@ -70,17 +72,21 @@ export function SentinelsCard() {
               className="flex flex-col gap-1 rounded-md border border-border-subtle bg-bg-card px-3 py-2"
             >
               <div className="flex flex-wrap items-center gap-1.5">
-                <Pill tone={pillToneForLevel(s.level)} size="sm">
+                <Pill intent={intentForLevel(s.level)} size="sm">
                   {s.level}
                 </Pill>
-                <Pill tone="cyan" size="sm">
+                <Pill
+                  tone="cyan"
+                  size="sm"
+                  className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+                >
                   {s.tag}
                 </Pill>
                 {s.ts && (
-                  <span className="text-micro text-fg-muted">{s.ts}</span>
+                  <span className="font-mono text-micro text-fg-muted">{s.ts}</span>
                 )}
               </div>
-              <div className="break-words text-caption text-fg-primary">
+              <div className="break-words font-mono text-caption text-fg-primary">
                 {s.message}
               </div>
             </li>

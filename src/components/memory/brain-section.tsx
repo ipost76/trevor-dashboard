@@ -139,10 +139,16 @@ export function BrainSection() {
           </CardTitle>
           {data && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <Pill tone="amber" size="sm">{data.sacred_count} sacred</Pill>
-              <Pill tone="cyan" size="sm">{data.non_sacred_count} non-sacred</Pill>
+              <Pill intent="warn" size="sm">{data.sacred_count} sacred</Pill>
+              <Pill
+                tone="cyan"
+                size="sm"
+                className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+              >
+                {data.non_sacred_count} non-sacred
+              </Pill>
               {data.edit_enabled
-                ? <Pill tone="green" size="sm">EDIT ON</Pill>
+                ? <Pill intent="active" size="sm">EDIT ON</Pill>
                 : <Pill tone="neutral" size="sm">edit off</Pill>}
             </div>
           )}
@@ -171,14 +177,14 @@ export function BrainSection() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {f.is_sacred
-                      ? <Lock size={14} className="text-accent-amber flex-none" />
+                      ? <Lock size={14} className="text-accent-gold flex-none" />
                       : f.is_editable
-                        ? <Edit size={14} className="text-accent-cyan flex-none" />
+                        ? <Edit size={14} className="text-accent-cyan-soft flex-none" />
                         : <FileText size={14} className="text-fg-muted flex-none" />}
-                    <span className="font-bold truncate">{f.name}</span>
-                    {f.is_sacred && <Pill tone="amber" size="sm">SACRED</Pill>}
+                    <span className="font-mono font-semibold truncate">{f.name}</span>
+                    {f.is_sacred && <Pill intent="warn" size="sm">SACRED</Pill>}
                   </div>
-                  <div className="text-micro text-fg-muted text-right flex-none">
+                  <div className="font-mono text-micro text-fg-muted text-right flex-none">
                     {(f.size_bytes / 1024).toFixed(1)}KB · {new Date(f.modified_at).toLocaleDateString()}
                   </div>
                 </button>
@@ -188,8 +194,8 @@ export function BrainSection() {
         )}
 
         {data && !data.edit_enabled && (
-          <div className="mt-3 text-micro text-fg-muted">
-            Editing disabled by default. Set <code className="text-accent-cyan">HUB_BRAIN_EDIT_ENABLED=true</code> in <code>auto_config</code> to unlock non-sacred files. Sacred files always read-only.
+          <div className="mt-3 font-sans text-micro text-fg-muted">
+            Editing disabled by default. Set <code className="font-mono text-accent-cyan-soft">HUB_BRAIN_EDIT_ENABLED=true</code> in <code className="font-mono">auto_config</code> to unlock non-sacred files. Sacred files always read-only.
           </div>
         )}
       </Card>
@@ -201,14 +207,14 @@ export function BrainSection() {
 
         {content && !content.error && (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2 text-micro text-fg-muted">
+            <div className="flex flex-wrap items-center gap-2 font-sans text-micro text-fg-muted">
               {content.is_sacred && (
-                <Pill tone="amber" size="sm" pulse>
+                <Pill intent="warn" size="sm" pulse>
                   <Lock size={10} className="inline" /> SACRED
                 </Pill>
               )}
-              <span>{content.lines} lines · {(content.size_bytes / 1024).toFixed(1)}KB</span>
-              <span>· modified {new Date(content.modified_at).toLocaleDateString()}</span>
+              <span className="font-mono">{content.lines} lines · {(content.size_bytes / 1024).toFixed(1)}KB</span>
+              <span>· modified <span className="font-mono">{new Date(content.modified_at).toLocaleDateString()}</span></span>
             </div>
 
             {!editing && (
@@ -234,7 +240,7 @@ export function BrainSection() {
 
             {!content.is_sacred && data?.edit_enabled && editing && (
               <div className="space-y-2">
-                <div className="flex items-start gap-2 rounded-md border border-accent-amber/40 bg-accent-amber/10 p-3 text-caption text-accent-amber">
+                <div className="flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
                   <AlertTriangle size={16} className="mt-0.5 flex-none" />
                   <span>Saving creates a timestamped .bak and writes an audit row. Sacred files cannot be edited.</span>
                 </div>
@@ -256,8 +262,8 @@ export function BrainSection() {
 
             {saveResult && (
               <div
-                className={`text-caption ${
-                  saveResult.startsWith("Failed") ? "text-accent-red" : "text-accent-green"
+                className={`font-sans text-caption ${
+                  saveResult.startsWith("Failed") ? "text-accent-red" : "text-accent-mint-strong"
                 }`}
               >
                 {saveResult}
@@ -265,7 +271,7 @@ export function BrainSection() {
             )}
 
             {content.is_sacred && (
-              <div className="text-micro text-fg-muted">
+              <div className="font-sans text-micro text-fg-muted">
                 <Lock size={10} className="inline mr-1" />
                 Sacred file — read-only. Modification rejected at every layer.
               </div>

@@ -148,17 +148,17 @@ export function NotesSection() {
             placeholder="jot something down..."
             rows={4}
             aria-label="Note content"
-            className="w-full resize-y rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-caption text-fg-primary placeholder:text-fg-muted/60 transition-colors focus:border-accent-cyan focus:outline-none focus:ring-1 focus:ring-accent-cyan"
+            className="w-full resize-y rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-caption text-fg-primary placeholder:text-fg-muted/60 transition-colors focus:border-accent-cyan-soft focus:outline-none focus:shadow-glow-focus"
           />
           <div className="flex items-center justify-between gap-2">
-            <span className="text-micro text-fg-muted">
+            <span className="font-sans text-micro italic text-fg-muted">
               Ctrl/⌘ + Enter to add
             </span>
             <button
               type="button"
               onClick={addNote}
               disabled={!canAdd}
-              className="tap-target inline-flex items-center justify-center gap-1 rounded-md border border-accent-green/40 bg-accent-green/10 px-4 py-2 font-mono text-caption uppercase tracking-wider text-accent-green transition-all duration-instant hover:bg-accent-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-green/10"
+              className="tap-target inline-flex items-center justify-center gap-1 rounded-md border border-accent-mint/40 bg-accent-mint/10 px-4 py-2 font-sans text-caption font-semibold uppercase tracking-wider text-accent-mint-strong transition-all duration-instant hover:bg-accent-mint/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-mint/10"
             >
               <Plus size={14} />
               Add Note

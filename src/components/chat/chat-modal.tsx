@@ -72,7 +72,7 @@ export function ChatModal({ open, onClose, children }: ChatModalProps) {
       <div
         className={[
           "relative flex h-[100dvh] w-full flex-col",
-          "bg-bg-primary border-t border-accent-cyan/30 shadow-glow-cyan",
+          "bg-bg-primary border-t border-accent-cyan-soft/30 shadow-glow-subtle",
           "lg:h-[100dvh] lg:max-w-[480px] lg:border-l lg:border-t-0",
           "pb-[env(safe-area-inset-bottom)]",
           animatingOut ? "animate-slide-down-spring" : "animate-slide-up-spring",

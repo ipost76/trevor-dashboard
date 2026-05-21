@@ -61,17 +61,25 @@ export function MemorySection() {
               MEMORY JOURNAL
             </span>
           </CardTitle>
-          {data && <Pill tone="cyan" size="sm">{data.total} entries</Pill>}
+          {data && (
+            <Pill
+              tone="cyan"
+              size="sm"
+              className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+            >
+              {data.total} entries
+            </Pill>
+          )}
         </CardHeader>
         <input
           type="text"
           value={pendingQ}
           onChange={(e) => setPendingQ(e.target.value)}
           placeholder="Search daily checkpoints…"
-          className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 text-caption text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan/60"
+          className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-sans text-caption text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan-soft/60"
         />
-        <div className="mt-2 text-micro text-fg-muted">
-          Source: <code>brain/memory/*.md</code> daily session checkpoints (read-only).
+        <div className="mt-2 font-sans text-micro text-fg-muted">
+          Source: <code className="font-mono">brain/memory/*.md</code> daily session checkpoints (read-only).
         </div>
       </Card>
 
@@ -98,12 +106,26 @@ export function MemorySection() {
             const body = truncated ? e.content.slice(0, PREVIEW_CHARS) : e.content;
             return (
               <li key={e.id}>
-                <Card padding="md" className="space-y-2">
-                  <div className="flex items-center gap-2 text-micro text-fg-muted">
-                    <Pill tone="violet" size="sm">{e.id}</Pill>
-                    {e.tag && <Pill tone="cyan" size="sm">{e.tag}</Pill>}
-                    {e.ts && <span>{e.ts}</span>}
-                    <span className="ml-auto">{(e.size_bytes / 1024).toFixed(1)}KB</span>
+                <Card padding="md" className="card-base space-y-2">
+                  <div className="flex items-center gap-2 font-sans text-micro text-fg-muted">
+                    <Pill
+                      tone="violet"
+                      size="sm"
+                      className="bg-accent-plum/10 text-accent-plum-strong border-accent-plum/30"
+                    >
+                      {e.id}
+                    </Pill>
+                    {e.tag && (
+                      <Pill
+                        tone="cyan"
+                        size="sm"
+                        className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+                      >
+                        {e.tag}
+                      </Pill>
+                    )}
+                    {e.ts && <span className="font-mono">{e.ts}</span>}
+                    <span className="ml-auto font-mono">{(e.size_bytes / 1024).toFixed(1)}KB</span>
                   </div>
                   <pre className="text-caption text-fg-primary whitespace-pre-wrap break-words font-mono">
                     {body}{truncated ? "…" : ""}
@@ -112,7 +134,7 @@ export function MemorySection() {
                     <button
                       type="button"
                       onClick={() => toggle(e.id)}
-                      className="text-micro text-accent-cyan hover:underline tap-target"
+                      className="font-sans text-micro text-accent-cyan-soft-strong hover:underline tap-target"
                     >
                       {isOpen ? "Collapse" : "Expand full"}
                     </button>

@@ -98,7 +98,7 @@ export function ShadowSection() {
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
       {/* Shadow scoring */}
-      <Card padding="md" glow={shadow?.enabled === false ? "amber" : "cyan"}>
+      <Card padding="md" className={shadow?.enabled === false ? "card-warn" : "card-elevated"}>
         <CardHeader>
           <CardTitle>
             <span className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export function ShadowSection() {
             </span>
           </CardTitle>
           {shadow ? (
-            <Pill tone={shadow.enabled ? "cyan" : "amber"} size="sm">
+            <Pill intent={shadow.enabled ? "active" : "warn"} size="sm">
               {shadow.enabled ? "ACTIVE" : "OFF"}
             </Pill>
           ) : (
@@ -144,11 +144,11 @@ export function ShadowSection() {
 
             <div className="relative h-2 mt-3 rounded-full bg-bg-elevated overflow-hidden">
               <div
-                className="absolute inset-y-0 left-0 bg-accent-cyan"
+                className="absolute inset-y-0 left-0 bg-accent-cyan-soft"
                 style={{ width: `${Math.max(0, Math.min(100, shadowProgress * 100))}%` }}
               />
             </div>
-            <div className="mt-1 text-micro text-fg-muted">
+            <div className="mt-1 font-sans text-micro text-fg-muted">
               {shadow.ready_for_analysis
                 ? "Ready for FUTURE_01 shadow analysis."
                 : `${Math.max(0, shadow.rows_required_for_analysis - shadow.rows)} more rows needed.`}
@@ -158,7 +158,12 @@ export function ShadowSection() {
       </Card>
 
       {/* Optuna A/B comparison window */}
-      <Card padding="md" glow={abActive ? (reviewOverdue ? "amber" : "cyan") : "none"}>
+      <Card
+        padding="md"
+        className={
+          abActive ? (reviewOverdue ? "card-warn" : "card-elevated") : "card-base"
+        }
+      >
         <CardHeader>
           <CardTitle>
             <span className="flex items-center gap-2">
@@ -168,7 +173,8 @@ export function ShadowSection() {
           </CardTitle>
           {ab ? (
             <Pill
-              tone={abActive ? (reviewOverdue ? "amber" : "cyan") : "neutral"}
+              intent={abActive ? (reviewOverdue ? "warn" : "active") : undefined}
+              tone={abActive ? undefined : "neutral"}
               size="sm"
             >
               {abActive ? (reviewOverdue ? "REVIEW OVERDUE" : "ACTIVE") : ab.stopped_at ? "STOPPED" : "INACTIVE"}
@@ -234,14 +240,14 @@ export function ShadowSection() {
             )}
 
             {ab.last_reason && (
-              <div className="mt-3 rounded-md border border-border-subtle bg-bg-elevated p-2 text-micro text-fg-muted">
-                <span className="font-bold text-fg-primary">Reason:</span> {ab.last_reason}
-                {ab.last_enabled_by && <> · <span className="font-bold">{ab.last_enabled_by}</span></>}
+              <div className="mt-3 rounded-md border border-border-subtle bg-bg-elevated p-2 font-sans text-micro text-fg-muted">
+                <span className="font-semibold text-fg-primary">Reason:</span> {ab.last_reason}
+                {ab.last_enabled_by && <> · <span className="font-semibold">{ab.last_enabled_by}</span></>}
               </div>
             )}
 
             {reviewOverdue && (
-              <div className="mt-3 rounded-md border border-border-amber bg-accent-amber/10 p-2 text-micro text-accent-amber">
+              <div className="mt-3 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-2 font-sans text-micro text-accent-gold-strong">
                 Review window passed (started {reviewWindowDays}d ago).
                 Decide: roll forward, freeze, or revert prod params.
               </div>
@@ -256,8 +262,8 @@ export function ShadowSection() {
 function SnapStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between rounded-md border border-border-subtle bg-bg-elevated px-2 py-1">
-      <span className="text-fg-muted text-micro uppercase tracking-wider">{label}</span>
-      <span className="font-bold tabular-nums">{value}</span>
+      <span className="font-sans text-fg-muted text-micro uppercase tracking-wider">{label}</span>
+      <span className="font-mono font-semibold tabular-nums">{value}</span>
     </div>
   );
 }

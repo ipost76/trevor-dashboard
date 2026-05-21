@@ -33,16 +33,29 @@ export default function PriceStrip() {
   const hasPrices = Object.keys(prices).length > 0;
 
   return (
-    <div className="shrink-0 h-6 flex items-center overflow-x-auto scrollbar-hide border-b border-[rgba(0,255,136,0.06)]"
-      style={{ background: "#060a08", WebkitOverflowScrolling: "touch" }}>
-      <div className="flex items-center gap-0 px-3 h-full">
+    <div
+      className="shrink-0 h-6 flex items-center overflow-x-auto scrollbar-hide bg-bg-sidebar border-b border-border-subtle"
+      style={{ WebkitOverflowScrolling: "touch" }}
+    >
+      <div className="flex items-center gap-0 px-3 h-full font-mono">
         {TICKERS.map((ticker, i) => {
           const price = prices[ticker];
           return (
-            <span key={ticker} className="flex items-center gap-1 shrink-0 whitespace-nowrap" style={{ fontFamily: "var(--font-mono)" }}>
-              {i > 0 && <span className="text-[10px] mx-2" style={{ color: "#1e3d28" }}>·</span>}
-              <span className="text-[10px] font-semibold" style={{ color: "#3d6b4a" }}>{ticker}</span>
-              <span className="text-[10px]" style={{ color: hasPrices ? "#7ab88a" : "#2a4a3a" }}>
+            <span
+              key={ticker}
+              className="flex items-center gap-1 shrink-0 whitespace-nowrap"
+            >
+              {i > 0 && (
+                <span className="text-[10px] mx-2 text-fg-faint">·</span>
+              )}
+              <span className="text-[10px] font-semibold text-fg-muted">
+                {ticker}
+              </span>
+              <span
+                className={`text-[10px] tabular-nums ${
+                  hasPrices ? "text-fg-primary" : "text-fg-faint"
+                }`}
+              >
                 {price ? `$${formatPrice(price)}` : "—"}
               </span>
             </span>

@@ -3,7 +3,7 @@ import * as React from "react";
 import { LogOut, Sun, Moon, KeyRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useRouter, usePathname } from "next/navigation";
-import { LivePulse, KillswitchPill, Pill } from "@/components/ui";
+import { KillswitchPill, Pill } from "@/components/ui";
 import PriceStrip from "@/components/PriceStrip";
 import { useScrollDirection } from "@/hooks/useScrollDirection";
 import { cn } from "@/lib/utils";
@@ -80,12 +80,12 @@ export function Header() {
     return () => clearInterval(id);
   }, []);
 
-  // LivePulse tone: red when bot offline, cyan otherwise
-  // (drops amber DEGRADED tier per Phase 0 audit deviation #2 —
-  // /api/status doesn't expose a separate scanner_ok signal)
-  const liveTone: "cyan" | "red" =
-    status?.trevor.running === false ? "red" : "cyan";
-  const liveLabel = liveTone === "red" ? "OFFLINE" : "LIVE";
+  // Status pill: red when bot offline, refined mint otherwise. B2 swapped
+  // <LivePulse> → static refined dot + sans label (per Ghost B1 decision).
+  // /api/status does not expose a separate DEGRADED signal — drop amber tier.
+  const isOffline = status?.trevor.running === false;
+  const dotCls = isOffline ? "bg-accent-red" : "bg-accent-mint";
+  const liveLabel = isOffline ? "OFFLINE" : "LIVE";
 
   // /chat minimal variant detection
   const isChat = pathname === "/chat";
@@ -123,9 +123,9 @@ export function Header() {
         >
           ←
         </button>
-        <span className="text-h3 tracking-wide">TREVOR CHAT</span>
-        <span className="ml-auto">
-          <LivePulse tone={liveTone} label="" />
+        <span className="font-sans text-h3 font-semibold tracking-tight">TREVOR CHAT</span>
+        <span className="ml-auto inline-flex items-center" aria-label={liveLabel}>
+          <span className={`h-2 w-2 rounded-full ${dotCls}`} />
         </span>
       </header>
     );
@@ -152,8 +152,13 @@ export function Header() {
     >
       {/* Row 1: pulse + clock + ticker (desktop) + identity controls */}
       <div className="flex items-center gap-3 px-4 py-2">
-        <LivePulse tone={liveTone} label={liveLabel} />
-        <span className="text-caption tabular-nums text-fg-muted">{now}</span>
+        <span className="inline-flex items-center gap-2" aria-label={liveLabel}>
+          <span className={`h-2 w-2 rounded-full ${dotCls}`} />
+          <span className="font-sans text-micro font-medium uppercase tracking-wider text-fg-muted">
+            {liveLabel}
+          </span>
+        </span>
+        <span className="font-mono text-caption tabular-nums text-fg-muted">{now}</span>
 
         {/* Desktop ticker strip — hidden on mobile (mobile gets row 2) */}
         <div className="hidden lg:block flex-1 min-w-0">
@@ -166,9 +171,14 @@ export function Header() {
         {/* Killswitch pill — KillswitchPill renders nothing when killswitch is OFF */}
         <KillswitchPill />
 
-        {/* XP badge */}
-        <Pill tone="cyan" size="sm" title={status?.rank ?? "—"}>
-          {(status?.xp ?? 0).toLocaleString()}⚡
+        {/* XP badge — refined cyan-soft (B2 className override; tone="cyan" kept for compat) */}
+        <Pill
+          tone="cyan"
+          size="sm"
+          title={status?.rank ?? "—"}
+          className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+        >
+          <span className="font-mono">{(status?.xp ?? 0).toLocaleString()}</span>⚡
         </Pill>
 
         {/* Theme toggle (next-themes) */}

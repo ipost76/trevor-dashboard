@@ -49,7 +49,7 @@ export function KillswitchPill() {
   const tip = `Killswitch ON · ${state.lastToggle ?? "(unknown time)"} by ${state.lastAuthor ?? "(unknown)"} · ${state.lastReason ?? "(no reason)"}`;
 
   return (
-    <Pill tone="amber" pulse size="sm" title={tip}>
+    <Pill intent="warn" pulse size="sm" title={tip}>
       Standby
     </Pill>
   );

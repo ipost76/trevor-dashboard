@@ -81,26 +81,30 @@ export function LessonsSection() {
               LESSONS
             </span>
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-1.5 text-micro text-fg-muted">
+          <div className="flex flex-wrap items-center gap-1.5 font-sans text-micro text-fg-muted">
             {data && <span>{data.total_closed_trades} closed trades</span>}
             {data && <span className="text-fg-faint">·</span>}
             {data && (
-              <Pill tone="green" size="sm">
+              <Pill intent="active" size="sm">
                 {counts.PRIORITIZE} prioritize
               </Pill>
             )}
             {data && (
-              <Pill tone="red" size="sm">
+              <Pill intent="error" size="sm">
                 {counts.AVOID} avoid
               </Pill>
             )}
             {data && (
-              <Pill tone="amber" size="sm">
+              <Pill intent="warn" size="sm">
                 {counts.REGIME_DEPENDENT} regime
               </Pill>
             )}
             {data && (
-              <Pill tone="violet" size="sm">
+              <Pill
+                tone="violet"
+                size="sm"
+                className="bg-accent-plum/10 text-accent-plum-strong border-accent-plum/30"
+              >
                 {counts.ACTIVE_LEARNING} learning
               </Pill>
             )}
@@ -151,8 +155,8 @@ export function LessonsSection() {
       )}
 
       {data?.generated_at && !loading && (
-        <div className="text-center text-micro text-fg-faint">
-          generated {new Date(data.generated_at).toLocaleString()}
+        <div className="text-center font-sans text-micro text-fg-faint">
+          generated <span className="font-mono">{new Date(data.generated_at).toLocaleString()}</span>
         </div>
       )}
     </div>

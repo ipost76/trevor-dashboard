@@ -114,26 +114,22 @@ export function KillswitchControlCard() {
   const enabled = !!state?.enabled;
 
   return (
-    <Card
-      padding="md"
-      glow={enabled ? "red" : "none"}
-      className={enabled ? "border-accent-red/60" : undefined}
-    >
+    <Card padding="md" className={enabled ? "card-warn" : "card-base"}>
       {/* Identity row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           {enabled ? (
             <ShieldOff size={20} className="text-accent-red" aria-hidden />
           ) : (
-            <ShieldCheck size={20} className="text-accent-green" aria-hidden />
+            <ShieldCheck size={20} className="text-accent-mint" aria-hidden />
           )}
           <div>
-            <div className="text-caption uppercase tracking-wider text-fg-muted">
+            <div className="font-sans text-caption uppercase tracking-wider text-fg-muted">
               Emergency Killswitch
             </div>
             <div
               className={
-                "text-h3 font-semibold " +
+                "font-sans text-h3 font-semibold " +
                 (enabled ? "text-accent-red" : "text-fg-primary")
               }
             >
@@ -152,13 +148,13 @@ export function KillswitchControlCard() {
 
       {/* Audit metadata */}
       {state && (state.lastToggle || state.lastAuthor) && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-micro text-fg-muted">
+        <div className="mt-3 flex flex-wrap items-center gap-2 font-sans text-micro text-fg-muted">
           <Clock size={12} aria-hidden />
           <span>
-            Last toggle: {state.lastToggle || "(unknown)"} · by {state.lastAuthor || "(unknown)"}
+            Last toggle: <span className="font-mono">{state.lastToggle || "(unknown)"}</span> · by {state.lastAuthor || "(unknown)"}
           </span>
           {state.lastReason && (
-            <span className="basis-full text-micro text-fg-muted">
+            <span className="basis-full font-sans text-micro text-fg-muted">
               Reason: {state.lastReason}
             </span>
           )}
@@ -191,7 +187,7 @@ export function KillswitchControlCard() {
         </HapticButton>
       </div>
 
-      <p className="mt-3 text-micro text-fg-muted">
+      <p className="mt-3 font-sans text-micro text-fg-muted">
         Killswitch ON blocks ALL new signal cards + AutoTrader entries.
         Open positions stay monitored — exits run on their own merits. Does
         NOT close, cancel, or restart anything.
@@ -200,9 +196,9 @@ export function KillswitchControlCard() {
       {result && (
         <div
           className={
-            "mt-3 flex items-start gap-2 rounded-md border p-3 text-caption " +
+            "mt-3 flex items-start gap-2 rounded-md border p-3 font-sans text-caption " +
             (result.tone === "ok"
-              ? "border-accent-green/40 bg-accent-green/10 text-accent-green"
+              ? "border-accent-mint/40 bg-accent-mint/10 text-accent-mint-strong"
               : "border-accent-red/40 bg-accent-red/10 text-accent-red")
           }
         >
@@ -219,10 +215,10 @@ export function KillswitchControlCard() {
         <div className="space-y-4 p-4">
           <div
             className={
-              "flex items-start gap-2 rounded-md border p-3 text-caption " +
+              "flex items-start gap-2 rounded-md border p-3 font-sans text-caption " +
               (confirmTarget === "on"
                 ? "border-accent-red/40 bg-accent-red/10 text-accent-red"
-                : "border-accent-amber/40 bg-accent-amber/10 text-accent-amber")
+                : "border-accent-gold/40 bg-accent-gold/10 text-accent-gold-strong")
             }
           >
             <AlertTriangle size={16} className="shrink-0 mt-0.5" aria-hidden />
@@ -239,10 +235,10 @@ export function KillswitchControlCard() {
               </div>
             </div>
           </div>
-          <div className="text-micro text-fg-muted">
+          <div className="font-sans text-micro text-fg-muted">
             Author: <span className="text-fg-primary">ghost</span> · Audit recorded
-            in <code>auto_config.EMERGENCY_KILLSWITCH_LAST_*</code> · WARNING
-            sentinel <code>[KILLSWITCH-{confirmTarget?.toUpperCase()}]</code> emitted.
+            in <code className="font-mono">auto_config.EMERGENCY_KILLSWITCH_LAST_*</code> · WARNING
+            sentinel <code className="font-mono">[KILLSWITCH-{confirmTarget?.toUpperCase()}]</code> emitted.
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <HapticButton

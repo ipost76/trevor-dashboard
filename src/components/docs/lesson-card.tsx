@@ -6,10 +6,12 @@ import { cn } from "@/lib/utils";
 
 type Category = "PRIORITIZE" | "AVOID" | "REGIME_DEPENDENT" | "ACTIVE_LEARNING";
 
+type CategoryIntent = "active" | "error" | "warn" | "meme";
+
 type CategoryMeta = {
   label: string;
-  pillTone: "green" | "red" | "amber" | "violet";
-  cardGlow: "green" | "red" | "amber" | "magenta";
+  pillIntent: CategoryIntent;
+  cardClass: "card-elevated" | "card-warn";
   iconClass: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
 };
@@ -17,30 +19,30 @@ type CategoryMeta = {
 const META: Record<Category, CategoryMeta> = {
   PRIORITIZE: {
     label: "PRIORITIZE",
-    pillTone: "green",
-    cardGlow: "green",
-    iconClass: "text-accent-green",
+    pillIntent: "active",
+    cardClass: "card-elevated",
+    iconClass: "text-accent-mint",
     icon: CheckCircle2,
   },
   AVOID: {
     label: "AVOID",
-    pillTone: "red",
-    cardGlow: "red",
+    pillIntent: "error",
+    cardClass: "card-warn",
     iconClass: "text-accent-red",
     icon: AlertCircle,
   },
   REGIME_DEPENDENT: {
     label: "REGIME-DEPENDENT",
-    pillTone: "amber",
-    cardGlow: "amber",
-    iconClass: "text-accent-amber",
+    pillIntent: "warn",
+    cardClass: "card-elevated",
+    iconClass: "text-accent-gold",
     icon: Repeat,
   },
   ACTIVE_LEARNING: {
     label: "ACTIVE LEARNING",
-    pillTone: "violet",
-    cardGlow: "magenta",
-    iconClass: "text-accent-violet",
+    pillIntent: "meme",
+    cardClass: "card-elevated",
+    iconClass: "text-accent-plum",
     icon: Hourglass,
   },
 };
@@ -89,7 +91,7 @@ export function LessonCard({ data }: { data: LessonCardData }) {
         : "negative";
 
   return (
-    <Card glow={meta.cardGlow} padding="md" className="space-y-3">
+    <Card padding="md" className={cn(meta.cardClass, "space-y-3")}>
       <CardHeader>
         <CardTitle>
           <span className={cn("flex items-center gap-2", meta.iconClass)}>
@@ -97,7 +99,7 @@ export function LessonCard({ data }: { data: LessonCardData }) {
             {meta.label}
           </span>
         </CardTitle>
-        <Pill tone={meta.pillTone} size="sm">
+        <Pill intent={meta.pillIntent} size="sm">
           {data.confidence_level === "high"
             ? "high conf"
             : data.confidence_level === "medium"
@@ -106,14 +108,14 @@ export function LessonCard({ data }: { data: LessonCardData }) {
         </Pill>
       </CardHeader>
 
-      <h3 className="text-h3 text-fg-primary">{data.title}</h3>
+      <h3 className="font-sans text-h3 font-semibold text-fg-primary">{data.title}</h3>
 
       {cohortChips.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {cohortChips.map((chip) => (
             <span
               key={chip}
-              className="rounded-pill border border-border-subtle bg-bg-elevated px-2 py-0.5 text-micro text-fg-muted"
+              className="rounded-pill border border-border-subtle bg-bg-elevated px-2 py-0.5 font-sans text-micro text-fg-muted"
             >
               {chip}
             </span>
@@ -142,12 +144,12 @@ export function LessonCard({ data }: { data: LessonCardData }) {
       </div>
 
       <div className="space-y-1 pt-1">
-        <div className="text-caption text-fg-primary">{data.conclusion}</div>
-        <div className="text-micro text-fg-muted">→ {data.recommendation}</div>
+        <div className="font-sans text-caption text-fg-primary">{data.conclusion}</div>
+        <div className="font-sans text-micro text-fg-muted">→ {data.recommendation}</div>
       </div>
 
       {data.note && (
-        <div className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 text-micro text-fg-muted">
+        <div className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 font-sans text-micro text-fg-muted">
           {data.note}
         </div>
       )}

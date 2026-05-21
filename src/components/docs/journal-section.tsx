@@ -195,7 +195,11 @@ export function JournalSection() {
                   <div className="flex items-center gap-2">
                     <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
                     {t.has_narrative ? (
-                      <Pill tone="cyan" size="sm">
+                      <Pill
+                        tone="cyan"
+                        size="sm"
+                        className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+                      >
                         📝
                       </Pill>
                     ) : (
@@ -249,13 +253,14 @@ export function JournalSection() {
             {generating && <Skeleton className="h-32 w-full" />}
 
             {narrative?.error === "budget_exceeded" && (
-              <Card glow="amber" padding="md">
+              <Card padding="md" className="card-warn">
                 <div className="flex items-start gap-2">
-                  <Lock size={16} className="mt-0.5 text-accent-amber" />
-                  <div className="text-caption text-accent-amber">
+                  <Lock size={16} className="mt-0.5 text-accent-gold" />
+                  <div className="font-sans text-caption text-accent-gold-strong">
                     Daily budget exceeded ({narrative.tokens_used_today}/{narrative.tokens_cap}{" "}
                     tokens). Try again after reset, or raise{" "}
-                    <code>ANTHROPIC_API_DAILY_BUDGET_TOKENS</code> via <code>auto_config</code>.
+                    <code className="font-mono">ANTHROPIC_API_DAILY_BUDGET_TOKENS</code> via{" "}
+                    <code className="font-mono">auto_config</code>.
                   </div>
                 </div>
               </Card>
@@ -266,26 +271,30 @@ export function JournalSection() {
             )}
 
             {narrative?.narrative && (
-              <Card padding="md" className="space-y-2">
-                <div className="whitespace-pre-wrap text-body text-fg-primary">
+              <Card padding="md" className="card-base space-y-2">
+                <div className="whitespace-pre-wrap font-sans text-body leading-relaxed text-fg-primary">
                   {narrative.narrative}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 pt-2 text-micro text-fg-muted">
+                <div className="flex flex-wrap items-center gap-2 pt-2 font-sans text-micro text-fg-muted">
                   <Pill tone="neutral" size="sm">
                     {narrative.model ?? "haiku"}
                   </Pill>
                   {narrative.from_cache && (
-                    <Pill tone="cyan" size="sm">
+                    <Pill
+                      tone="cyan"
+                      size="sm"
+                      className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+                    >
                       cached
                     </Pill>
                   )}
                   {!narrative.from_cache && narrative.tokens_output && (
-                    <Pill tone="green" size="sm">
+                    <Pill intent="active" size="sm">
                       {narrative.tokens_input ?? 0}+{narrative.tokens_output} tokens
                     </Pill>
                   )}
                   {narrative.generated_at && (
-                    <span>{new Date(narrative.generated_at).toLocaleString()}</span>
+                    <span className="font-mono">{new Date(narrative.generated_at).toLocaleString()}</span>
                   )}
                 </div>
                 {narrative.from_cache && (
@@ -304,10 +313,11 @@ export function JournalSection() {
 
 function BudgetPill({ used, cap }: { used: number; cap: number }) {
   const pct = cap > 0 ? (used / cap) * 100 : 0;
-  const tone: "green" | "amber" | "red" = pct < 70 ? "green" : pct < 90 ? "amber" : "red";
+  const intent: "live" | "warn" | "error" =
+    pct < 70 ? "live" : pct < 90 ? "warn" : "error";
   return (
     <Pill
-      tone={tone}
+      intent={intent}
       size="sm"
       title={`${used.toLocaleString()} / ${cap.toLocaleString()} tokens today`}
     >

@@ -186,26 +186,26 @@ export function ChatPanel(_: { onClose: () => void }) {
     }
   };
 
-  const budgetTone: "red" | "amber" | "green" =
-    budget && budget.pct_used > 90 ? "red" : budget && budget.pct_used > 70 ? "amber" : "green";
+  const budgetIntent: "live" | "warn" | "error" =
+    budget && budget.pct_used > 90 ? "error" : budget && budget.pct_used > 70 ? "warn" : "live";
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-accent-cyan" />
-          <span className="text-caption font-bold uppercase tracking-[0.18em] text-fg-muted">
+          <Sparkles size={16} className="text-accent-cyan-soft" />
+          <span className="font-sans text-caption font-semibold uppercase tracking-[0.15em] text-fg-muted">
             TREVOR Chat
           </span>
         </div>
         {budget && (
           <div className="flex items-center gap-1.5">
-            <Pill tone={budgetTone} size="sm">
-              {budget.pct_used.toFixed(0)}% used
+            <Pill intent={budgetIntent} size="sm">
+              <span className="font-mono">{budget.pct_used.toFixed(0)}%</span> used
             </Pill>
-            <span className="hidden text-micro text-fg-muted md:inline">
-              {budget.available_tokens.toLocaleString()} left
+            <span className="hidden font-sans text-micro text-fg-muted md:inline">
+              <span className="font-mono">{budget.available_tokens.toLocaleString()}</span> left
             </span>
           </div>
         )}
@@ -253,7 +253,7 @@ export function ChatPanel(_: { onClose: () => void }) {
               "flex-1 resize-none rounded-md border border-border-subtle bg-bg-elevated",
               "px-3 py-2 text-caption text-fg-primary",
               "max-h-32 min-h-[44px] font-mono",
-              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-cyan/60",
+              "focus:border-accent-cyan-soft focus:outline-none focus:shadow-glow-focus",
               "disabled:opacity-60",
             ].join(" ")}
           />

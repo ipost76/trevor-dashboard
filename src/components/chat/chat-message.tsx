@@ -14,23 +14,23 @@ export function ChatMessage({ role, content, pending }: Props) {
   return (
     <div className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        <div className="grid h-8 w-8 flex-none place-items-center rounded-md border border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan">
+        <div className="grid h-8 w-8 flex-none place-items-center rounded-md border border-accent-cyan-soft/30 bg-accent-cyan-soft/10 text-accent-cyan-soft-strong">
           <Sparkles size={14} />
         </div>
       )}
 
       <div
         className={[
-          "max-w-[85%] rounded-md border px-3 py-2 text-caption whitespace-pre-wrap break-words",
+          "max-w-[85%] rounded-md border px-3 py-2 font-sans text-caption leading-relaxed whitespace-pre-wrap break-words",
           isUser
-            ? "border-accent-cyan/40 bg-accent-cyan/10 text-fg-primary"
+            ? "border-accent-cyan-soft/40 bg-accent-cyan-soft/10 text-fg-primary"
             : "border-border-subtle bg-bg-elevated text-fg-primary",
         ].join(" ")}
       >
         {content || (pending ? <PendingDots /> : null)}
         {pending && content && (
           <span
-            className="ml-0.5 inline-block h-3 w-1.5 -mb-0.5 bg-accent-cyan animate-pulse"
+            className="ml-0.5 inline-block h-3 w-1.5 -mb-0.5 bg-accent-cyan-soft animate-pulse"
             aria-hidden
           />
         )}
