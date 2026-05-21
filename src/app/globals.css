@@ -104,6 +104,60 @@
   --animate-slide-up-spring:   slide-up-spring 480ms cubic-bezier(0.17, 0.84, 0.44, 1);
   --animate-slide-down-spring: slide-down-spring 280ms cubic-bezier(0.4, 0, 1, 1);
   --animate-scrim-fade-in:     scrim-fade-in 200ms ease-out;
+
+  /* ============================================================
+     A4 v1.1 — REFINED TOKENS (additive, 2026-05-21).
+     Sanctioned A4-revision. Existing --color-accent-* and
+     --shadow-glow-* are UNTOUCHED (108 cyan refs, etc.) — these
+     are new parallel families for the "refined dark cyber"
+     direction: ~50% sat accents, ~30-40% glow intensity.
+     Reference: src/styles/design-tokens.md.
+     ============================================================ */
+  /* Refined accents — desaturated, professional */
+  --color-accent-cyan-soft:         #5fb4cc;
+  --color-accent-cyan-soft-strong:  #7fc8e0;
+  --color-accent-cyan-soft-subtle:  rgba(95, 180, 204, 0.2);
+  --color-accent-plum:              #a067c4;
+  --color-accent-plum-strong:       #b585d4;
+  --color-accent-plum-subtle:       rgba(160, 103, 196, 0.2);
+  --color-accent-mint:              #5fcc99;
+  --color-accent-mint-strong:       #7adcad;
+  --color-accent-mint-subtle:       rgba(95, 204, 153, 0.2);
+  --color-accent-gold:              #d4a64a;
+  --color-accent-gold-strong:       #e0b865;
+  --color-accent-gold-subtle:       rgba(212, 166, 74, 0.2);
+  /* Red intentionally NOT refined — warnings must stay clear. Add strong/subtle siblings only. */
+  --color-accent-red-strong:        #ff5577;
+  --color-accent-red-subtle:        rgba(255, 51, 102, 0.2);
+
+  /* Refined borders — pair with the refined accents */
+  --color-border-cyan-soft:         rgba(95, 180, 204, 0.18);
+  --color-border-plum:              rgba(160, 103, 196, 0.18);
+  --color-border-mint:              rgba(95, 204, 153, 0.18);
+  --color-border-gold:              rgba(212, 166, 74, 0.22);
+
+  /* Subtle glow utilities — ~30-40% of original neon glow intensity.
+     Default cards use -subtle; only active/hover/focus get -active/-focus. */
+  --shadow-glow-subtle:        0 0 6px rgba(95, 180, 204, 0.15);
+  --shadow-glow-active:        0 0 10px rgba(95, 180, 204, 0.25);
+  --shadow-glow-focus:         0 0 12px rgba(95, 180, 204, 0.35);
+  /* Per-color subtle glows (for opt-in usage per refined accent) */
+  --shadow-glow-subtle-cyan:   0 0 6px rgba(95, 180, 204, 0.15);
+  --shadow-glow-subtle-plum:   0 0 6px rgba(160, 103, 196, 0.15);
+  --shadow-glow-subtle-mint:   0 0 6px rgba(95, 204, 153, 0.15);
+  --shadow-glow-subtle-gold:   0 0 6px rgba(212, 166, 74, 0.18);
+  --shadow-glow-subtle-red:    0 0 6px rgba(255, 51, 102, 0.18);
+  /* Per-color active glows (slightly stronger, still ~40% of original) */
+  --shadow-glow-active-cyan:   0 0 10px rgba(95, 180, 204, 0.25);
+  --shadow-glow-active-plum:   0 0 10px rgba(160, 103, 196, 0.25);
+  --shadow-glow-active-mint:   0 0 10px rgba(95, 204, 153, 0.25);
+  --shadow-glow-active-gold:   0 0 10px rgba(212, 166, 74, 0.28);
+  --shadow-glow-active-red:    0 0 10px rgba(255, 51, 102, 0.28);
+
+  /* Geist Sans — loaded via next/font in layout.tsx (Phase 2).
+     Wired through here so `font-sans` works as a Tailwind utility.
+     Mono stays the body default — sans is opt-in for UI labels/prose. */
+  --font-sans: var(--font-geist-sans), 'Geist', 'Inter', system-ui, sans-serif;
 }
 
 :root {
@@ -365,6 +419,57 @@ body::after {
   .pulse-live {
     animation: pulseLive 2s ease-in-out infinite;
   }
+
+  /* A4 v1.1 — Refined card utility classes (additive, opt-in).
+     Composable with the <Card> primitive's existing API. Use these as
+     `<div className="card-base">` for plain markup that doesn't use Card.
+     Reference: src/styles/design-tokens.md › Cards. */
+  .card-base {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-cyan-soft);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    transition:
+      box-shadow var(--transition-duration-fast),
+      border-color var(--transition-duration-fast);
+  }
+  @media (min-width: 768px) {
+    .card-base { border-radius: var(--radius-lg); }
+  }
+  .card-elevated {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-cyan-soft);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card), var(--shadow-glow-subtle);
+    transition:
+      box-shadow var(--transition-duration-fast),
+      border-color var(--transition-duration-fast);
+  }
+  @media (min-width: 768px) {
+    .card-elevated { border-radius: var(--radius-lg); }
+  }
+  .card-elevated:hover,
+  .card-elevated:focus-within {
+    box-shadow: var(--shadow-card), var(--shadow-glow-active);
+  }
+  .card-active {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-accent-cyan-soft);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card), var(--shadow-glow-active);
+  }
+  @media (min-width: 768px) {
+    .card-active { border-radius: var(--radius-lg); }
+  }
+  .card-warn {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-accent-red-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card), var(--shadow-glow-subtle-red);
+  }
+  @media (min-width: 768px) {
+    .card-warn { border-radius: var(--radius-lg); }
+  }
 }
 
 @keyframes shake {
@@ -518,6 +623,16 @@ body::after {
 .text-body    { font-size: 0.875rem; line-height: 1.25rem;  font-weight: 400; }
 .text-caption { font-size: 0.75rem;  line-height: 1rem;     font-weight: 400; }
 .text-micro   { font-size: 0.625rem; line-height: 0.875rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* A4 v1.1 — Refined type utilities (additive, opt-in).
+   Force font-family: var(--font-sans) — independent of body's mono default.
+   Use these for UI labels, headings, and prose; keep mono for numeric data. */
+.text-label-ui   { font-family: var(--font-sans); font-size: 0.6875rem; line-height: 1rem;     font-weight: 500; letter-spacing: 0.075em; text-transform: uppercase; }
+.text-heading-ui { font-family: var(--font-sans); font-size: 1.25rem;   line-height: 1.625rem; font-weight: 600; letter-spacing: -0.005em; }
+.text-h1-ui      { font-family: var(--font-sans); font-size: 1.5rem;    line-height: 2rem;     font-weight: 600; letter-spacing: -0.01em; }
+.text-h2-ui      { font-family: var(--font-sans); font-size: 1.125rem;  line-height: 1.5rem;   font-weight: 600; letter-spacing: -0.005em; }
+.text-prose-ui   { font-family: var(--font-sans); font-size: 0.9375rem; line-height: 1.5rem;   font-weight: 400; }
+.text-caption-ui { font-family: var(--font-sans); font-size: 0.75rem;   line-height: 1.125rem; font-weight: 400; letter-spacing: 0.005em; }
 
 /* Motion keyframes (design system v1) */
 @keyframes pulse-cyan {
