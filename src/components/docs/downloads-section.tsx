@@ -19,6 +19,7 @@ import {
 import { CategoryTabs, UNCATEGORIZED_KEY, type DocsCategory } from "./category-tabs";
 import { MoveToSheet } from "./move-to-sheet";
 import { CategorySettingsSheet } from "./category-settings-sheet";
+import { DownloadFormatSheet } from "./download-format-sheet";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -250,6 +251,12 @@ export function DownloadsSection() {
   );
   // Settings (category management) sheet visibility — Wave B2.
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  // Filename currently targeted by the Download-format sheet (.md vs PDF
+  // picker). `null` = sheet closed. The Download button on a file card now
+  // opens this sheet instead of firing a direct .md download.
+  const [downloadSheetFile, setDownloadSheetFile] = React.useState<
+    string | null
+  >(null);
   // Category folders (Wave B1). `null` = the categories fetch has not resolved
   // yet; `[]` = resolved empty / endpoint unavailable → a lone Uncategorized
   // tab. `activeCategory` holds a category id or UNCATEGORIZED_KEY; it stays
@@ -362,13 +369,11 @@ export function DownloadsSection() {
     ? "Uncategorized"
     : (categories?.find((c) => c.id === activeKey)?.name ?? activeKey);
 
+  // Opens the DownloadFormatSheet — the sheet hosts both the .md and PDF
+  // download triggers. (Pre-Phase 2 this was a direct-link click; the sheet
+  // now mediates so users can pick a format on every tap.)
   const handleDownload = (filename: string) => {
-    const link = document.createElement("a");
-    link.href = `/api/intel/downloads/${encodeURIComponent(filename)}`;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    setDownloadSheetFile(filename);
   };
 
   const handleMove = async (
@@ -541,6 +546,16 @@ export function DownloadsSection() {
           ))}
         </ul>
       )}
+
+      {/* Download-format sheet — opens when the Download button on any card
+          is tapped (Phase 2 — PDF download wave). Hosts the .md direct-link
+          flow and the on-demand PDF conversion. One shared instance, scoped
+          to whichever file's Download was tapped. */}
+      <DownloadFormatSheet
+        open={downloadSheetFile !== null}
+        onClose={() => setDownloadSheetFile(null)}
+        filename={downloadSheetFile}
+      />
 
       {/* Move-to sheet — one shared instance; opens for whichever file's MOVE
           button was tapped (Wave B2). Categories list is the same one the
