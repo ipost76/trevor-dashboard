@@ -6,7 +6,6 @@ Schema notes (Phase 0 audit findings):
 - No `signals` table -> use trade_insights.
 - No `direction` column -> use trade_insights.signal_type (LONG/SHORT).
 - trade_insights.confidence is 0-1 scale -> multiply by 100 for display.
-- No LIFETIME_XP key in auto_config -> use xp_ledger.total_after (latest row).
 
 JSON output:
 {
@@ -14,7 +13,6 @@ JSON output:
   "avg_confidence": 55.1,        # past 24h, displayed as 0-100
   "long_pct": 38.5,              # % LONG of past-24h
   "short_pct": 61.5,             # % SHORT of past-24h
-  "lifetime_xp": 214,
   "data_available": true
 }
 """
@@ -34,7 +32,6 @@ def main() -> None:
         "avg_confidence": 0.0,
         "long_pct": 0.0,
         "short_pct": 0.0,
-        "lifetime_xp": 0,
         "data_available": False,
     }
     try:
@@ -59,17 +56,11 @@ def main() -> None:
             # confidence stored 0-1; display as 0-100
             avg_conf_display = float(avg_conf_raw) * 100.0
 
-            xp_row = conn.execute(
-                "SELECT total_after FROM xp_ledger ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            xp = int(xp_row[0]) if xp_row and xp_row[0] is not None else 0
-
         out.update({
             "today_signals": int(total),
             "avg_confidence": round(avg_conf_display, 1),
             "long_pct": round(long_pct, 1),
             "short_pct": round(short_pct, 1),
-            "lifetime_xp": xp,
             "data_available": True,
         })
         print(json.dumps(out))

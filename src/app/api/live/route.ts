@@ -23,8 +23,6 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     latencyMs: 0,
     signals: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 },
-    xp: 0,
-    rank: "Apprentice",
     recentSignals: [] as Array<{ id?: number; ticker: string; signal_type?: string; direction: string; confidence: number; outcome: string | null; entry_price?: number | null; target_price?: number | null; stop_price?: number | null; timeframe?: string; timestamp: string }>,
     activeScalps: [] as Array<{ ticker: string; direction: string; confidence: number; timestamp: string; entry_price?: number | null; leverage?: number; stop_price?: number | null; target_price?: number | null }>,
     watchlist: [] as Array<{ ticker: string; track: string; type: string }>,
@@ -41,20 +39,6 @@ export async function GET() {
 import sqlite3, json
 conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
 result = {}
-
-# XP display cutoff — lifetime XP preserved in xp_ledger, only display filtered.
-# Future promotion/milestone logic MUST read lifetime XP, not this filtered value.
-try:
-    _xp_cutoff = None
-    try:
-        _xc = conn.execute("SELECT reset_at_unix FROM capital_resets WHERE reset_type='xp' ORDER BY reset_at_unix DESC LIMIT 1").fetchone()
-        if _xc: _xp_cutoff = int(_xc[0])
-    except: pass
-    if _xp_cutoff:
-        result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger WHERE CAST(strftime('%s', created_at) AS INTEGER) >= ?", (_xp_cutoff,)).fetchone()[0])
-    else:
-        result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0])
-except: result["xp"] = 0
 
 # Trade insights (signals proxy)
 try:
@@ -118,7 +102,6 @@ print(json.dumps(result))
       ).trim();
       const db = JSON.parse(pyResult);
 
-      data.xp = db.xp || 0;
       data.signals.total = db.total || 0;
       data.signals.wins = db.outcomes?.wins || 0;
       data.signals.losses = db.outcomes?.losses || 0;
@@ -128,16 +111,6 @@ print(json.dumps(result))
       data.activeScalps = db.active || [];
       data.watchlist = db.watchlist || [];
       data.trainingStats = { trades: db.training?.trades || 0, observations: db.training?.observations || 0, sentiment: db.training?.sentiment || 0, vectors: 0 };
-
-      // Derive rank (matches memory.py RANK_THRESHOLDS)
-      if (data.xp >= 5000) data.rank = "Head of Alpha";
-      else if (data.xp >= 3000) data.rank = "Portfolio Mgr";
-      else if (data.xp >= 1500) data.rank = "Risk Officer";
-      else if (data.xp >= 800) data.rank = "Lead Strategist";
-      else if (data.xp >= 400) data.rank = "Senior Analyst";
-      else if (data.xp >= 150) data.rank = "Desk Analyst";
-      else if (data.xp >= 50) data.rank = "Junior Analyst";
-      else data.rank = "Intern Quant";
     } catch { /* DB failed — graceful */ }
 
     // Log tail

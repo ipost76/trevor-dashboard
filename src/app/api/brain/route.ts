@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const scope = searchParams.get("scope") || "xp";
+  const scope = searchParams.get("scope") || "brain";
 
   try {
     // Rule 26 — scope crosses to Python as a spawnSync argv element via runPython(), never a shell string.
@@ -13,9 +13,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     const errMsg = String(err);
-    if (scope === "xp") {
-      return NextResponse.json({ currentXP: 0, currentRank: "Unknown", totalXP: 0, history: [], ranks: [], error: errMsg });
-    }
     if (scope === "brain") {
       return NextResponse.json({ files: {}, error: errMsg });
     }

@@ -11,12 +11,6 @@ result = {}
 try:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
 
-    # XP
-    try:
-        result["xp"] = int(conn.execute("SELECT COALESCE(SUM(amount),0) FROM xp_ledger").fetchone()[0] or 0)
-    except Exception:
-        result["xp"] = 0
-
     # Trade insights count
     # Aggressive-mode exclusion: NULL-safe filter excludes aggressive-tagged signals from
     # quality metrics (see !aggressive stats for tagged-only breakdown).

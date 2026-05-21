@@ -3,7 +3,7 @@ import * as React from "react";
 import { LogOut, Sun, Moon, KeyRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useRouter, usePathname } from "next/navigation";
-import { KillswitchPill, Pill } from "@/components/ui";
+import { KillswitchPill } from "@/components/ui";
 import PriceStrip from "@/components/PriceStrip";
 import { useScrollDirection } from "@/hooks/useScrollDirection";
 import { cn } from "@/lib/utils";
@@ -12,8 +12,6 @@ import { ChangePasswordModal } from "./change-password-modal";
 interface StatusData {
   ok: boolean;
   trevor: { running: boolean; pid: number };
-  xp: number;
-  rank: string;
 }
 
 /**
@@ -22,7 +20,7 @@ interface StatusData {
  *
  * Composes: LivePulse (cyan/red — derived from /api/status trevor.running) +
  * clock + PriceStrip (row 1 desktop / row 2 mobile) + KillswitchPill (visible
- * only when on) + XP badge + theme toggle (next-themes) + logout.
+ * only when on) + theme toggle (next-themes) + logout.
  *
  * Mobile: collapses on scroll-down, restores on scroll-up.
  * Desktop: always visible.
@@ -170,16 +168,6 @@ export function Header() {
 
         {/* Killswitch pill — KillswitchPill renders nothing when killswitch is OFF */}
         <KillswitchPill />
-
-        {/* XP badge — refined cyan-soft (B2 className override; tone="cyan" kept for compat) */}
-        <Pill
-          tone="cyan"
-          size="sm"
-          title={status?.rank ?? "—"}
-          className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
-        >
-          <span className="font-mono">{(status?.xp ?? 0).toLocaleString()}</span>⚡
-        </Pill>
 
         {/* Theme toggle (next-themes) */}
         <button

@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Wifi, WifiOff, KeyRound, LogOut, Zap, Search, Moon, Sun } from "lucide-react";
+import { Wifi, WifiOff, KeyRound, LogOut, Search, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeFetch } from "@/lib/fetch";
 import { ChangePasswordModal } from "@/components/change-password-modal";
 import { KillswitchPill } from "@/components/KillswitchPill";
 
-type StatusData = { ok: boolean; trevor: { running: boolean; pid: number }; xp: number; rank: string };
+type StatusData = { ok: boolean; trevor: { running: boolean; pid: number } };
 
 export function LegacyHeader() {
   const [status, setStatus] = useState<StatusData | null>(null);
@@ -90,15 +90,8 @@ export function LegacyHeader() {
           <span className="text-[10px] text-muted-foreground font-mono">{time}</span>
         </div>
 
-        {/* Right: XP + Controls */}
+        {/* Right: Controls */}
         <div className="flex items-center gap-2 md:gap-3">
-          {status && (
-            <div className="flex items-center gap-1 md:gap-1.5 rounded bg-[rgba(0,240,255,0.06)] border border-[rgba(0,240,255,0.12)] px-1.5 md:px-2 py-0.5">
-              <Zap className="h-2.5 w-2.5 text-[var(--neon-cyan)]" />
-              <span className="text-[10px] font-bold text-[var(--neon-cyan)]">{status.xp}</span>
-              <span className="hidden md:inline text-[9px] text-muted-foreground">{status.rank}</span>
-            </div>
-          )}
           <div className="hidden md:block h-3 w-px bg-[var(--border)]" />
           <button
             onClick={() => setShowChangePassword(true)}

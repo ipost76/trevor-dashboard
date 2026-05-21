@@ -58,14 +58,14 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
-- **Control / Admin** — `killswitch`, `kill-switch`, `admin/{current-state,reset-capital,reset-history,reset-pnl-stats,reset-xp}`, `feature-flags`, `commits`, `auth`, `health`.
+- **Control / Admin** — `killswitch`, `kill-switch`, `admin/{current-state,reset-capital,reset-history,reset-pnl-stats}`, `feature-flags`, `commits`, `auth`, `health`.
 
 Conventions:
 - Handlers call `runPython()`, parse its stdout as JSON, and return that. Live-data routes set `export const dynamic = "force-dynamic"` to bypass caching; several wrap the call in try/catch and return a fail-safe JSON shape instead of throwing.
 - About 30 of the 70 accept `POST` (writes/actions); the rest are GET-only reads.
 - `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
-- `admin/*` routes are destructive resets (capital / P&L stats / XP / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
-- High-traffic reads: `live` (full dashboard payload), `status` (service state + XP + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
+- `admin/*` routes are destructive resets (capital / P&L stats / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
+- High-traffic reads: `live` (full dashboard payload), `status` (service state + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
 - Dynamic segments: `intel/journal/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`, `docs/categories/[id]`, `docs/downloads/[filename]/move`.
 
 ---
