@@ -51,16 +51,19 @@ export function CategoryTabs({
         label: c.name,
         badge: counts[c.id] ?? 0,
       }));
-    // Uncategorized is always FIRST (2026-05-20) — newly-delivered files land
-    // here, so it is the default landing tab for the docs page. It is not an
-    // API category, it is the bucket for files with category_id === null.
+    // Uncategorized is always LAST (2026-05-22, supersedes the 2026-05-20
+    // first-tab preference): Ghost wants the curated API categories to lead
+    // and Uncategorized to act as the system-bucket terminator. Uncategorized
+    // is not an API category — it is the bucket for files with
+    // category_id === null — so it has no sort_order; the locked position is
+    // enforced here and in category-settings-sheet.tsx.
     return [
+      ...categoryItems,
       {
         key: UNCATEGORIZED_KEY,
         label: "Uncategorized",
         badge: counts[UNCATEGORIZED_KEY] ?? 0,
       },
-      ...categoryItems,
     ];
   }, [categories, counts]);
 
