@@ -17,7 +17,7 @@ export interface DocsCategory {
 export const UNCATEGORIZED_KEY = "uncategorized";
 
 interface CategoryTabsProps {
-  /** Categories from the API — rendered in sort_order, before Uncategorized. */
+  /** Categories from the API — rendered in sort_order, after Uncategorized. */
   categories: ReadonlyArray<DocsCategory>;
   /** File counts keyed by category id, plus UNCATEGORIZED_KEY. Missing → 0. */
   counts: Readonly<Record<string, number>>;
@@ -51,19 +51,18 @@ export function CategoryTabs({
         label: c.name,
         badge: counts[c.id] ?? 0,
       }));
-    // Uncategorized is always LAST (2026-05-22, supersedes the 2026-05-20
-    // first-tab preference): Ghost wants the curated API categories to lead
-    // and Uncategorized to act as the system-bucket terminator. Uncategorized
-    // is not an API category — it is the bucket for files with
-    // category_id === null — so it has no sort_order; the locked position is
-    // enforced here and in category-settings-sheet.tsx.
+    // Uncategorized is always FIRST (2026-05-23, supersedes the 2026-05-22
+    // last-tab preference): Ghost wants the system bucket to lead the strip
+    // so newly-arriving files are immediately visible. Uncategorized is not
+    // an API category — it is the bucket for files with category_id === null
+    // — so it has no sort_order; the locked position is enforced here.
     return [
-      ...categoryItems,
       {
         key: UNCATEGORIZED_KEY,
         label: "Uncategorized",
         badge: counts[UNCATEGORIZED_KEY] ?? 0,
       },
+      ...categoryItems,
     ];
   }, [categories, counts]);
 
