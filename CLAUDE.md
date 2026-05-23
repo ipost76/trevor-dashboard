@@ -49,7 +49,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 ## API Routes
 
-70 `route.ts` files under `src/app/api/`, grouped by zone (Wave E2 deleted 7 manual-scalp routes):
+67 `route.ts` files under `src/app/api/`, grouped by zone (Wave E2 deleted 7 manual-scalp routes; Wave RM-AH-E2 deleted 3 duplicate/dead routes):
 
 - **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
@@ -58,7 +58,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
-- **Control / Admin** — `killswitch`, `kill-switch`, `admin/{current-state,reset-capital,reset-history,reset-pnl-stats}`, `feature-flags`, `commits`, `auth`, `health`.
+- **Control / Admin** — `killswitch`, `admin/{current-state,reset-capital,reset-pnl-stats}`, `feature-flags`, `commits`, `auth`, `health`.
 
 Conventions:
 - Handlers call `runPython()`, parse its stdout as JSON, and return that. Live-data routes set `export const dynamic = "force-dynamic"` to bypass caching; several wrap the call in try/catch and return a fail-safe JSON shape instead of throwing.
@@ -179,14 +179,12 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ## Known Issues
 
 - `feature-flags.ts:readFlag()` is a stub that always returns `false`; the real flag source is `/api/feature-flags`. Components must not call `readFlag()` directly.
-- Duplicate API routes `api/killswitch/` and `api/kill-switch/` both exist — `killswitch/` is live (it calls `set_killswitch.py`); `kill-switch/` looks legacy. Consolidate when next touched.
-- Two `aggressive` endpoints exist — `api/aggressive/` and `api/memory/aggressive/`; only `memory/aggressive/` calls `set_aggressive.py` (same split pattern as the killswitch routes).
+- `src/app/api/system-health/route.ts:81` reads the flat file `/home/trevor/trevor/.kill_switch` for its killswitch readout — pre-existing dead read since Wave RM-AH-E2 deleted the legacy `/api/kill-switch` (the only writer). Silently always returns `active: false` (file doesn't exist). Misleading but harmless; real killswitch state lives in `auto_config.EMERGENCY_KILLSWITCH`. Switch this check to `query_killswitch_state.py` when next touched.
 - `next.config.ts` legacy redirects target retired zone names (`/trading`, `/intelligence`, `/command`) and only resolve because `middleware.ts` re-chains them — editing either file alone can silently break legacy links.
 - `verify_deploy.sh` still probes `ghost-qa.service` (retired) and the pre-rename `/scalp?tab=*` paths — the service check is a pre-existing FAIL; the page checks pass only because the 308 redirect is accepted.
 - `verify_deploy.sh` briefly force-mutates two `auto_config` rows (`HUB_BRAIN_EDIT_ENABLED`, `ANTHROPIC_API_DAILY_TOKENS_USED`) during its gate tests and restores them — don't run it alongside a real config edit.
 - `middleware.ts` hardcodes the VM IP `34.28.231.36` for the direct-IP→domain redirect; a VM IP change silently breaks it.
 - `/chat` injects a page-scoped `<style>` block overriding the global theme (Termius-blue) — a deliberate zone-local exception to the design tokens.
-- `api/admin/reset-history/route.ts` exists but exposes no `POST` handler — incomplete or a stub.
 - `change-password-modal.tsx` is present but historically buggy (field-name mismatch) — verify before relying on it.
 - `tsconfig.tsbuildinfo` and `.env.local` are perpetually modified in `git status`; the repo root also carries stale `*.bak` files — never stage any of them in a selective commit.
 
@@ -208,6 +206,17 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ---
 
 ## Hub Wave Changelog (additive — most recent at top)
+
+### 2026-05-23 — Hub route dedup (RM-AH-E2)
+- **Removed 3 duplicate / dead API routes** — confirmed zero `src/` consumers via grep before deletion. Net route count 70 → 67.
+- **Killswitch dedup:** deleted `src/app/api/kill-switch/route.ts` — legacy flat-file route touching `/home/trevor/trevor/.kill_switch` directly, bypassing `auto_config.EMERGENCY_KILLSWITCH`. Would have created a divergent killswitch state if anything had called it; nothing did. Canonical `/api/killswitch` (5s GET cache, `set_killswitch.py` via `runPython`, in-process bot cache bust + `[KILLSWITCH-ON/OFF]` audit sentinels) untouched — still served by `ui/killswitch-pill.tsx` and `memory/killswitch-control-card.tsx`.
+- **Aggressive dedup:** deleted `src/app/api/aggressive/route.ts` — legacy `execSync` route writing to `hub_commands` table. Canonical `/api/memory/aggressive` (G2 single-write surface, `set_aggressive.py` exit-code → HTTP 0/1/3 → 200/400/423 mapping) untouched — still served by `memory/aggressive-section.tsx`. `/api/memory/autotrader-toggle/route.ts:19` comment that references "Mirrors `/api/memory/aggressive` contract" still accurate.
+- **reset-history disposition: deleted.** Audit finding revised: the route was NOT incomplete — it was a fully-functional GET that read the 50 most recent rows from `capital_resets` via `query_admin_reset.py reset_history()`. The "missing POST" framing in the 2026-05-19 audit was wrong; "resetting the audit log" isn't a meaningful operation. Route had zero frontend consumers (no component fetched it) — dead read, not a stub. Sibling admin routes (`reset-capital` / `reset-pnl-stats`) are POST-only destructive (require `confirmText === "RESET"`) — `reset-history` was a pattern outlier.
+- **Orphan Python helper flagged (NOT deleted):** `query_aggressive_mode.py` (Hub repo root) was the legacy `/api/aggressive` backing — now dead code. Stays on disk per the 2026-05-20 precedent (`query_similar_trades.py` left orphaned because `monitor_center/11_hub_api.py` `TRACKED_HELPERS` would CRIT on missing — needs paired bot-side wave to clean up). `query_admin_reset.py reset_history()` function similarly orphaned but file stays — other functions still used by `reset-capital` / `reset-pnl-stats` / `admin/current-state`. Canonical `query_killswitch_state.py` + `set_killswitch.py` + `query_aggressive.py` + `set_aggressive.py` still in active use.
+- **Pre-existing dead read flagged in Known Issues:** `src/app/api/system-health/route.ts:81` still reads `/home/trevor/trevor/.kill_switch` for its readout. Now that nothing writes to that path, it silently always returns `active: false`. Misleading but harmless (Hub-Only Control Doctrine: real killswitch is `auto_config.EMERGENCY_KILLSWITCH`); out of scope to fix this wave. Switch the check to `query_killswitch_state.py` when next touched.
+- **Build + verify:** `next build` clean (route list confirms `/api/killswitch`, `/api/memory/aggressive`, `/api/admin/reset-capital`, `/api/admin/reset-pnl-stats` present; `/api/kill-switch`, `/api/aggressive`, `/api/admin/reset-history` absent from output). `npx tsc --noEmit` exit 0. Final grep across `src/` + `middleware.ts` + `next.config.ts` for `kill-switch` / `api/aggressive` / `reset-history` → 0 matches.
+- **Service restart required** post-merge on `master`: `sudo systemctl restart trevor-dashboard.service`. Deferred to Ghost approval — never restarted from inside a worktree.
+- **Hub `master` commit scope:** `src/app/api/kill-switch/route.ts` (deleted) · `src/app/api/aggressive/route.ts` (deleted) · `src/app/api/admin/reset-history/route.ts` (deleted) · `CLAUDE.md` (route count, Control/Admin list, Known Issues, this entry). Bot side untouched.
 
 ### 2026-05-22 — Docs category reorder (UP/DOWN arrows) + Uncategorized moved to LAST
 - **Phase 0 finding:** the reorder backend was fully shipped in Wave A1 (2026-05-19) — `categories.json` carries `sort_order` per row, `download_manager.reorder_categories()` exists, `PUT /api/docs/categories/reorder` accepts `{category_ids: [...]}` and persists, `category-tabs.tsx` already sorts by `sort_order`. Only the UI control was missing (Wave B2 explicitly deferred "drag-reorder intentionally NOT implemented — no DnD library installed"). Sacred 12/12 OK at entry + exit.
