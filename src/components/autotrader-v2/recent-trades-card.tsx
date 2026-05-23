@@ -38,6 +38,33 @@ function fmtHold(min: number | null | undefined): string {
   return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
 }
 
+// SQLite datetime('now') returns UTC without a Z suffix — coerce so the
+// browser parses it as UTC, not local time.
+function parseUTC(ts: string | null | undefined): Date {
+  if (!ts) return new Date(NaN);
+  let s = ts.includes("T") ? ts : ts.replace(" ", "T");
+  if (!/Z$|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
+  return new Date(s);
+}
+
+function fmtClosedAt(ts: string | null | undefined): string {
+  const d = parseUTC(ts);
+  if (!Number.isFinite(d.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  if (sameDay) return time;
+  const md = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${md} ${time}`;
+}
+
 export function RecentTradesCard() {
   const [trades, setTrades] = React.useState<ClosedTrade[] | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -116,6 +143,14 @@ export function RecentTradesCard() {
                 <span className="text-fg-muted tabular-nums">
                   {fmtHold(t.hold_duration_minutes)}
                 </span>
+                {t.closed_at && (
+                  <span
+                    className="font-mono text-fg-muted tabular-nums"
+                    title={t.closed_at}
+                  >
+                    · {fmtClosedAt(t.closed_at)}
+                  </span>
+                )}
                 {t.exit_reason && (
                   <span className="font-sans text-fg-faint">· {t.exit_reason}</span>
                 )}
