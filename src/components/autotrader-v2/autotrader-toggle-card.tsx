@@ -42,6 +42,32 @@ interface SetResponse {
 const POLL_MS = 30_000;
 const ENDPOINT = "/api/memory/autotrader-toggle";
 
+// Human-readable explanations of each audit action. Keys are matched
+// case-insensitively against `audit.action`. Verified 2026-05-23 against
+// the bot codebase:
+//   - start/pause            → set_autotrader_enabled.py (Rule 32 carve-out)
+//   - devil_advocate_enabled → devil_advocate.py (DEVIL_ADVOCATE_ENABLED env)
+//   - swarm_judgment_*       → auto_trader/judgment.py (AI_SWARM_JUDGMENT_ENABLED)
+//   - partial_thresholds_*   → auto_trader/ticker_exit_profiles.py partial_schedule
+//   - calibrator_v2_live_*   → discord_bot.py CALIBRATOR_LIVE confidence pipeline
+const TOGGLE_DESCRIPTIONS: Record<string, string> = {
+  start: "Resumes AutoTrader — new entries will execute on the next signal",
+  pause:
+    "Pauses new AutoTrader entries; open positions keep being monitored",
+  devil_advocate_enabled:
+    "Devil's Advocate critic challenges signals before execution",
+  swarm_judgment_disabled:
+    "Swarm consensus voting on signals before execution",
+  partial_thresholds_lowered:
+    "Partial-take-profit thresholds (R-multiples for exits)",
+  calibrator_v2_live_verified:
+    "Confidence calibrator v2 running in live (non-shadow) mode",
+};
+
+function describeToggle(action: string): string {
+  return TOGGLE_DESCRIPTIONS[action.toLowerCase()] ?? "Configuration toggle";
+}
+
 /**
  * AutoTrader Pause / Resume toggle (Rule 32 carve-out, 2026-05-02).
  *
@@ -252,6 +278,9 @@ export function AutoTraderToggleCard() {
                     {row.prev_value} → {row.new_value}
                   </span>
                   <span className="font-mono text-fg-muted ml-auto">{row.timestamp}</span>
+                  <span className="basis-full font-sans text-micro text-fg-muted">
+                    {describeToggle(row.action)}
+                  </span>
                   <span className="basis-full font-sans text-micro text-fg-faint">
                     {row.source}
                   </span>
