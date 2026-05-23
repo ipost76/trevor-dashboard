@@ -115,22 +115,6 @@ def reset_pnl_stats():
     }))
 
 
-def reset_history():
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            "SELECT id, reset_type, reset_at, old_value, new_value, notes "
-            "FROM capital_resets ORDER BY reset_at_unix DESC LIMIT 50"
-        ).fetchall()
-    finally:
-        conn.close()
-
-    print(json.dumps({
-        "resets": [dict(r) for r in rows],
-    }))
-
-
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "current_state"
 
@@ -140,7 +124,5 @@ if __name__ == "__main__":
         reset_capital(sys.argv[2])
     elif cmd == "reset_pnl_stats":
         reset_pnl_stats()
-    elif cmd == "reset_history":
-        reset_history()
     else:
         print(json.dumps({"error": f"Unknown command: {cmd}"}))

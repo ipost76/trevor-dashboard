@@ -77,13 +77,25 @@ try:
 except:
     result["circuit_breakers"] = []
 
-# Kill switch
-result["kill_switch"] = {"active": os.path.exists('/home/trevor/trevor/.kill_switch')}
-if result["kill_switch"]["active"]:
-    try:
-        result["kill_switch"]["reason"] = open('/home/trevor/trevor/.kill_switch').read().strip()
-    except:
-        pass
+# Kill switch — auto_config.EMERGENCY_KILLSWITCH is the canonical state
+# (Discord !killswitch and Hub POST /api/killswitch both write here).
+# Fail-open: any DB error reports inactive so a flaky read never falsely
+# signals an emergency stop to the UI.
+try:
+    ks_conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+    ks_rows = ks_conn.execute(
+        "SELECT key, value FROM auto_config WHERE key LIKE 'EMERGENCY_KILLSWITCH%'"
+    ).fetchall()
+    ks_conn.close()
+    ks_d = dict(ks_rows)
+    ks_active = str(ks_d.get("EMERGENCY_KILLSWITCH", "false")).lower() == "true"
+    result["kill_switch"] = {"active": ks_active}
+    if ks_active:
+        ks_reason = ks_d.get("EMERGENCY_KILLSWITCH_LAST_REASON", "")
+        if ks_reason:
+            result["kill_switch"]["reason"] = ks_reason
+except Exception:
+    result["kill_switch"] = {"active": False}
 
 print(json.dumps(result, default=str))
 `;
