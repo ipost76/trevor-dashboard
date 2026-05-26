@@ -9,6 +9,6 @@ export async function GET() {
     const stdout = runPython("query_shadow_status.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (err) {
-    return NextResponse.json({ shadow: {}, optuna_ab: {}, error: String(err) }, { status: 200 });
+    return NextResponse.json({ shadow: {}, error: String(err) }, { status: 200 });
   }
 }

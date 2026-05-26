@@ -54,7 +54,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`. (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`.
 - **Manual / Trades** — `signals/unread-count`, `trades` + `trades/{close,close-status,command-status,edit-entry,flip}`, `watchlist`, `reminders`, `dca`. (Wave E2 deleted the `signals` parent route, `live-board` + `live-board/{enter,ticker}`, and `trades/{add-position,partial-close,tranches}` with the manual-scalp helper teardown — `signals/unread-count` kept, it backs the nav unread badges.)
-- **Intel** — `intel/{lessons,journal,shadow,downloads}`, `journal`, `optuna`, `quality`, `training`. (Wave 2026-05-20 deleted `intel/similar/[source]/[id]` and `intel/calibration`; Notes is client-side and has no API.)
+- **Intel** — `intel/{lessons,journal,shadow,downloads}`, `journal`, `quality`, `training`. (Wave 2026-05-20 deleted `intel/similar/[source]/[id]` and `intel/calibration`; Wave 2026-05-26 deleted `intel/optuna` with the Optuna A/B removal; Notes is client-side and has no API.)
 - **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
 - **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
@@ -88,7 +88,6 @@ Conventions:
 | `trades/` | 4 | `live-board`, `trade-form`, `history-table`, `journal-tab` |
 | `charts/` | 2 | `StyledLineChart`, `StyledBarChart` (Recharts wrappers) |
 | `control/` | 2 | `brain-editor`, `chroma-browser` |
-| `intelligence/` | 1 | `OptunaShadowCard` (legacy) |
 
 - Top-level: `app-shell.tsx` (+ `-nav`, `-legacy`), `header.tsx` (+ `-legacy`), `sidebar.tsx`, `status-bar.tsx`, `theme-provider.tsx`, `KillswitchPill.tsx`, `PriceStrip.tsx`, `change-password-modal.tsx`, `TabContainer.tsx`, `typing-dots.tsx`, `Skeleton.tsx`.
 - `layout.tsx` mounts `<ThemeProvider><AppShell>`; the `*-legacy` shells are pre-redesign chrome kept for `HUB_REDESIGN_NAV` rollback.
