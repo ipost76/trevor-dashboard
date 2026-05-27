@@ -8,6 +8,8 @@ import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
 import { AutoTraderToggleCard } from "./autotrader-toggle-card";
 import { ExitControlsCard } from "./exit-controls-card";
+import { PartialsToggleCard } from "./partials-toggle-card";
+import { PartialShadowCard } from "./partial-shadow-card";
 
 export function ScalperViewV2() {
   return (
@@ -20,6 +22,8 @@ export function ScalperViewV2() {
       <WatchlistGrid />
       <AutoTraderToggleCard />
       <ExitControlsCard />
+      <PartialsToggleCard />
+      <PartialShadowCard />
     </div>
   );
 }

@@ -68,6 +68,11 @@ const TOGGLE_DESCRIPTIONS: Record<string, string> = {
     "Layer 6 momentum EXIT requires N consecutive sub-threshold cycles",
   confirm_cycles_off:
     "Layer 6 momentum EXIT fires on first sub-threshold cycle (pre-B3)",
+  // B4 (2026-05-27): LIVE_PARTIALS_ENABLED gate. Same audit table.
+  live_partials_on:
+    "Layer 5 partial exits execute live (reduce-only IOC at 0.75R / 1.5R)",
+  live_partials_off:
+    "Layer 5 partial exits shadow-only; eval still writes partial_trigger_shadow",
 };
 
 function describeToggle(action: string): string {
