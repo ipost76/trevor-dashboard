@@ -5,3 +5,14 @@ data/
 __pycache__/
 *.pyc
 *.backup*
+# Secrets — never commit. Held on disk at 600 perms; loaded by server.js + /api/auth.
+.env
+.env.local
+.env.*.bak*
+.env.bak*
+# Local SQLite copies that should never be pushed
+trevor.db
+trevor.db-wal
+trevor.db-shm
+# tsconfig build cache (drifts on every build)
+tsconfig.tsbuildinfo
