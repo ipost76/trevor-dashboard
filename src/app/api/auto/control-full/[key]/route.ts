@@ -12,6 +12,9 @@ import { PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
 //   EMERGENCY_KILLSWITCH, LIVE_PARTIALS_ENABLED, CONFIRM_CYCLES_PROMOTED)
 //   are rejected with 400 and a pointer to the correct endpoint.
 //
+//   `reason` is optional; when present it lands in change_log.notes via
+//   audit_config_write. D2 Tier 1 toggles (A1 §9) require it client-side.
+//
 // Responses:
 //   200 — flipped or idempotent no-op (JSON includes prev/new values)
 //   400 — bad input (value not bool, key not bool-shaped, dedicated, immutable)
@@ -36,7 +39,7 @@ export async function PATCH(
     );
   }
 
-  let body: { value?: unknown; author?: unknown } = {};
+  let body: { value?: unknown; author?: unknown; reason?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -51,9 +54,13 @@ export async function PATCH(
     );
   }
   const author = String(body.author ?? "ghost").trim() || "ghost";
+  const reason = String(body.reason ?? "").trim();
 
   const scriptPath = join(DASHBOARD_DIR, "write_control_value.py");
-  const result = spawnSync(PYTHON_PATH, [scriptPath, key, value, author], {
+  const argv = reason
+    ? [scriptPath, key, value, author, reason]
+    : [scriptPath, key, value, author];
+  const result = spawnSync(PYTHON_PATH, argv, {
     encoding: "utf-8",
     timeout: 10_000,
     cwd: TREVOR_DIR,
