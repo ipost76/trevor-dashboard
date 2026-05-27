@@ -39,6 +39,10 @@ import sys
 
 DB_PATH = "/home/trevor/trevor/trevor.db"
 
+# B1b: bot dir on sys.path so we can import audit_logger (lives at
+# /home/trevor/trevor/audit_logger.py). Mirrors set_killswitch.py:38.
+sys.path.insert(0, "/home/trevor/trevor")
+
 
 def _emit(payload: dict, code: int = 0) -> None:
     print(json.dumps(payload))
@@ -121,14 +125,34 @@ def main() -> None:
             )
 
             action = "confirm_cycles_on" if requested else "confirm_cycles_off"
+            # B1b: per-table INSERT extended with actor/source_type/session_id
+            # envelope columns added by scripts/migration_b1b.py.
             audit_cur = conn.execute(
                 "INSERT INTO autotrader_state_audit "
-                "(action, prev_value, new_value, source, timestamp) "
-                "VALUES (?, ?, ?, ?, datetime('now'))",
-                (action, prev_str, requested_str, f"hub:{author}"),
+                "(action, prev_value, new_value, source, timestamp, "
+                " actor, source_type, session_id) "
+                "VALUES (?, ?, ?, ?, datetime('now'), 'ghost_hub', 'UI', ?)",
+                (action, prev_str, requested_str, f"hub:{author}", f"hub:{author}"),
             )
             audit_id = audit_cur.lastrowid
             conn.commit()
+
+        # B1b: change_log cross-index row. Fail-open.
+        try:
+            from audit_logger import audit_log
+            audit_log(
+                key="CONFIRM_CYCLES_PROMOTED",
+                old_value=prev_str,
+                new_value=requested_str,
+                actor="ghost_hub",
+                source_type="UI",
+                table_name="autotrader_state_audit",
+                row_id=audit_id,
+                session_id=f"hub:{author}",
+                notes=action,
+            )
+        except Exception:
+            pass
 
         _emit(
             {

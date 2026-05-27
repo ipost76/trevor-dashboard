@@ -88,6 +88,11 @@ def main() -> None:
             )
 
         new_state = _ks_set(target, author=author, reason=reason)
+
+        # B1b: auto_trader.killswitch.set_killswitch already writes its own
+        # change_log row (with author parsed for hub:* prefix). Nothing more
+        # to do here — the audit hook fires inside the delegate call above.
+
         _emit(
             {
                 "ok": True,

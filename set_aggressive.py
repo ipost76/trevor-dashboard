@@ -34,6 +34,9 @@ SENTINEL_TRADE_ID = "__GLOBAL_AGGRESSIVE__"
 DEFAULT_DELTA = -5
 DEFAULT_HOURS = 48.0
 
+# B1b: bot dir on sys.path so we can import audit_logger.
+sys.path.insert(0, "/home/trevor/trevor")
+
 
 def _emit(payload: dict, code: int = 0) -> None:
     print(json.dumps(payload))
@@ -114,11 +117,14 @@ def main() -> None:
             cmd_id = cmd_cur.lastrowid
 
             event_type = "enable" if requested else "disable"
+            # B1b: per-table INSERT extended with source_type + session_id
+            # envelope columns added by scripts/migration_b1b.py. The
+            # existing `actor` column already holds the Hub author.
             audit_cur = conn.execute(
                 "INSERT INTO aggressive_mode_history "
                 "(event_type, threshold_delta, duration_hours, actor, "
-                " reason, signals_fired, timestamp) "
-                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+                " reason, signals_fired, timestamp, source_type, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 'UI', ?)",
                 (
                     event_type,
                     DEFAULT_DELTA if requested else 0,
@@ -126,11 +132,30 @@ def main() -> None:
                     author,
                     f"g2_hub_toggle:{author}",
                     None,
+                    f"hub:{author}",
                 ),
             )
             audit_id = audit_cur.lastrowid
 
             conn.commit()
+
+        # B1b: change_log cross-index row. Fail-open. Outside the txn so
+        # the audit-side write can't roll back the queued command.
+        try:
+            from audit_logger import audit_log
+            audit_log(
+                key="aggressive_mode",
+                old_value=str(prev).lower(),
+                new_value=str(requested).lower(),
+                actor="ghost_hub",
+                source_type="UI",
+                table_name="aggressive_mode_history",
+                row_id=audit_id,
+                session_id=f"hub:{author}",
+                notes=f"{event_type} via hub_commands#{cmd_id}",
+            )
+        except Exception:
+            pass
 
         _emit(
             {
