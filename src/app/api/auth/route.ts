@@ -59,7 +59,12 @@ export async function POST(request: NextRequest) {
       return res;
     }
 
-    if (username !== user || password !== pass) {
+    // Username compare is case-insensitive (Trevor / trevor / TREVOR all match).
+    // Password compare stays exact — that's a secret, not an identifier.
+    // Defensive: missing/non-string username from body would crash .toLowerCase().
+    const usernameNorm = (username ?? "").toString().toLowerCase();
+    const userNorm = user.toLowerCase();
+    if (usernameNorm !== userNorm || password !== pass) {
       await new Promise((r) => setTimeout(r, 500));
       return NextResponse.json(
         { ok: false, error: "Invalid credentials" },
