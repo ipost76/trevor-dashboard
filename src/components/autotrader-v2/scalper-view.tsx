@@ -7,6 +7,7 @@ import { RecentTradesCard } from "./recent-trades-card";
 import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
 import { AutoTraderToggleCard } from "./autotrader-toggle-card";
+import { ExitControlsCard } from "./exit-controls-card";
 
 export function ScalperViewV2() {
   return (
@@ -18,6 +19,7 @@ export function ScalperViewV2() {
       <ConfigCard />
       <WatchlistGrid />
       <AutoTraderToggleCard />
+      <ExitControlsCard />
     </div>
   );
 }

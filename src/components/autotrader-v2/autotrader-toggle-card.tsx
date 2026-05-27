@@ -62,6 +62,12 @@ const TOGGLE_DESCRIPTIONS: Record<string, string> = {
     "Partial-take-profit thresholds (R-multiples for exits)",
   calibrator_v2_live_verified:
     "Confidence calibrator v2 running in live (non-shadow) mode",
+  // B3 (2026-05-27): CONFIRM_CYCLES production gate. Writes land in the
+  // same autotrader_state_audit table so they surface here automatically.
+  confirm_cycles_on:
+    "Layer 6 momentum EXIT requires N consecutive sub-threshold cycles",
+  confirm_cycles_off:
+    "Layer 6 momentum EXIT fires on first sub-threshold cycle (pre-B3)",
 };
 
 function describeToggle(action: string): string {
