@@ -40,3 +40,24 @@ export type { HapticButtonProps } from "./haptic-button";
 
 export { CollapsibleSection } from "./collapsible-section";
 export type { CollapsibleSectionProps } from "./collapsible-section";
+
+export { FilterChips } from "./filter-chips";
+export type { FilterChipsProps } from "./filter-chips";
+
+export { ConfirmModal } from "./confirm-modal";
+export type { ConfirmModalProps } from "./confirm-modal";
+
+export { EditableField } from "./editable-field";
+export type { EditableFieldProps, EditableFieldType } from "./editable-field";
+
+export { ToggleSwitch } from "./toggle-switch";
+export type { ToggleSwitchProps, ToggleSensitivity } from "./toggle-switch";
+
+export { CompactShadowCard } from "./compact-shadow-card";
+export type {
+  CompactShadowCardProps,
+  CompactShadowStatus,
+} from "./compact-shadow-card";
+
+export { ActivityRow } from "./activity-row";
+export type { ActivityRowProps } from "./activity-row";

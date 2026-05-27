@@ -1,7 +1,12 @@
-import { ScalperViewV2 } from "@/components/autotrader-v2/scalper-view";
+import { AutoZoneView } from "@/components/autotrader-v2/auto-zone-view";
 
 export const dynamic = "force-dynamic";
 
-export default function AutotraderPage() {
-  return <ScalperViewV2 />;
+interface AutotraderPageProps {
+  searchParams: Promise<{ tab?: string }>;
+}
+
+export default async function AutotraderPage({ searchParams }: AutotraderPageProps) {
+  const { tab } = await searchParams;
+  return <AutoZoneView subtab={tab ?? "dashboard"} />;
 }

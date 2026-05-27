@@ -55,6 +55,14 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Auto",
     icon: Bot,
     accent: "green",
+    subTabs: [
+      { key: "dashboard", label: "Dashboard" },
+      { key: "recent", label: "Recent" },
+      { key: "config", label: "Config" },
+      { key: "control", label: "Control" },
+      { key: "activity", label: "Activity" },
+    ],
+    defaultSubTab: "dashboard",
   },
   {
     id: "stocks",
