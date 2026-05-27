@@ -2,9 +2,11 @@
 """write_control_value.py — D2 (Control Center) PATCH backend.
 
 Backs PATCH /api/auto/control-full/[key]. Argv:
-    write_control_value.py <key> <value> <author>
+    write_control_value.py <key> <value> <author> [reason]
 
 Where <value> ∈ {"true", "false"} (case-insensitive, normalized to lower).
+`reason` is optional; when present it lands in `change_log.notes` via
+`audit_config_write` (Tier 1 toggles require it client-side per A1 §9).
 
 Gate checks (in order):
     1. LIVE_EDIT_ENABLED must be 'true' → else exit 3 (HTTP 423)
@@ -67,6 +69,7 @@ def main() -> None:
     key = (sys.argv[1] or "").strip()
     raw_value = sys.argv[2] if len(sys.argv) > 2 else ""
     author = (sys.argv[3] if len(sys.argv) > 3 else "").strip() or "ghost"
+    reason = (sys.argv[4] if len(sys.argv) > 4 else "").strip()
 
     if not key:
         _emit({"ok": False, "error": "key may not be empty", "status": 400}, code=1)
@@ -147,7 +150,7 @@ def main() -> None:
                 source_type="UI",
                 session_id=f"hub:{author}",
                 prompt_id=None,
-                notes=f"D2 toggle flip",
+                notes=reason or "D2 toggle flip",
             )
         except Exception:
             pass
