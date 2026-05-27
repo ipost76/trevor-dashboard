@@ -1,0 +1,5 @@
+# CLAUDE.md is an append-only changelog ("most recent at top"). Use union merge so
+# parallel worktree branches (D1/D2/D3/D4-style waves) keep ALL their changelog
+# entries when merged sequentially into master, instead of one overwriting another.
+# Removes the need for the worktree_merge_all.sh script's --theirs fallback.
+CLAUDE.md merge=union
