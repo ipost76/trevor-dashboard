@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { NotesSection } from "./notes-section";
-import { ShadowSection } from "./shadow-section";
+import { ShadowOverview } from "./shadow-overview";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
 
@@ -21,6 +21,11 @@ import { JournalSection } from "@/components/docs/journal-section";
  * CRIT alerts on their deletion, and pruning that list requires touching
  * `/home/trevor/trevor/`, forbidden from a Hub prompt. Matches the
  * `dashboard/calibration` orphan pattern. Notes is the default tab.
+ *
+ * Wave D4 (2026-05-27): SHADOW sub-tab swapped from the long-scroll
+ * `ShadowSection` to the compact `ShadowOverview` (Active/Dormant tabs +
+ * function sub-sections + ShadowScoring hero). Old `shadow-section.tsx` and
+ * `shadow-table-card.tsx` left on disk for a separate cleanup prompt.
  */
 
 interface IntelZoneViewProps {
@@ -30,7 +35,7 @@ interface IntelZoneViewProps {
 export function IntelZoneView({ subtab }: IntelZoneViewProps) {
   switch (subtab) {
     case "shadow":
-      return <ShadowSection />;
+      return <ShadowOverview />;
     case "lessons":
       return <LessonsSection />;
     case "journal":
