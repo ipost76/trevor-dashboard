@@ -116,13 +116,22 @@ def reset_pnl_stats():
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "current_state"
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    import traceback as _tb_wrap, sys as _sys_wrap
+    try:
+        cmd = sys.argv[1] if len(sys.argv) > 1 else "current_state"
 
-    if cmd == "current_state":
-        current_state()
-    elif cmd == "reset_capital":
-        reset_capital(sys.argv[2])
-    elif cmd == "reset_pnl_stats":
-        reset_pnl_stats()
-    else:
-        print(json.dumps({"error": f"Unknown command: {cmd}"}))
+        if cmd == "current_state":
+            current_state()
+        elif cmd == "reset_capital":
+            reset_capital(sys.argv[2])
+        elif cmd == "reset_pnl_stats":
+            reset_pnl_stats()
+        else:
+            print(json.dumps({"error": f"Unknown command: {cmd}"}))
+
+    except SystemExit:
+        raise
+    except Exception:
+        _tb_wrap.print_exc(file=_sys_wrap.stderr)
+        _sys_wrap.exit(1)

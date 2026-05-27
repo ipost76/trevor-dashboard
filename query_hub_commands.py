@@ -81,17 +81,26 @@ def exit_signals(ticker: str = None, limit: int = 50):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: query_hub_commands.py submit|status|exit_signals ..."}))
-        sys.exit(1)
-    action = sys.argv[1]
-    if action == "submit":
-        submit_command(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "{}")
-    elif action == "status":
-        command_status(sys.argv[2])
-    elif action == "exit_signals":
-        ticker = sys.argv[2] if len(sys.argv) > 2 else None
-        limit = int(sys.argv[3]) if len(sys.argv) > 3 else 50
-        exit_signals(ticker, limit)
-    else:
-        print(json.dumps({"error": f"Unknown action: {action}"}))
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    import traceback as _tb_wrap, sys as _sys_wrap
+    try:
+        if len(sys.argv) < 2:
+            print(json.dumps({"error": "Usage: query_hub_commands.py submit|status|exit_signals ..."}))
+            sys.exit(1)
+        action = sys.argv[1]
+        if action == "submit":
+            submit_command(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "{}")
+        elif action == "status":
+            command_status(sys.argv[2])
+        elif action == "exit_signals":
+            ticker = sys.argv[2] if len(sys.argv) > 2 else None
+            limit = int(sys.argv[3]) if len(sys.argv) > 3 else 50
+            exit_signals(ticker, limit)
+        else:
+            print(json.dumps({"error": f"Unknown action: {action}"}))
+
+    except SystemExit:
+        raise
+    except Exception:
+        _tb_wrap.print_exc(file=_sys_wrap.stderr)
+        _sys_wrap.exit(1)

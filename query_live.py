@@ -111,6 +111,11 @@ try:
 
     conn.close()
 except Exception as e:
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    # JSON error stays for the route's normal error path; traceback also goes
+    # to stderr so Node's spawnSync surfaces it on hang post-mortems.
+    import traceback as _tb_wrap
+    _tb_wrap.print_exc(file=sys.stderr)
     result["error"] = str(e)
 
 print(json.dumps(result))

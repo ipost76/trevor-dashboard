@@ -250,4 +250,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    import traceback as _tb_wrap, sys as _sys_wrap
+    try:
+        sys.exit(main())
+
+    except SystemExit:
+        raise
+    except Exception:
+        _tb_wrap.print_exc(file=_sys_wrap.stderr)
+        _sys_wrap.exit(1)

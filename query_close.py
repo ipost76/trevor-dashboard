@@ -108,18 +108,27 @@ def check_status(trade_id: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print(json.dumps({"error": "Usage: query_close.py submit|status TRADE_ID [EXIT_PRICE]"}))
-        sys.exit(1)
-
-    action = sys.argv[1]
-    if action == "submit":
-        if len(sys.argv) < 4:
-            print(json.dumps({"error": "Usage: query_close.py submit TRADE_ID EXIT_PRICE"}))
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    import traceback as _tb_wrap, sys as _sys_wrap
+    try:
+        if len(sys.argv) < 3:
+            print(json.dumps({"error": "Usage: query_close.py submit|status TRADE_ID [EXIT_PRICE]"}))
             sys.exit(1)
-        submit_close(sys.argv[2], float(sys.argv[3]))
-    elif action == "status":
-        check_status(sys.argv[2])
-    else:
-        print(json.dumps({"error": f"Unknown action: {action}"}))
-        sys.exit(1)
+
+        action = sys.argv[1]
+        if action == "submit":
+            if len(sys.argv) < 4:
+                print(json.dumps({"error": "Usage: query_close.py submit TRADE_ID EXIT_PRICE"}))
+                sys.exit(1)
+            submit_close(sys.argv[2], float(sys.argv[3]))
+        elif action == "status":
+            check_status(sys.argv[2])
+        else:
+            print(json.dumps({"error": f"Unknown action: {action}"}))
+            sys.exit(1)
+
+    except SystemExit:
+        raise
+    except Exception:
+        _tb_wrap.print_exc(file=_sys_wrap.stderr)
+        _sys_wrap.exit(1)

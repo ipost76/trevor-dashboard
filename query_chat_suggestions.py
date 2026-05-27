@@ -208,8 +208,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # OUTER-WRAP: 2026-05-27 (silent-crash visibility)
+    import traceback as _tb_wrap, sys as _sys_wrap
     try:
-        main()
-    except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"suggestions": [], "error": f"{type(exc).__name__}: {exc}"}))
-        sys.exit(0)  # soft-fail; route emits the empty shape via parse
+        try:
+            main()
+        except Exception as exc:  # noqa: BLE001
+            print(json.dumps({"suggestions": [], "error": f"{type(exc).__name__}: {exc}"}))
+            sys.exit(0)  # soft-fail; route emits the empty shape via parse
+
+    except SystemExit:
+        raise
+    except Exception:
+        _tb_wrap.print_exc(file=_sys_wrap.stderr)
+        _sys_wrap.exit(1)
