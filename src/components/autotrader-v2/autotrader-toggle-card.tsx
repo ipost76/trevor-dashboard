@@ -329,7 +329,7 @@ export function AutoTraderToggleCard() {
               </div>
               <div className="text-micro text-fg-muted">
                 {confirmTarget === "start"
-                  ? "AutoTrader will accept new entries on the next signal. Per-ticker thresholds + killswitch + $50 cap still apply."
+                  ? "AutoTrader will accept new entries on the next signal. Per-ticker thresholds + killswitch still apply. Capital cap removed per RM-07 P00 — live HL balance is the only limit."
                   : "AutoTrader will stop accepting NEW entries. Open positions stay monitored. Exits and manual signal cards are NOT affected."}
               </div>
             </div>

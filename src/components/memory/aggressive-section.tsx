@@ -214,7 +214,7 @@ export function AggressiveModeSection() {
             and removes select scoring brakes for <span className="font-mono">{48}h</span>, then auto-reverts.
           </p>
           <ul className="ml-4 list-disc space-y-1 text-micro">
-            <li>Still respects EMERGENCY_KILLSWITCH and the $50 daily cap.</li>
+            <li>Still respects EMERGENCY_KILLSWITCH. Live HL balance is the only capital limit (RM-07 P00).</li>
             <li>Does NOT auto-close any open position.</li>
             <li>Independent of the killswitch — toggle here, not there.</li>
             <li>Queued via hub_commands; bot applies within ~10s.</li>
@@ -366,7 +366,7 @@ export function AggressiveModeSection() {
               </div>
               <div className="text-micro text-fg-muted">
                 {confirmTarget === "on"
-                  ? `Threshold lowered by 5 for ~48h. Killswitch and $50 cap still apply. Auto-reverts.`
+                  ? `Threshold lowered by 5 for ~48h. Killswitch still applies. Capital cap removed per RM-07 P00. Auto-reverts.`
                   : "Returns to standard threshold. No effect on currently open positions."}
               </div>
             </div>

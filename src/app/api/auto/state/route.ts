@@ -45,7 +45,9 @@ const FALLBACK: AutoStateResponse = {
 
 export async function GET() {
   try {
-    const raw = runPython("query_auto_state.py", [], { timeout: 5_000 });
+    // RM-07 P00 (2026-05-28): timeout bumped 5s → 10s to absorb the live HL
+    // info.user_state() round-trip (typical 3-5s cold, sub-1s warm).
+    const raw = runPython("query_auto_state.py", [], { timeout: 10_000 });
     const data = safeJsonParse<AutoStateResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

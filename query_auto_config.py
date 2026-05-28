@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-Consolidated AUTO config view for /api/auto/config (D3, 2026-04-30).
+Consolidated AUTO config view for /api/auto/config.
 
-READ-ONLY. Returns the four config knobs D1's ConfigCard renders +
-the per-ticker thresholds (live mirror of /home/trevor/trevor/ticker_thresholds.py
-via runtime import — no hardcoded drift).
+RM-07 P00 (2026-05-28): capital_cap_usd kept at 0.0 (vestigial — cap removed).
+New margin_mode field returns "isolated" (sourced from auto_trader.config).
+
+READ-ONLY. Returns the config knobs D1's ConfigCard renders + the per-ticker
+thresholds (live mirror of /home/trevor/trevor/ticker_thresholds.py via runtime
+import — no hardcoded drift).
 
 JSON output:
   {
-    "capital_cap_usd": 50.0,
+    "capital_cap_usd": 0.0,
+    "margin_mode": "isolated",
     "live_per_trade_usd": 10.0,
     "confidence_floor": 35,
     "max_leverage": 5,
     "per_ticker_thresholds_enabled": true,
-    "per_ticker_thresholds": [
-      { "ticker": "BTC", "tier": "BLUE_CHIP", "quiet": 34, "normal": 37, "active": 40 },
-      ...
-    ],
+    "per_ticker_thresholds": [...],
     "data_available": true
   }
-
-Replaces: GET /api/auto-trader/per-ticker-thresholds + GET side of
-/api/auto-trader/config (PUT side intentionally dropped — config writes
-are CC-prompt + auto_trader/config.py only, never via Hub UI).
 """
 from __future__ import annotations
 
@@ -50,7 +47,8 @@ def _connect_ro() -> sqlite3.Connection:
 
 def _empty_payload(error: str | None = None) -> dict:
     out = {
-        "capital_cap_usd": 50.0,
+        "capital_cap_usd": 0.0,           # RM-07 P00 — vestigial; cap removed
+        "margin_mode": "isolated",        # RM-07 P00 — mandatory; one bad trade can't drain account
         "live_per_trade_usd": 10.0,
         "confidence_floor": 35,
         "max_leverage": 5,
@@ -61,6 +59,16 @@ def _empty_payload(error: str | None = None) -> dict:
     if error:
         out["error"] = error
     return out
+
+
+def _margin_mode() -> str:
+    """Runtime import of auto_trader.config.MARGIN_MODE — default 'isolated'."""
+    try:
+        sys.path.insert(0, "/home/trevor/trevor")
+        from auto_trader import config as _atcfg  # type: ignore[import-not-found]
+        return str(getattr(_atcfg, "MARGIN_MODE", "isolated")).lower()
+    except Exception:
+        return "isolated"
 
 
 def _per_ticker_payload() -> tuple[bool, list[dict]]:
@@ -131,12 +139,13 @@ def main() -> int:
             except (TypeError, ValueError):
                 return default
 
-        # Capital cap: prefer LIVE_HARD_CAPITAL_CAP_USD (the immutable code-enforced
-        # ceiling); fall back to CAPITAL_USD for configurations that pre-date it.
-        cap = _f("LIVE_HARD_CAPITAL_CAP_USD", _f("CAPITAL_USD", 50.0))
+        # RM-07 P00 (2026-05-28): capital_cap_usd reported as 0.0 — cap removed.
+        # The auto_config row is preserved per Rule 15 but is no longer read by
+        # the bot. Hub display now shows margin_mode + live HL balance instead.
 
         out = {
-            "capital_cap_usd": cap,
+            "capital_cap_usd": 0.0,
+            "margin_mode": _margin_mode(),
             "live_per_trade_usd": _f("LIVE_PER_TRADE_USD", 10.0),
             "confidence_floor": _i("AGGRESSIVE_THRESHOLD", 35),
             "max_leverage": _i("LIVE_LEVERAGE_DEFAULT", 5),

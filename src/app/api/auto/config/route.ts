@@ -22,7 +22,8 @@ interface Threshold {
 }
 
 interface AutoConfigResponse {
-  capital_cap_usd: number;
+  capital_cap_usd: number;     // RM-07 P00 — vestigial; cap removed
+  margin_mode: string;         // RM-07 P00 — "isolated" mandatory
   live_per_trade_usd: number;
   confidence_floor: number;
   max_leverage: number;
@@ -33,7 +34,8 @@ interface AutoConfigResponse {
 }
 
 const FALLBACK: AutoConfigResponse = {
-  capital_cap_usd: 50,
+  capital_cap_usd: 0,
+  margin_mode: "isolated",
   live_per_trade_usd: 10,
   confidence_floor: 35,
   max_leverage: 5,

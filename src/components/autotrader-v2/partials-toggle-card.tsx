@@ -246,7 +246,7 @@ export function PartialsToggleCard() {
               </div>
               <div className="text-micro text-fg-muted">
                 {confirmTarget === "on"
-                  ? "Layer 5 PARTIAL_EXIT will start executing reduce-only IOC orders on live trades when r_multiple crosses 0.75R / 1.5R. Killswitch + per-ticker stop + $50 cap still apply."
+                  ? "Layer 5 PARTIAL_EXIT will start executing reduce-only IOC orders on live trades when r_multiple crosses 0.75R / 1.5R. Killswitch + per-ticker stop still apply. Capital cap removed per RM-07 P00 — live HL balance is the only limit."
                   : "Layer 5 PARTIAL_EXIT will stop executing on live trades. Shadow eval continues; paper-mode partials are unaffected."}
               </div>
             </div>

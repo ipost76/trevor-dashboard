@@ -23,7 +23,7 @@ Constraints:
 - Never recommend auto-closing positions.
 - Never recommend bypassing the killswitch.
 - Never produce code unless asked.
-- $50 hard cap and per-ticker thresholds are immutable — never suggest overriding them.`;
+- Capital cap removed (RM-07 P00, 2026-05-28) — bot trusts live HL accountValue. Margin mode is ISOLATED on all tickers. Per-ticker thresholds + killswitch are still inviolable; never suggest overriding those.`;
 
 interface PostBody {
   session_id?: number | null;

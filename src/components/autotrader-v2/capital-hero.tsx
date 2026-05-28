@@ -41,8 +41,8 @@ export function CapitalHero() {
     };
   }, []);
 
+  // RM-07 P00 (2026-05-28): equity is live HL accountValue; capital cap removed
   const equity = data?.equity ?? 0;
-  const liveCap = data?.live_capital_usd ?? data?.capital_usd ?? 0;
   const todayPnl = data?.pnl_today_usd ?? 0;
   const todayPct = data?.pnl_today_pct ?? 0;
   const todayCount = data?.trades_today ?? 0;
@@ -72,11 +72,9 @@ export function CapitalHero() {
             <span className="font-mono text-display font-bold tabular-nums text-fg-primary">
               ${equity.toFixed(2)}
             </span>
-            {liveCap > 0 && (
-              <span className="font-sans text-micro italic text-fg-muted">
-                of ${liveCap.toFixed(0)} cap
-              </span>
-            )}
+            <span className="font-sans text-micro italic text-fg-muted">
+              live HL balance
+            </span>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -92,7 +90,7 @@ export function CapitalHero() {
                 />
               }
               sub={
-                liveCap > 0 ? (
+                equity > 0 ? (
                   <MoneyText
                     value={todayPct}
                     unit="%"

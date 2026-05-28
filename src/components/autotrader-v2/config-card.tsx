@@ -4,7 +4,8 @@ import { Card, CardHeader, CardTitle, Pill, MetricTile, Skeleton } from "@/compo
 import { Settings } from "lucide-react";
 
 interface AutoConfig {
-  capital_cap_usd: number;
+  capital_cap_usd: number;       // RM-07 P00 — vestigial; cap removed
+  margin_mode: string;           // RM-07 P00 — "isolated" mandatory
   live_per_trade_usd: number;
   confidence_floor: number;
   max_leverage: number;
@@ -38,7 +39,8 @@ export function ConfigCard() {
     };
   }, []);
 
-  const capitalCap = data?.capital_cap_usd ?? 50;
+  // RM-07 P00 (2026-05-28): capitalCap is vestigial; marginMode replaces it on display
+  const marginMode = (data?.margin_mode ?? "isolated").toUpperCase();
   const perTrade = data?.live_per_trade_usd ?? 10;
   const confFloor = data?.confidence_floor ?? 35;
   const maxLev = data?.max_leverage ?? 5;
@@ -76,9 +78,9 @@ export function ConfigCard() {
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <MetricTile
-              label="Capital Cap"
-              value={`$${capitalCap.toFixed(0)}`}
-              sub="hard floor"
+              label="Margin Mode"
+              value={marginMode}
+              sub="risk isolation"
             />
             <MetricTile
               label="Per-Trade"
