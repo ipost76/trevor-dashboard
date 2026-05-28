@@ -72,9 +72,8 @@ export default async function StocksPage({ searchParams }: StocksPageProps) {
   if (tab === "reminders") {
     redirect("/stocks?tab=dca");
   }
-  // <StockSection /> is an async server component (reads SCOUT_V3_FEED flag);
-  // we render it here so the client-side <StocksZoneView /> can receive it as
-  // a prop slot. RSC import boundary: client components cannot import server
-  // components, but they can accept them as props.
+  // <StockSection /> is a "Coming Soon" placeholder (SCOUT-REMOVE 2026-05-28).
+  // Passed as a slot prop so the slot pattern is preserved for any future
+  // stock surface; client-side <StocksZoneView /> renders it when subtab=="stock".
   return <StocksZoneView subtab={tab ?? "stock"} stockSlot={<StockSection />} />;
 }

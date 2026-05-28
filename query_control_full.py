@@ -123,7 +123,6 @@ EXPLICIT_CATEGORY: dict[str, str] = {
     "CONFIRM_CYCLES_PROMOTED":           "Signal Gates",
     "TIME_GATE_PROMOTED":                "Signal Gates",
     "TIME_GATE_SHADOW_ENABLED":          "Signal Gates",
-    "SCOUT_V3_FEED":                     "Signal Gates",
     "GAP_WATCHDOG_ENABLED":              "Signal Gates",
     "CRYPTO_STOP_FLOORS_AT_ENABLED":     "Signal Gates",
     "MOMENTUM_FACTOR_LOGGING":           "Signal Gates",
