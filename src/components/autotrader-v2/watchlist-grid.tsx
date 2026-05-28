@@ -33,7 +33,7 @@ const TIER_INTENT: Record<Tier, "blue-chip" | "mid-cap" | "meme"> = {
   MEME: "meme",
 };
 
-const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN"];
+const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 
 function fmtPrice(p: number): string {
   if (p >= 1000) return p.toFixed(2);
@@ -96,7 +96,7 @@ export function WatchlistGrid() {
 
       {loading && (
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 5 }).map((_, i) => (
+          {Array.from({ length: 10 }).map((_, i) => (
             <Skeleton key={i} className="h-24 w-full" />
           ))}
         </div>

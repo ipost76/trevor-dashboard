@@ -68,7 +68,7 @@ export function ScalperHeader() {
             <span className="font-sans text-h3 font-semibold tracking-tight text-fg-primary">
               AUTOTRADER
             </span>
-            <span className="font-sans text-micro text-fg-muted">5 tickers</span>
+            <span className="font-sans text-micro text-fg-muted">10 tickers</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

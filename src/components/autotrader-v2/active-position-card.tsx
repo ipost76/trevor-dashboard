@@ -41,7 +41,7 @@ interface PricesResponse {
   prices: Record<string, { price: number; source: string; stale: boolean }>;
 }
 
-const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN"];
+const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 
 function parseUTC(ts: string): Date {
   if (!ts) return new Date(NaN);

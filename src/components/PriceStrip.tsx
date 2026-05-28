@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-const TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN"];
+const TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 
 function formatPrice(price: number): string {
   if (price >= 1000) return price.toLocaleString("en-US", { maximumFractionDigits: 0 });

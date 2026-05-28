@@ -38,6 +38,15 @@ TIER_MAP = {
     "SOL": "MID_CAP",
     "HYPE": "MID_CAP",
     "FARTCOIN": "MEME",
+    # RM-07 P02 (2026-05-28): sacred 5 -> 10. Tiers mirror the bot's own
+    # classification (auto_trader/config.py leverage comment + altcoin/
+    # memecoin tier lists): XRP/NEAR/SUI = MID_CAP, DOGE/kPEPE = MEME.
+    # (CL/XAU were deferred in P01 — not on Hyperliquid — so no COMMODITY tier.)
+    "XRP": "MID_CAP",
+    "DOGE": "MEME",
+    "NEAR": "MID_CAP",
+    "SUI": "MID_CAP",
+    "kPEPE": "MEME",
 }
 
 

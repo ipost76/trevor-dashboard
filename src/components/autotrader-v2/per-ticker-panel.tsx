@@ -26,20 +26,33 @@ export interface PerTickerPanelProps {
   onSave: (key: string, newValue: string) => Promise<void>;
 }
 
-const SACRED_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN"] as const;
+const SACRED_TICKERS = [
+  "BTC", "ETH", "SOL", "HYPE", "FARTCOIN",
+  "XRP", "DOGE", "NEAR", "SUI", "kPEPE",
+] as const;
 type SacredTicker = (typeof SACRED_TICKERS)[number];
 
 // Source-of-truth mirrors from /home/trevor/trevor/ — surfaced read-only.
 // These dicts live in Python source, not auto_config, so the Hub cannot
-// edit them. Values verified against the bot repo on 2026-05-27.
+// edit them. Values verified against the bot repo on 2026-05-27 (sacred 5)
+// and 2026-05-28 (RM-07 P02 sacred-ticker expansion 5 -> 10).
 //
 // SOURCES:
-//   ticker_thresholds.py:46  → TICKER_THRESHOLDS
-//   ticker_thresholds.py:105 → RECALIBRATED_THRESHOLDS_V2
-//   ticker_thresholds.py:147 → DIRECTION_PENALTIES
-//   auto_trader/config.py:744 → TICKER_LEVERAGE  (IMMUTABLE per Ghost ruling 4)
-//   auto_trader/monitor.py    → MOMENTUM_FLOOR_BY_TICKER
-//   auto_trader/exit_helpers.py → TICKER_TRAIL_FLOORS
+//   ticker_thresholds.py:47  → TICKER_THRESHOLDS          (all 10)
+//   ticker_thresholds.py:138 → RECALIBRATED_THRESHOLDS_V2 (orig 5 only)
+//   ticker_thresholds.py:178 → DIRECTION_PENALTIES        (orig 5 only)
+//   auto_trader/config.py:748 → TICKER_LEVERAGE  (all 10; IMMUTABLE per Ghost ruling 4)
+//   auto_trader/monitor.py:630    → MOMENTUM_FLOOR_BY_TICKER (orig 5 only)
+//   auto_trader/exit_helpers.py:69 → TICKER_TRAIL_FLOORS     (orig 5 only)
+//
+// P02 note: the 5 new tickers (XRP/DOGE/NEAR/SUI/kPEPE) have explicit
+// per-ticker entries only in TICKER_THRESHOLDS + TICKER_LEVERAGE. In the
+// other four dicts they are NOT individually tuned — the bot applies a
+// documented fallback (get_direction_penalty → FARTCOIN's 8.0;
+// get_momentum_floor → default 50; get_trail_floor → default 0.015;
+// RECALIBRATED_THRESHOLDS_V2 → not calibrated). Those dicts are Partial<>
+// here and the UI renders the fallback with a "(default)" marker rather
+// than inventing a per-ticker value (honesty protocol — no source drift).
 
 interface ThresholdSet {
   quiet: number;
@@ -53,9 +66,16 @@ const TICKER_THRESHOLDS: Record<SacredTicker, ThresholdSet> = {
   SOL:      { quiet: 38, normal: 41, active: 44 },
   HYPE:     { quiet: 39, normal: 42, active: 45 },
   FARTCOIN: { quiet: 42, normal: 45, active: 48 },
+  XRP:      { quiet: 38, normal: 41, active: 44 },
+  DOGE:     { quiet: 42, normal: 45, active: 48 },
+  NEAR:     { quiet: 39, normal: 42, active: 45 },
+  SUI:      { quiet: 39, normal: 42, active: 45 },
+  kPEPE:    { quiet: 42, normal: 45, active: 48 },
 };
 
-const RECALIBRATED_THRESHOLDS_V2: Record<SacredTicker, ThresholdSet> = {
+// V2 shadow recalibration (RM-03 P07) covers only the original sacred 5.
+// New tickers are not V2-calibrated → no entry (UI shows "Not calibrated").
+const RECALIBRATED_THRESHOLDS_V2: Partial<Record<SacredTicker, ThresholdSet>> = {
   BTC:      { quiet: 51, normal: 54, active: 57 },
   ETH:      { quiet: 53, normal: 56, active: 59 },
   SOL:      { quiet: 53, normal: 56, active: 59 },
@@ -63,19 +83,25 @@ const RECALIBRATED_THRESHOLDS_V2: Record<SacredTicker, ThresholdSet> = {
   FARTCOIN: { quiet: 42, normal: 45, active: 48 },
 };
 
-const DIRECTION_PENALTIES: Record<SacredTicker, number> = {
+// Bot fallbacks for tickers without a bespoke entry (mirror the get_* helpers).
+const DIRECTION_PENALTY_FALLBACK = 8;   // get_direction_penalty → DIRECTION_PENALTIES['FARTCOIN']
+const MOMENTUM_FLOOR_DEFAULT = 50;      // get_momentum_floor default (MOMENTUM_EXIT_FLOOR)
+const TRAIL_FLOOR_DEFAULT = 0.015;      // get_trail_floor default (TRAIL_MIN_PCT)
+
+const DIRECTION_PENALTIES: Partial<Record<SacredTicker, number>> = {
   BTC: 3, ETH: 4, SOL: 5, HYPE: 6, FARTCOIN: 8,
 };
 
 const TICKER_LEVERAGE: Record<SacredTicker, number> = {
   BTC: 25, ETH: 15, SOL: 12, HYPE: 10, FARTCOIN: 8,
+  XRP: 10, DOGE: 8, NEAR: 8, SUI: 8, kPEPE: 8,
 };
 
-const MOMENTUM_FLOOR_BY_TICKER: Record<SacredTicker, number> = {
+const MOMENTUM_FLOOR_BY_TICKER: Partial<Record<SacredTicker, number>> = {
   BTC: 50, ETH: 50, SOL: 52, HYPE: 50, FARTCOIN: 50,
 };
 
-const TICKER_TRAIL_FLOORS: Record<SacredTicker, number> = {
+const TICKER_TRAIL_FLOORS: Partial<Record<SacredTicker, number>> = {
   BTC: 0.015, ETH: 0.015, SOL: 0.015, HYPE: 0.020, FARTCOIN: 0.025,
 };
 
@@ -251,6 +277,19 @@ export function PerTickerPanel({
   const tickerThresholds = TICKER_THRESHOLDS[ticker];
   const recalibratedThresholds = RECALIBRATED_THRESHOLDS_V2[ticker];
 
+  // Scalars below cover only the original sacred 5; new tickers fall back to
+  // the bot's documented defaults (see get_* helpers). Show the fallback with
+  // a "(default)" marker rather than a fabricated per-ticker value.
+  const dirPenalty = DIRECTION_PENALTIES[ticker];
+  const dirPenaltyDisplay =
+    dirPenalty == null ? `${DIRECTION_PENALTY_FALLBACK} (default)` : String(dirPenalty);
+  const momentumFloor = MOMENTUM_FLOOR_BY_TICKER[ticker];
+  const momentumFloorDisplay =
+    momentumFloor == null ? `${MOMENTUM_FLOOR_DEFAULT} (default)` : String(momentumFloor);
+  const trailFloor = TICKER_TRAIL_FLOORS[ticker];
+  const trailFloorDisplay =
+    trailFloor == null ? `${TRAIL_FLOOR_DEFAULT.toFixed(3)} (default)` : trailFloor.toFixed(3);
+
   return (
     <CollapsibleSection
       title="Per-Ticker"
@@ -285,7 +324,16 @@ export function PerTickerPanel({
               · RECALIBRATED_THRESHOLDS_V2
             </span>
           </div>
-          <ThresholdsRow set={recalibratedThresholds} />
+          {recalibratedThresholds ? (
+            <ThresholdsRow set={recalibratedThresholds} />
+          ) : (
+            <div
+              className="px-2 py-2 font-mono text-caption text-fg-faint"
+              title="No V2 shadow recalibration for this ticker (orig sacred 5 only)"
+            >
+              Not calibrated (V2)
+            </div>
+          )}
         </div>
 
         {/* Source-code per-ticker scalars (read-only) */}
@@ -295,17 +343,17 @@ export function PerTickerPanel({
           </div>
           <ReadOnlyRow
             label="Direction Penalty"
-            value={String(DIRECTION_PENALTIES[ticker])}
+            value={dirPenaltyDisplay}
             sourceFile="ticker_thresholds.py"
           />
           <ReadOnlyRow
             label="Momentum Floor"
-            value={String(MOMENTUM_FLOOR_BY_TICKER[ticker])}
+            value={momentumFloorDisplay}
             sourceFile="auto_trader/monitor.py"
           />
           <ReadOnlyRow
             label="Trail Floor"
-            value={TICKER_TRAIL_FLOORS[ticker].toFixed(3)}
+            value={trailFloorDisplay}
             sourceFile="auto_trader/exit_helpers.py"
           />
           <ReadOnlyRow
