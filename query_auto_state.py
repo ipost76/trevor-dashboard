@@ -34,7 +34,18 @@ DB = "/home/trevor/trevor/trevor.db"
 
 
 def _fetch_hl_account_value() -> float | None:
-    """Read live HL marginSummary.accountValue. Returns None on any failure."""
+    """Read live HL UNIFIED balance.
+
+    RM-07 P01 (2026-05-28): returns `marginSummary.accountValue` (perps margin
+    + unrealized PnL) + spot USDC.total. Pre-P01 this returned only the perps
+    slice, which read $0 when no positions were open even though USDC sat in
+    spot waiting to fund the next trade. The unified formula matches
+    Hyperliquid's "unified account" semantics — USDC migrates between spot
+    and perps margin as trades open and close; the sum is constant modulo
+    realized PnL.
+
+    Returns None on any failure.
+    """
     try:
         # Bot venv has hyperliquid + python-dotenv installed
         sys.path.insert(0, "/home/trevor/trevor")
@@ -51,9 +62,24 @@ def _fetch_hl_account_value() -> float | None:
         if not addr:
             return None
         info = Info(constants.MAINNET_API_URL, skip_ws=True)
+
+        # Perps margin + unrealized PnL
         state = info.user_state(addr)
         margin = state.get("marginSummary", {})
-        return float(margin.get("accountValue", 0.0))
+        perps_value = float(margin.get("accountValue", 0.0))
+
+        # Spot USDC total
+        spot_usdc = 0.0
+        try:
+            spot_state = info.spot_user_state(addr)
+            for bal in spot_state.get("balances", []) or []:
+                if (bal or {}).get("coin") == "USDC":
+                    spot_usdc = float(bal.get("total", 0.0) or 0.0)
+                    break
+        except Exception:
+            spot_usdc = 0.0
+
+        return perps_value + spot_usdc
     except Exception:
         return None
 
