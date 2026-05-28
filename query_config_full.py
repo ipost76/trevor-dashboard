@@ -43,7 +43,7 @@ IMMUTABLE_KEYS = {
     "EMERGENCY_KILLSWITCH_LAST_REASON": "system counter — written by killswitch helper",
     "ANTHROPIC_API_DAILY_RESET_DATE":   "system counter — auto-rotated by budget tracker",
     "ANTHROPIC_API_DAILY_TOKENS_USED":  "system counter — incremented per API call",
-    "DISCOVERED_TICKERS":               "autonomous output — written by ticker discovery loop",
+    # DISCOVERED_TICKERS removed 2026-05-28 (DEGEN-REMOVE)
 }
 
 # Explicit category overrides for keys whose category isn't obvious from prefix.
@@ -94,7 +94,7 @@ EXPLICIT_CATEGORY: dict[str, str] = {
     "KNOWN_TICKERS":                   "Per-Ticker",
     "CRYPTO_TICKERS":                  "Per-Ticker",
     "SLIPPAGE_BPS":                    "Per-Ticker",
-    "DISCOVERED_TICKERS":              "Per-Ticker",
+    # DISCOVERED_TICKERS removed 2026-05-28 (DEGEN-REMOVE)
     # Calibration
     "DEFAULT_TARGET":                  "Calibration",
     "LOOKBACK_LIMIT":                  "Calibration",

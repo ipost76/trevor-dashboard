@@ -182,18 +182,17 @@ export function PerTickerPanel({
   const [ticker, setTicker] = React.useState<SacredTicker>("BTC");
 
   // Editable per-ticker dict configs sourced from auto_config (D1 editable).
+  // DISCOVERED_TICKERS lookup removed 2026-05-28 (DEGEN-REMOVE — auto_config row gone).
   const aloDisabledConfig = findConfig(configs, "ALO_DISABLED_TICKERS");
   const hardStopConfig = findConfig(configs, "TICKER_HARD_STOP_PCT_JSON");
   const leverageV2Config = findConfig(
     configs,
     "LEVERAGE_V2_INTERMEDIATE_JSON",
   );
-  const discoveredConfig = findConfig(configs, "DISCOVERED_TICKERS");
 
   const aloDisabledList = parseJsonArray(aloDisabledConfig?.value ?? null);
   const hardStopDict = parseJsonDict(hardStopConfig?.value ?? null);
   const leverageV2Dict = parseJsonDict(leverageV2Config?.value ?? null);
-  const discoveredList = parseJsonArray(discoveredConfig?.value ?? null);
 
   const aloDisabled = aloDisabledList.includes(ticker);
   const hardStopValue = (() => {
@@ -393,35 +392,7 @@ export function PerTickerPanel({
           ) : null}
         </div>
 
-        {/* Discovered tickers — autonomous list, read-only */}
-        {discoveredConfig && (
-          <div
-            className={cn(
-              "flex flex-col gap-1 rounded-md border border-border-subtle bg-bg-elevated/30 p-3",
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 font-sans text-label-ui text-fg-muted">
-                <Lock size={12} className="text-fg-faint" aria-hidden />
-                Discovered Tickers
-              </span>
-              <Pill intent="warn" size="sm">
-                {discoveredList.length} · autonomous
-              </Pill>
-            </div>
-            <div className="font-mono text-micro text-fg-faint break-words tabular-nums">
-              {discoveredList.length > 0
-                ? discoveredList.join(", ")
-                : "—"}
-            </div>
-            <div
-              className="font-sans text-micro text-fg-faint"
-              title={discoveredConfig.immutable_reason ?? undefined}
-            >
-              Written by the ticker-discovery loop — not editable.
-            </div>
-          </div>
-        )}
+        {/* Discovered Tickers card removed 2026-05-28 (DEGEN-REMOVE) */}
       </div>
     </CollapsibleSection>
   );

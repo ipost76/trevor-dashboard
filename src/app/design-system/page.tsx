@@ -18,7 +18,7 @@ import {
 } from "@/components/ui";
 import { Activity } from "lucide-react";
 
-type System = "auto" | "degen" | "scalp";
+type System = "auto" | "scalp";
 type DemoTab = "a" | "b" | "c";
 
 export default function DesignSystemShowcasePage() {
@@ -62,12 +62,6 @@ export default function DesignSystemShowcasePage() {
               <CardTitle>Glow Green</CardTitle>
             </CardHeader>
             SCALPER tone.
-          </Card>
-          <Card glow="magenta">
-            <CardHeader>
-              <CardTitle>Glow Magenta</CardTitle>
-            </CardHeader>
-            DEGEN tone.
           </Card>
           <Card glow="amber">
             <CardHeader>
@@ -116,7 +110,6 @@ export default function DesignSystemShowcasePage() {
           <Pill tone="green">Active</Pill>
           <Pill tone="amber" pulse>Standby</Pill>
           <Pill tone="red">Halted</Pill>
-          <Pill tone="magenta">DEGEN</Pill>
           <Pill tone="violet">Shadow</Pill>
         </div>
       </section>
@@ -127,7 +120,6 @@ export default function DesignSystemShowcasePage() {
           ariaLabel="System"
           options={[
             { value: "auto", label: "Auto" },
-            { value: "degen", label: "Degen" },
             { value: "scalp", label: "Scalp" },
           ]}
           value={system}
