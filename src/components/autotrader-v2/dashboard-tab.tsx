@@ -3,6 +3,7 @@ import * as React from "react";
 import { ScalperHeader } from "./scalper-header";
 import { CapitalHero } from "./capital-hero";
 import { ActivePositionCard } from "./active-position-card";
+import { ProfitRiskPanel } from "./profit-risk-panel";
 import { WatchlistGrid } from "./watchlist-grid";
 
 export function DashboardTab() {
@@ -11,6 +12,7 @@ export function DashboardTab() {
       <ScalperHeader />
       <CapitalHero />
       <ActivePositionCard />
+      <ProfitRiskPanel />
       <WatchlistGrid />
     </div>
   );
