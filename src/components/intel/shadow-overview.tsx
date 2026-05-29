@@ -11,6 +11,7 @@ import {
 import { CompactShadowCard } from "@/components/ui/compact-shadow-card";
 import { cn } from "@/lib/utils";
 import { ShadowScoringHero, type IntelShadowState } from "./shadow-scoring-hero";
+import { PartialShadowCard } from "@/components/autotrader-v2/partial-shadow-card";
 
 type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN";
 type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data";
@@ -211,6 +212,7 @@ export function ShadowOverview() {
             intel={intel?.shadow ?? null}
             loading={loading && !registry}
           />
+          <PartialShadowCard />
           {activeGroups.map(({ fn, rows }) =>
             rows.length === 0 ? null : (
               <FunctionBlock key={fn} title={fn} tables={rows} sortKey="rows_48h" />

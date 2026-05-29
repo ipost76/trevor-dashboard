@@ -3,12 +3,7 @@ import * as React from "react";
 import { ScalperHeader } from "./scalper-header";
 import { CapitalHero } from "./capital-hero";
 import { ActivePositionCard } from "./active-position-card";
-import { ConfigCard } from "./config-card";
 import { WatchlistGrid } from "./watchlist-grid";
-import { AutoTraderToggleCard } from "./autotrader-toggle-card";
-import { ExitControlsCard } from "./exit-controls-card";
-import { PartialsToggleCard } from "./partials-toggle-card";
-import { PartialShadowCard } from "./partial-shadow-card";
 
 export function DashboardTab() {
   return (
@@ -16,12 +11,7 @@ export function DashboardTab() {
       <ScalperHeader />
       <CapitalHero />
       <ActivePositionCard />
-      <ConfigCard />
       <WatchlistGrid />
-      <AutoTraderToggleCard />
-      <ExitControlsCard />
-      <PartialsToggleCard />
-      <PartialShadowCard />
     </div>
   );
 }

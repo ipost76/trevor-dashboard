@@ -12,7 +12,7 @@ import {
 import { Activity } from "lucide-react";
 
 interface ActivityEntry {
-  id: number;
+  id: string;
   timestamp: string;
   table_name: string;
   row_id: number | null;

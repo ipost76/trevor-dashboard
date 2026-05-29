@@ -12,6 +12,8 @@ import {
 } from "@/components/ui";
 import { Lock, ShieldOff, AlertTriangle } from "lucide-react";
 import { AutoTraderToggleCard } from "./autotrader-toggle-card";
+import { ExitControlsCard } from "./exit-controls-card";
+import { PartialsToggleCard } from "./partials-toggle-card";
 import { RecentTogglesSection } from "./recent-toggles-section";
 
 // D2 — Control Center sub-tab.
@@ -46,10 +48,10 @@ interface ControlFullResponse {
 
 // Keys whose flip is owned by a dedicated endpoint with its own audit +
 // cache-bust surface. The control-full PATCH refuses them with 400 anyway;
-// rendering them here would just be misleading duplication of UI that
-// already exists elsewhere on the app (AutoTraderToggleCard at the top,
-// KillswitchPill on the topbar / System Health page, PartialsToggleCard
-// + ExitControlsCard on the Dashboard tab).
+// rendering them in the grouped toggle grid would just duplicate UI that
+// already lives on this same tab (AutoTraderToggleCard + PartialsToggleCard
+// + ExitControlsCard immediately below) or in the global topbar
+// (KillswitchPill).
 const DEDICATED_ENDPOINT_KEYS = new Set<string>([
   "AUTO_TRADER_ENABLED",
   "EMERGENCY_KILLSWITCH",
@@ -202,6 +204,10 @@ export function ControlTab() {
       {/* Top: existing AutoTrader pause/resume card (Rule 32 carve-out) */}
       <AutoTraderToggleCard />
 
+      {/* Dedicated-endpoint toggles — each owns its own write surface */}
+      <ExitControlsCard />
+      <PartialsToggleCard />
+
       {/* LIVE_EDIT_ENABLED state banner */}
       <Card padding="sm" className="card-elevated">
         <div className="flex items-start gap-3">
@@ -336,9 +342,8 @@ export function ControlTab() {
             <code className="font-mono">EMERGENCY_KILLSWITCH</code>,{" "}
             <code className="font-mono">LIVE_PARTIALS_ENABLED</code>,{" "}
             <code className="font-mono">CONFIRM_CYCLES_PROMOTED</code> — each
-            has its own dedicated write surface (AutoTrader card above,
-            Killswitch pill on topbar, partials + exit cards on the Dashboard
-            tab).
+            has its own dedicated write surface (AutoTrader / Exit Controls /
+            Partials cards above, Killswitch pill on the topbar).
           </div>
         </div>
       </Card>
