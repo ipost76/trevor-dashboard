@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runCommand } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
@@ -13,33 +14,39 @@ type Commit = {
 
 const REPO_DIR = "/home/trevor/trevor";
 
-let cached: { total: number; commits: Commit[] } | null = null;
-let cacheTime = 0;
+// RM-DASH 2026-05-29: single-flight + SWR (60s) on the full git-log load so a
+// cold-cache burst spawns ONE `git log` per window, not N. Only the upstream load
+// is cached; the per-request filter/paginate derive stays outside the cache. The
+// catch below preserves the prior contract: cold failure → {total:0,commits:[]},
+// while SWR keeps serving the last good list across a transient git failure.
+const commitsCache = createSwrCache<{ total: number; commits: Commit[] }>({
+  defaultTtl: 60_000,
+  concurrency: 2,
+});
 
-async function loadCommits() {
-  const now = Date.now();
-  if (cached && now - cacheTime < 60_000) return cached;
+async function loadCommits(): Promise<{ total: number; commits: Commit[] }> {
   try {
-    // argv (no shell) — the --format token is one element, no quoting needed.
-    const raw = await runCommand(
-      "git",
-      ["-C", REPO_DIR, "log", "--format=%H|%h|%aI|%an|%s", "--no-merges"],
-      { timeout: 10_000 }
-    );
-    const commits: Commit[] = raw
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, short_hash, date, author, ...rest] = line.split("|");
-        return { hash, short_hash, date, author, subject: rest.join("|") };
-      });
-    cached = { total: commits.length, commits };
-    cacheTime = now;
+    const { value } = await commitsCache.swr("commits", async () => {
+      // argv (no shell) — the --format token is one element, no quoting needed.
+      const raw = await runCommand(
+        "git",
+        ["-C", REPO_DIR, "log", "--format=%H|%h|%aI|%an|%s", "--no-merges"],
+        { timeout: 10_000 }
+      );
+      const commits: Commit[] = raw
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [hash, short_hash, date, author, ...rest] = line.split("|");
+          return { hash, short_hash, date, author, subject: rest.join("|") };
+        });
+      return { total: commits.length, commits };
+    });
+    return value;
   } catch {
-    cached = cached || { total: 0, commits: [] };
+    return { total: 0, commits: [] };
   }
-  return cached!;
 }
 
 export async function GET(request: NextRequest) {

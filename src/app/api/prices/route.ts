@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,14 @@ const COINGECKO_IDS: Record<string, string> = {
   XRP: "ripple", NEAR: "near", SUI: "sui",
 };
 
-let cache: { data: Record<string, { price: number; source: string; stale: boolean }>; ts: number } | null = null;
+type PriceEntry = { price: number; source: string; stale: boolean };
+type PriceMap = Record<string, PriceEntry>;
+
+// 30s read-through cache keyed by the normalized ticker set, with single-flight
+// dedup + stale-while-revalidate + a per-origin (HL/CG) concurrency cap (RM-DASH
+// 2026-05-29 — kills the cache-stampede wedge: the synchronous JSON.parse of HL's
+// full allMids now runs ONCE per window per key, not once per concurrent request).
+const pricesCache = createSwrCache<PriceMap>({ defaultTtl: 30_000, concurrency: 2 });
 
 async function fetchHyperliquid(): Promise<Record<string, number>> {
   const res = await fetch("https://api.hyperliquid.xyz/info", {
@@ -54,24 +62,16 @@ async function fetchCoinGecko(tickers: string[]): Promise<Record<string, number>
   return prices;
 }
 
-export async function GET(request: NextRequest) {
-  const tickerParam = request.nextUrl.searchParams.get("tickers") || "BTC,ETH,SOL";
-  // Preserve original casing — HL symbols can be mixed-case (e.g. "kPEPE", the
-  // 1000x PEPE perp). Symbol matching below is case-insensitive; the response is
-  // keyed by the exact strings the caller passed, so callers read prices back by
-  // the same ticker they requested.
-  const tickers = tickerParam.split(",").map((t) => t.trim());
-
-  // Return cache if fresh (30s)
-  if (cache && Date.now() - cache.ts < 30_000) {
-    const result: Record<string, { price: number; source: string; stale: boolean }> = {};
-    for (const t of tickers) {
-      result[t] = cache.data[t] || { price: 0, source: "none", stale: true };
-    }
-    return NextResponse.json({ prices: result, timestamp: new Date(cache.ts).toISOString() });
-  }
-
-  const prices: Record<string, { price: number; source: string; stale: boolean }> = {};
+// The full HL→CG miss-chain, wrapped by the single-flight cache. NEVER throws —
+// HL/CG failures degrade per-ticker to the prior cached value (marked stale) or a
+// zero placeholder, exactly as the pre-dedup route did. `prev` is the prior cached
+// payload for this same ticker set (the value the single-flight cache holds).
+async function computePrices(tickers: string[], prev: PriceMap | undefined): Promise<PriceMap> {
+  // Observability: ONE line per ACTUAL upstream refresh. Single-flight guarantees
+  // this runs at most once per ticker-set per 30s window — so the count of these
+  // lines under load is the number of upstream chains (the stampede-dedup signal).
+  console.log(`[PRICES] upstream refresh — tickers=[${tickers.join(",")}]`);
+  const prices: PriceMap = {};
 
   // Try Hyperliquid first (case-insensitive symbol match — HL uses mixed-case
   // symbols like "kPEPE"; results are keyed by the caller's original casing).
@@ -100,14 +100,42 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Fill remaining from old cache
+  // Fill remaining from the prior payload for this ticker set (marked stale).
   for (const t of tickers) {
     if (!prices[t]) {
-      const old = cache?.data[t];
+      const old = prev?.[t];
       prices[t] = old ? { ...old, stale: true } : { price: 0, source: "none", stale: true };
     }
   }
 
-  cache = { data: { ...(cache?.data || {}), ...prices }, ts: Date.now() };
-  return NextResponse.json({ prices, timestamp: new Date().toISOString() });
+  return prices;
+}
+
+export async function GET(request: NextRequest) {
+  const tickerParam = request.nextUrl.searchParams.get("tickers") || "BTC,ETH,SOL";
+  // Preserve original casing — HL symbols can be mixed-case (e.g. "kPEPE", the
+  // 1000x PEPE perp). Symbol matching is case-insensitive; the response is keyed
+  // by the exact strings the caller passed, so callers read prices back by the
+  // same ticker they requested.
+  const tickers = tickerParam.split(",").map((t) => t.trim());
+
+  // Cache key = normalized (sorted) ticker set. Case-sensitive so response keys
+  // keep the caller's exact casing; all three production callers (PriceStrip,
+  // watchlist-grid, active-position-card) send the identical 10-ticker array, so
+  // they collapse onto a single in-flight refresh per 30s window.
+  const key = [...tickers].sort().join(",");
+
+  const { value, stale, ts } = await pricesCache.swr(key, (prev) => computePrices(tickers, prev));
+
+  // Build the response in request order. When serving a stale (expired) payload
+  // during background revalidation, mark every entry stale:true (clients already
+  // render stale:true). Response shape is byte-identical to the prior contract:
+  // { prices: { <ticker>: { price, source, stale } }, timestamp }.
+  const result: PriceMap = {};
+  for (const t of tickers) {
+    const entry = value[t] || { price: 0, source: "none", stale: true };
+    result[t] = stale ? { ...entry, stale: true } : entry;
+  }
+
+  return NextResponse.json({ prices: result, timestamp: new Date(ts).toISOString() });
 }

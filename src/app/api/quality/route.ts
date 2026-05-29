@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 // /api/quality — Signal Quality Intelligence summary
 //
@@ -28,7 +29,12 @@ const ALLOWED_SCOPES = new Set([
   "by_confidence",
 ]);
 
-const _cache: Map<string, { data: unknown; ts: number }> = new Map();
+// RM-DASH 2026-05-29: single-flight + SWR keyed by scope+args, so a cold-cache
+// burst across distinct scopes spawns at most ONE Python child per key per window
+// (and at most `concurrency` concurrently). The route's existing try/catch around
+// swr() preserves the prior cold-failure contract (500). This is the route that
+// genuinely needs the keyed Map — multiple distinct cache keys are live at once.
+const cache = createSwrCache<unknown>({ defaultTtl: CACHE_TTL, concurrency: 2 });
 
 async function runHelper(args: string[]): Promise<unknown> {
   // Async bridge — argv, no shell interpolation, never blocks the event loop.
@@ -77,15 +83,8 @@ export async function GET(request: Request) {
       cacheKey = `recent_matches_${safeN}`;
     }
 
-    const now = Date.now();
-    const cached = _cache.get(cacheKey);
-    if (cached && now - cached.ts < CACHE_TTL) {
-      return NextResponse.json(cached.data);
-    }
-
-    const data = await runHelper(helperArgs);
-    _cache.set(cacheKey, { data, ts: now });
-    return NextResponse.json(data);
+    const { value } = await cache.swr(cacheKey, () => runHelper(helperArgs));
+    return NextResponse.json(value);
   } catch (e) {
     return NextResponse.json(
       { error: String(e) },

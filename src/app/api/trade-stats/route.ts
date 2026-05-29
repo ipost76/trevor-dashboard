@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import { runPythonInline } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-let cache: { data: Record<string, unknown>; ts: number } | null = null;
-const CACHE_TTL = 60_000;
+// RM-DASH 2026-05-29: single-flight + SWR (60s) so a cold-cache burst spawns ONE
+// Python child per window, not N. The route's existing try/catch around swr()
+// preserves the exact cold-failure contract (the {stats:[],blocked:[]} fallback).
+const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 60_000, concurrency: 2 });
 
-export async function GET() {
-  if (cache && Date.now() - cache.ts < CACHE_TTL) {
-    return NextResponse.json(cache.data);
-  }
-
-  try {
-    const code = `
+const PY = `
 import sqlite3, json, os
 db = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -31,10 +28,14 @@ except:
 conn.close()
 print(json.dumps({"stats": stats, "blocked": blocked}))
 `;
-    const raw = await runPythonInline(code, { timeout: 5000 });
-    const data = JSON.parse(raw);
-    cache = { data, ts: Date.now() };
-    return NextResponse.json(data);
+
+export async function GET() {
+  try {
+    const { value } = await cache.swr("trade-stats", async () => {
+      const raw = await runPythonInline(PY, { timeout: 5000 });
+      return JSON.parse(raw);
+    });
+    return NextResponse.json(value);
   } catch {
     return NextResponse.json({ stats: {}, blocked: [] });
   }
