@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { runPythonInline, safeJsonParse } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +30,7 @@ for r in result:
     r["cumulative"] = round(cum, 2)
 print(json.dumps(result))
 `;
-    const { execSync } = require("child_process");
-    const raw = execSync(
-      `${process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor"}/venv/bin/python3 -`,
-      { input: code, encoding: "utf-8", timeout: 10000, env: { ...process.env, HOME: "/home/trevor" } }
-    ).trim();
+    const raw = await runPythonInline(code, { timeout: 10000 });
     return NextResponse.json(safeJsonParse(raw, []), {
       headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
     });

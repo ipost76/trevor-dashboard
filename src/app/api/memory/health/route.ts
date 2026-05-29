@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const stdout = runPython("query_system_health.py", []);
+    const stdout = await runPython("query_system_health.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
     return NextResponse.json(

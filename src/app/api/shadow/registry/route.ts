@@ -49,7 +49,7 @@ const FALLBACK: ShadowRegistryResponse = {
 
 export async function GET() {
   try {
-    const raw = runPython("query_shadow_registry.py", [], { timeout: 10_000 });
+    const raw = await runPython("query_shadow_registry.py", [], { timeout: 10_000 });
     const data = safeJsonParse<ShadowRegistryResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

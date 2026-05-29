@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
       : { type, count: 0, trades: [] };
 
   try {
-    const raw = runPython("query_auto_trades.py", [type, String(limit)], {
+    const raw = await runPython("query_auto_trades.py", [type, String(limit)], {
       timeout: 5_000,
     });
     const data = safeJsonParse<TradesResponse>(raw, fallback);

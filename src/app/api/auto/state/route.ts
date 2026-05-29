@@ -47,7 +47,7 @@ export async function GET() {
   try {
     // RM-07 P00 (2026-05-28): timeout bumped 5s → 10s to absorb the live HL
     // info.user_state() round-trip (typical 3-5s cold, sub-1s warm).
-    const raw = runPython("query_auto_state.py", [], { timeout: 10_000 });
+    const raw = await runPython("query_auto_state.py", [], { timeout: 10_000 });
     const data = safeJsonParse<AutoStateResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

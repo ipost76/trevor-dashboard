@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       new_entry: Number(new_entry),
       leverage: Number(leverage || 1),
     });
-    const raw = runPython("query_hub_commands.py", ["submit", trade_id, "FLIP", params]);
+    const raw = await runPython("query_hub_commands.py", ["submit", trade_id, "FLIP", params]);
     const data = safeJsonParse(raw, { error: "Parse error" });
     return NextResponse.json(data, { status: data.error ? 400 : 200 });
   } catch (err) {

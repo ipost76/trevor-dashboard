@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { runPython } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,7 @@ export async function GET() {
       return NextResponse.json(_cache.data);
     }
 
-    const raw = execSync(
-      "/home/trevor/trevor/venv/bin/python /home/trevor/trevor-dashboard/query_circuit_breaker.py",
-      { timeout: 10_000, encoding: "utf-8" }
-    );
+    const raw = await runPython("query_circuit_breaker.py", [], { timeout: 10_000 });
     const data = JSON.parse(raw);
     _cache = { data, ts: now };
     return NextResponse.json(data);

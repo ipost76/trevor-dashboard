@@ -33,7 +33,7 @@ const isStocksZoneOn = cache(async (): Promise<boolean> => {
   }
 
   try {
-    const stdout = runPython("query_feature_flags.py", []);
+    const stdout = await runPython("query_feature_flags.py", []);
     const data = JSON.parse(stdout) as {
       flags?: Record<string, { value?: boolean }>;
     };

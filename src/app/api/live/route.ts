@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runPythonInline, runCommand } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +32,6 @@ export async function GET() {
   };
 
   try {
-    const { execSync } = await import("child_process");
-
     // Query all dashboard data in one Python call
     try {
       const pyScript = `
@@ -96,10 +95,7 @@ except: result["cost_today"] = 0
 conn.close()
 print(json.dumps(result))
 `;
-      const pyResult = execSync(
-        `/home/trevor/trevor/venv/bin/python3 -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-        { encoding: "utf-8", timeout: 10000, cwd: "/home/trevor/trevor" }
-      ).trim();
+      const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
       const db = JSON.parse(pyResult);
 
       data.signals.total = db.total || 0;
@@ -113,9 +109,10 @@ print(json.dumps(result))
       data.trainingStats = { trades: db.training?.trades || 0, observations: db.training?.observations || 0, sentiment: db.training?.sentiment || 0, vectors: 0 };
     } catch { /* DB failed — graceful */ }
 
-    // Log tail
+    // Log tail — argv (no shell). allowFailure → empty string on a missing file,
+    // matching the old `2>/dev/null || echo ""` fallback.
     try {
-      const logs = execSync(`tail -8 "${logPath}" 2>/dev/null || echo ""`, { encoding: "utf-8", timeout: 2000 }).trim();
+      const logs = await runCommand("tail", ["-8", logPath], { timeout: 2000, allowFailure: true });
       data.logs = logs ? logs.split("\n").filter(Boolean) : [];
     } catch { /* graceful */ }
 

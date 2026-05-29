@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { runPython, PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPython, runPythonResult } from "@/lib/api-helpers";
 
 // /api/reminders — Hub surface for the bot's ReminderManager.
 //
@@ -18,7 +16,7 @@ const ALLOWED_ACTIONS = new Set(["add", "complete", "cancel", "edit"]);
 
 export async function GET() {
   try {
-    const stdout = runPython("query_reminders.py", []);
+    const stdout = await runPython("query_reminders.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
     return NextResponse.json(
@@ -48,21 +46,22 @@ export async function POST(request: Request) {
     );
   }
 
-  // Spawn directly (NOT runPython) so we can read stdout regardless of exit
-  // code — set_reminders.py emits a JSON payload on exit 1/2/4 too.
-  const scriptPath = join(DASHBOARD_DIR, "set_reminders.py");
-  const result = spawnSync(PYTHON_PATH, [scriptPath, action], {
-    encoding: "utf-8",
-    timeout: 10000,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor" },
-    input: JSON.stringify(body),
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  // runPythonResult (async) so we can read stdout regardless of exit code —
+  // set_reminders.py emits a JSON payload on exit 1/2/4 too. Async → never
+  // blocks the loop.
+  let result;
+  try {
+    result = await runPythonResult("set_reminders.py", [action], {
+      timeout: 10000,
+      input: JSON.stringify(body),
+    });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
 
-  if (result.error) {
+  if (result.timedOut || result.signal) {
     return NextResponse.json(
-      { ok: false, error: String(result.error) },
+      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
       { status: 500 },
     );
   }

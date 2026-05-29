@@ -19,7 +19,7 @@ else:
 conn.close()
 print(json.dumps({"count": row[0] if row else 0}))
 `;
-    const raw = runPythonInline(code, { env: { SINCE: since }, timeout: 5000 });
+    const raw = await runPythonInline(code, { env: { SINCE: since }, timeout: 5000 });
     return NextResponse.json(JSON.parse(raw));
   } catch {
     return NextResponse.json({ count: 0 });

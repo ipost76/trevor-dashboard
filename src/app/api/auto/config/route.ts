@@ -46,7 +46,7 @@ const FALLBACK: AutoConfigResponse = {
 
 export async function GET() {
   try {
-    const raw = runPython("query_auto_config.py", [], { timeout: 5_000 });
+    const raw = await runPython("query_auto_config.py", [], { timeout: 5_000 });
     const data = safeJsonParse<AutoConfigResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

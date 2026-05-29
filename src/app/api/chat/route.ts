@@ -1,45 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
+import { runPython } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Run a python helper with argv array (NO shell) and optional stdin input.
-// NEVER interpolate user-controlled strings into shell commands — all user
-// input crosses the boundary as argv elements or stdin bytes.
-function runPython(
-  scriptPath: string,
-  args: string[],
-  input: string | undefined,
-  timeoutMs: number,
-  cwd: string,
-): string {
-  const pythonPath = join(cwd, "venv", "bin", "python3");
-  const result = spawnSync(pythonPath, [scriptPath, ...args], {
-    encoding: "utf-8",
-    timeout: timeoutMs,
-    cwd,
-    env: { ...process.env, HOME: "/home/trevor" },
-    input,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`python exit=${result.status}: ${(result.stderr || "").slice(0, 500)}`);
-  }
-  return (result.stdout || "").trim();
-}
+// All Python crosses the boundary via the async bridge (argv array / stdin bytes,
+// NO shell). The bridge runs the venv python3 with cwd=TREVOR_DIR and resolves the
+// script relative to DASHBOARD_DIR — identical to the prior local helper, now async
+// so a slow/hung child can never block the event loop.
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action") || searchParams.get("scope") || "health";
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const scriptPath = join(process.cwd(), "chat_bridge.py");
-
   try {
     if (action === "health") {
-      const raw = runPython(scriptPath, ["health"], undefined, 10000, trevorDir);
+      const raw = await runPython("chat_bridge.py", ["health"], { timeout: 10000 });
       return NextResponse.json(JSON.parse(raw));
     }
 
@@ -47,7 +22,7 @@ export async function GET(request: NextRequest) {
       // Whitelist: 1-4 digit integer only. chat_bridge.py does int(argv[2]).
       const limitRaw = searchParams.get("limit") || "50";
       const limit = /^\d{1,4}$/.test(limitRaw) ? limitRaw : "50";
-      const raw = runPython(scriptPath, ["history", limit], undefined, 15000, trevorDir);
+      const raw = await runPython("chat_bridge.py", ["history", limit], { timeout: 15000 });
       return NextResponse.json(JSON.parse(raw));
     }
 
@@ -74,12 +49,10 @@ export async function POST(request: NextRequest) {
 
   // Legacy single-message format — route through chat_bridge as argv (no shell).
   if (!messages && body.message) {
-    const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-    const scriptPath = join(process.cwd(), "chat_bridge.py");
     try {
       // User input crosses as argv[2]. NO shell, NO escape dance. 2000-char cap.
       const msg = String(body.message ?? "").slice(0, 2000);
-      const raw = runPython(scriptPath, ["chat", msg], undefined, 90000, trevorDir);
+      const raw = await runPython("chat_bridge.py", ["chat", msg], { timeout: 90000 });
       return NextResponse.json(JSON.parse(raw));
     } catch (err) {
       return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
@@ -90,13 +63,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No messages provided" }, { status: 400 });
   }
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const aiScript = join(process.cwd(), "chat_ai.py");
-
   try {
     // Pipe JSON via stdin — no shell echo, no interpolation.
     const input = JSON.stringify({ messages: messages.slice(-10) });
-    const raw = runPython(aiScript, [], input, 30000, trevorDir);
+    const raw = await runPython("chat_ai.py", [], { timeout: 30000, input });
     const data = JSON.parse(raw);
     if (data.error) {
       return NextResponse.json({ error: data.error }, { status: 502 });

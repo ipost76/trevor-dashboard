@@ -38,13 +38,13 @@ interface BudgetSnapshot {
   blocked: boolean;
 }
 
-function readBudget(): BudgetSnapshot {
-  const stdout = runPython("query_chat_budget.py", []);
+async function readBudget(): Promise<BudgetSnapshot> {
+  const stdout = await runPython("query_chat_budget.py", []);
   return JSON.parse(stdout) as BudgetSnapshot;
 }
 
-function persistUserMessage(sessionId: number | null, content: string): number {
-  const stdout = runPython("write_chat_log.py", [
+async function persistUserMessage(sessionId: number | null, content: string): Promise<number> {
+  const stdout = await runPython("write_chat_log.py", [
     "user_message",
     String(sessionId ?? 0),
     content,
@@ -53,14 +53,14 @@ function persistUserMessage(sessionId: number | null, content: string): number {
   return parsed.session_id;
 }
 
-function persistAssistantMessage(
+async function persistAssistantMessage(
   sessionId: number,
   content: string,
   tokensIn: number,
   tokensOut: number,
   model: string,
-): void {
-  runPython("write_chat_log.py", [
+): Promise<void> {
+  await runPython("write_chat_log.py", [
     "assistant_message",
     String(sessionId),
     content,
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
   // 1) Budget pre-gate (BEFORE constructing the SDK client).
   let budget: BudgetSnapshot;
   try {
-    budget = readBudget();
+    budget = await readBudget();
   } catch (err) {
     return sseErrorResponse({ error: "budget_read_failed", detail: String(err) });
   }
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
   // first SSE event and can resume the session on subsequent turns.
   let resolvedSessionId: number;
   try {
-    resolvedSessionId = persistUserMessage(body.session_id ?? null, userMsg);
+    resolvedSessionId = await persistUserMessage(body.session_id ?? null, userMsg);
   } catch (err) {
     return sseErrorResponse({ error: "persist_user_failed", detail: String(err) });
   }
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
         const tokensOut = final.usage?.output_tokens ?? 0;
 
         try {
-          persistAssistantMessage(
+          await persistAssistantMessage(
             resolvedSessionId,
             collected,
             tokensIn,

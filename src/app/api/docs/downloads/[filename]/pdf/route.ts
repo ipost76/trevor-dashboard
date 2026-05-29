@@ -41,7 +41,7 @@ export async function GET(
   // subsequent download of the same .md is instant.
   let result: ConvertResult;
   try {
-    const stdout = runPython("convert_md_to_pdf.py", [filename], {
+    const stdout = await runPython("convert_md_to_pdf.py", [filename], {
       timeout: 90_000,
     });
     result = JSON.parse(stdout) as ConvertResult;

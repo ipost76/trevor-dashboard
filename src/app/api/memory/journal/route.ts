@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 50)));
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
   try {
-    const stdout = runPython("query_memory_entries.py", [String(limit), q]);
+    const stdout = await runPython("query_memory_entries.py", [String(limit), q]);
     return NextResponse.json(
       safeJsonParse(stdout, { entries: [], total: 0, data_available: false, filter: q })
     );

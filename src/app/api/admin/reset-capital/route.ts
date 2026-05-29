@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     }
 
     console.log(`[ADMIN_RESET] Capital reset: ${amount}`);
-    const raw = runPython("query_admin_reset.py", ["reset_capital", String(amount)]);
+    const raw = await runPython("query_admin_reset.py", ["reset_capital", String(amount)]);
     return NextResponse.json(safeJsonParse(raw, { success: false }));
   } catch (err) {
     console.error(`[ADMIN_RESET] Capital reset error: ${err}`);

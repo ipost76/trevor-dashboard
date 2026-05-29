@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     if (ticker) args.push(ticker);
     else args.push("");
     args.push(limit);
-    const raw = runPython("query_hub_commands.py", args);
+    const raw = await runPython("query_hub_commands.py", args);
     return NextResponse.json(safeJsonParse(raw, { signals: [] }));
   } catch (err) {
     return NextResponse.json({ signals: [], error: String(err) });

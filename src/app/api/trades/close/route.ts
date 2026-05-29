@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const raw = runPython("query_close.py", ["submit", trade_id, String(price)]);
+    const raw = await runPython("query_close.py", ["submit", trade_id, String(price)]);
     const data = safeJsonParse(raw, { error: "Failed to parse response" });
 
     if (data.error) {

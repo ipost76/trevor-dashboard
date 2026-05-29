@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { spawnSync } from "child_process";
+import { runPython } from "@/lib/api-helpers";
 
 // /api/quality/[id] — approve or reject a quality pattern
 //
@@ -8,9 +8,6 @@ import { spawnSync } from "child_process";
 // Auth: middleware enforces session cookie.
 
 export const dynamic = "force-dynamic";
-
-const PY = "/home/trevor/trevor/venv/bin/python";
-const HELPER = "/home/trevor/trevor-dashboard/query_quality.py";
 
 export async function POST(
   request: Request,
@@ -35,13 +32,9 @@ export async function POST(
       );
     }
 
-    // Rule 26 — spawnSync argv array, no shell. action/pid cross as argv, never a shell string.
-    const proc = spawnSync(PY, [HELPER, action, String(pid)], { timeout: 10_000, encoding: "utf-8" });
-    if (proc.error) throw proc.error;
-    if (proc.status !== 0) {
-      throw new Error(`query_quality exit=${proc.status}: ${(proc.stderr || "").slice(0, 500)}`);
-    }
-    const result = JSON.parse(proc.stdout);
+    // Rule 26 — argv array via async bridge, no shell. action/pid cross as argv.
+    const raw = await runPython("query_quality.py", [action, String(pid)], { timeout: 10_000 });
+    const result = JSON.parse(raw);
 
     return NextResponse.json(result);
   } catch (e) {

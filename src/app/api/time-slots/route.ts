@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { PYTHON_PATH, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,6 @@ export async function GET() {
   }
 
   try {
-    const { execSync } = await import("child_process");
     const code = `
 import sqlite3, json
 db = "/home/trevor/trevor/trevor.db"
@@ -41,13 +40,7 @@ for r in cur.execute("""
 conn.close()
 print(json.dumps({"slots": slots}))
 `;
-    const raw = execSync(`${PYTHON_PATH} -`, {
-      input: code,
-      encoding: "utf-8",
-      timeout: 5000,
-      cwd: TREVOR_DIR,
-      env: { ...process.env, HOME: "/home/trevor" },
-    }).trim();
+    const raw = await runPythonInline(code, { timeout: 5000 });
     const data = JSON.parse(raw);
     cache = { data, ts: Date.now() };
     return NextResponse.json(data);

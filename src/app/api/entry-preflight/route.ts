@@ -50,7 +50,7 @@ print(json.dumps({
 `;
 
   try {
-    const raw = runPythonInline(code, {
+    const raw = await runPythonInline(code, {
       timeout: 5000,
       env: { PF_TICKER: ticker, PF_DIRECTION: direction },
     });

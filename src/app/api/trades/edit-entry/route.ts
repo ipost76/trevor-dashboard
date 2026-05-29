@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update DB via Python helper
-    const raw = runPython("query_edit_entry.py", [trade_id, String(entry_price)]);
+    const raw = await runPython("query_edit_entry.py", [trade_id, String(entry_price)]);
     const result = safeJsonParse<Record<string, unknown>>(raw, { error: "Unknown error" });
 
     if (result.error) {

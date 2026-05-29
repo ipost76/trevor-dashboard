@@ -3,14 +3,14 @@ import { runPython } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-// Rule 26 — user input reaches Python only as spawnSync argv via runPython()
+// Rule 26 — user input reaches Python only as an argv element via runPython()
 // (no shell, no string interpolation). TICKER_RE is defense-in-depth input
 // validation layered on top of that argv bridge.
 const TICKER_RE = /^[A-Z0-9]{1,20}$/;
 
 export async function GET() {
   try {
-    const raw = runPython("manage_watchlist.py", ["list"], { timeout: 10_000 });
+    const raw = await runPython("manage_watchlist.py", ["list"], { timeout: 10_000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ items: [], error: String(err) });
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const raw = runPython("manage_watchlist.py", ["add", ticker], {
+    const raw = await runPython("manage_watchlist.py", ["add", ticker], {
       timeout: 10_000,
     });
     return NextResponse.json(JSON.parse(raw));
@@ -56,7 +56,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const raw = runPython("manage_watchlist.py", ["remove", ticker], {
+    const raw = await runPython("manage_watchlist.py", ["remove", ticker], {
       timeout: 10_000,
     });
     return NextResponse.json(JSON.parse(raw));

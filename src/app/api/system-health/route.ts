@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,6 @@ export async function GET() {
   }
 
   try {
-    const { execSync } = await import("child_process");
-
     const pyScript = `
 import sqlite3, json, time, os
 
@@ -100,10 +99,7 @@ except Exception:
 print(json.dumps(result, default=str))
 `;
 
-    const pyResult = execSync(
-      `/home/trevor/trevor/venv/bin/python3 -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-      { encoding: "utf-8", timeout: 10000, cwd: "/home/trevor/trevor" }
-    ).trim();
+    const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
     const data = JSON.parse(pyResult);
 
     const responseData = {

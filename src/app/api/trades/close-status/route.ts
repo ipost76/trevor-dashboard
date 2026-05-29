@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const raw = runPython("query_close.py", ["status", tradeId]);
+    const raw = await runPython("query_close.py", ["status", tradeId]);
     const data = safeJsonParse(raw, { status: "unknown" });
     return NextResponse.json(data);
   } catch (err) {

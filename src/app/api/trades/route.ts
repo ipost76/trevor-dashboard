@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
 import { runPython, runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -15,22 +14,12 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 500);
   const offset = parseInt(searchParams.get("offset") || "0");
 
-  const trevorDir = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
-  const pythonPath = join(trevorDir, "venv", "bin", "python3");
-  const dashboardDir = process.cwd();
-  const scriptPath = join(dashboardDir, "query_trades.py");
-
   try {
-    const { execSync } = await import("child_process");
-
     if (scope === "active") {
       if (_activeTradesCache && (Date.now() - _activeTradesCache.ts) < ACTIVE_CACHE_TTL) {
         return NextResponse.json({ ..._activeTradesCache.data, cached: true });
       }
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} active`,
-        { encoding: "utf-8", timeout: 15000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = await runPython("query_trades.py", ["active"], { timeout: 15000 });
       const parsed = JSON.parse(raw);
       _activeTradesCache = { data: parsed, ts: Date.now() };
       return NextResponse.json(parsed);
@@ -47,8 +36,8 @@ export async function GET(request: NextRequest) {
       if (direction) filters.direction = direction;
       if (search) filters.search = search;
 
-      // Rule 26 — args (incl. user filters) cross as a spawnSync argv array via runPython(), never a shell string.
-      const raw = runPython(
+      // Rule 26 — args (incl. user filters) cross as an argv array via runPython(), never a shell string.
+      const raw = await runPython(
         "query_trades.py",
         ["history", String(limit), String(offset), JSON.stringify(filters)],
         { timeout: 15000 }
@@ -58,10 +47,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (scope === "watchlist") {
-      const raw = execSync(
-        `${pythonPath} ${scriptPath} watchlist`,
-        { encoding: "utf-8", timeout: 10000, cwd: trevorDir, env: { ...process.env, HOME: "/home/trevor" } }
-      ).trim();
+      const raw = await runPython("query_trades.py", ["watchlist"], { timeout: 10000 });
       return NextResponse.json(JSON.parse(raw));
     }
 
@@ -89,8 +75,8 @@ export async function PUT(request: NextRequest) {
   const payload = JSON.stringify({ id, notes, training_status });
 
   try {
-    // Rule 26 — payload crosses as a spawnSync argv element via runPython(), never a shell string.
-    const raw = runPython("query_trades.py", ["annotate", payload], { timeout: 10000 });
+    // Rule 26 — payload crosses as an argv element via runPython(), never a shell string.
+    const raw = await runPython("query_trades.py", ["annotate", payload], { timeout: 10000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
@@ -102,9 +88,9 @@ export async function DELETE(request: NextRequest) {
   const { id, ids, trade_id } = body;
 
   try {
-    // Rule 26 — ids / deleteId cross as spawnSync argv elements via runPython(), never a shell string.
+    // Rule 26 — ids / deleteId cross as argv elements via runPython(), never a shell string.
     if (Array.isArray(ids) && ids.length > 0) {
-      const raw = runPython(
+      const raw = await runPython(
         "query_trades.py",
         ["bulk_update", JSON.stringify(ids), "EXCLUDE"],
         { timeout: 15000 }
@@ -114,7 +100,7 @@ export async function DELETE(request: NextRequest) {
 
     const deleteId = trade_id || id;
     if (deleteId != null) {
-      const raw = runPython("query_trades.py", ["delete_trade", String(deleteId)], { timeout: 15000 });
+      const raw = await runPython("query_trades.py", ["delete_trade", String(deleteId)], { timeout: 15000 });
       return NextResponse.json(JSON.parse(raw));
     }
 
@@ -157,7 +143,7 @@ else:
 `;
 
   try {
-    const raw = runPythonInline(code, {
+    const raw = await runPythonInline(code, {
       timeout: 5000,
       env: { PATCH_TRADE_ID: trade_id, PATCH_MARGIN_USD: String(margin_usd) },
     });

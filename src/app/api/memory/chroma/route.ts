@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   else args = ["search", collection, q, limit];
 
   try {
-    const stdout = runPython("query_chroma_browse.py", args, { timeout: 60000 });
+    const stdout = await runPython("query_chroma_browse.py", args, { timeout: 60000 });
     const data = safeJsonParse(stdout, { mode, error: "parse failure" });
     if (mode === "list") _listCache = { data, ts: Date.now() };
     return NextResponse.json(data, mode === "list" ? { headers: { "X-Cache": "MISS" } } : undefined);

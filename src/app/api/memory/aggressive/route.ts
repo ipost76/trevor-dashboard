@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { runPython, PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPython, runPythonResult } from "@/lib/api-helpers";
 
 // /api/memory/aggressive — G2 single-write surface for Aggressive Mode.
 //
@@ -20,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const stdout = runPython("query_aggressive.py", []);
+    const stdout = await runPython("query_aggressive.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
     return NextResponse.json(
@@ -54,20 +52,22 @@ export async function POST(request: Request) {
     );
   }
 
-  // We use spawnSync directly (NOT runPython) so we can read stdout regardless
+  // runPythonResult (async, NOT runPython) so we can read stdout regardless
   // of exit code — set_aggressive.py exits 3 on gate-lock and we still want to
   // surface its JSON payload to the caller (and map exit 3 → HTTP 423).
-  const scriptPath = join(DASHBOARD_DIR, "set_aggressive.py");
-  const result = spawnSync(PYTHON_PATH, [scriptPath, value, author], {
-    encoding: "utf-8",
-    timeout: 10000,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor" },
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  // Async → never blocks the loop; hung child SIGKILLed (process-group) at timeout.
+  let result;
+  try {
+    result = await runPythonResult("set_aggressive.py", [value, author], { timeout: 10000 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
 
-  if (result.error) {
-    return NextResponse.json({ ok: false, error: String(result.error) }, { status: 500 });
+  if (result.timedOut || result.signal) {
+    return NextResponse.json(
+      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
+      { status: 500 },
+    );
   }
 
   let parsed: Record<string, unknown> = {};

@@ -14,7 +14,7 @@ const EMPTY = {
 
 export async function GET() {
   try {
-    const stdout = runPython("query_dashboard_calibration.py", [], { timeout: 8000 });
+    const stdout = await runPython("query_dashboard_calibration.py", [], { timeout: 8000 });
     return NextResponse.json(safeJsonParse(stdout, EMPTY));
   } catch (err) {
     return NextResponse.json({ ...EMPTY, message: String(err) }, { status: 200 });

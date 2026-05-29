@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { spawnSync } from "child_process";
+import { runPython } from "@/lib/api-helpers";
 
 // /api/quality — Signal Quality Intelligence summary
 //
@@ -16,8 +16,6 @@ import { spawnSync } from "child_process";
 
 export const dynamic = "force-dynamic";
 
-const PY = "/home/trevor/trevor/venv/bin/python";
-const HELPER = "/home/trevor/trevor-dashboard/query_quality.py";
 const CACHE_TTL = 60_000;
 const ALLOWED_SCOPES = new Set([
   "summary",
@@ -32,18 +30,10 @@ const ALLOWED_SCOPES = new Set([
 
 const _cache: Map<string, { data: unknown; ts: number }> = new Map();
 
-function runHelper(args: string[]): unknown {
-  // spawnSync with argv — no shell interpolation.
-  const result = spawnSync(PY, [HELPER, ...args], {
-    timeout: 15_000,
-    encoding: "utf-8",
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`quality helper exit=${result.status}: ${(result.stderr || "").slice(0, 500)}`);
-  }
-  return JSON.parse(result.stdout || "null");
+async function runHelper(args: string[]): Promise<unknown> {
+  // Async bridge — argv, no shell interpolation, never blocks the event loop.
+  const raw = await runPython("query_quality.py", args, { timeout: 15_000 });
+  return JSON.parse(raw || "null");
 }
 
 export async function GET(request: Request) {
@@ -93,7 +83,7 @@ export async function GET(request: Request) {
       return NextResponse.json(cached.data);
     }
 
-    const data = runHelper(helperArgs);
+    const data = await runHelper(helperArgs);
     _cache.set(cacheKey, { data, ts: now });
     return NextResponse.json(data);
   } catch (e) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runPythonInline, runCommand } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -25,13 +26,15 @@ export async function GET() {
   let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
 
   try {
-    const { execSync } = await import("child_process");
-
-    // Get TREVOR PID
+    // Get TREVOR PID — argv, no shell (was `systemctl ... || echo 0`). allowFailure
+    // returns empty stdout on a missing unit → parseInt → 0, same as the old fallback.
     try {
-      const pidResult = execSync(
-        `systemctl show ${trevorService} --property=MainPID --value 2>/dev/null || echo "0"`,
-        { encoding: "utf-8", timeout: 3000 }
+      const pidResult = (
+        await runCommand(
+          "systemctl",
+          ["show", trevorService, "--property=MainPID", "--value"],
+          { timeout: 3000, allowFailure: true },
+        )
       ).trim();
       trevorPid = parseInt(pidResult) || 0;
       trevorRunning = trevorPid > 0;
@@ -59,10 +62,7 @@ except: result["recent"] = []
 conn.close()
 print(json.dumps(result))
 `;
-      const pyResult = execSync(
-        `/home/trevor/trevor/venv/bin/python3 -c '${pyScript.replace(/'/g, "'\"'\"'")}'`,
-        { encoding: "utf-8", timeout: 8000, cwd: "/home/trevor/trevor" }
-      ).trim();
+      const pyResult = await runPythonInline(pyScript, { timeout: 8000 });
       const dbData = JSON.parse(pyResult);
       signalStats.total = dbData.total || 0;
       recentSignals = dbData.recent || [];

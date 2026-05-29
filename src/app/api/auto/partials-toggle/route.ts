@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { runPython, PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPython, runPythonResult } from "@/lib/api-helpers";
 
 // /api/auto/partials-toggle — Hub write surface for LIVE_PARTIALS_ENABLED
 // (B4, 2026-05-27). Defaults to false; toggle promotes Layer 5 partial
@@ -25,7 +23,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const stdout = runPython("query_live_partials_enabled.py", []);
+    const stdout = await runPython("query_live_partials_enabled.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
     return NextResponse.json(
@@ -58,21 +56,22 @@ export async function POST(request: Request) {
     );
   }
 
-  // spawnSync directly (NOT runPython) so we read stdout regardless of exit
+  // runPythonResult (async, NOT runPython) so we read stdout regardless of exit
   // code — set_live_partials_enabled.py exits 3 on gate-lock and we want to
   // surface its JSON payload while mapping exit 3 → HTTP 423. argv passes
-  // values without shell interpolation per Rule 26.
-  const scriptPath = join(DASHBOARD_DIR, "set_live_partials_enabled.py");
-  const result = spawnSync(PYTHON_PATH, [scriptPath, value, author], {
-    encoding: "utf-8",
-    timeout: 10000,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor" },
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  // values without shell interpolation per Rule 26. Async → never blocks the loop.
+  let result;
+  try {
+    result = await runPythonResult("set_live_partials_enabled.py", [value, author], { timeout: 10000 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
 
-  if (result.error) {
-    return NextResponse.json({ ok: false, error: String(result.error) }, { status: 500 });
+  if (result.timedOut || result.signal) {
+    return NextResponse.json(
+      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
+      { status: 500 },
+    );
   }
 
   let parsed: Record<string, unknown> = {};

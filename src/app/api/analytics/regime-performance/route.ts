@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { execSync } = await import("child_process");
-
     const pyScript = `
 import sqlite3, json
 
@@ -37,10 +36,7 @@ else:
     print(json.dumps({"available": True, "total_trades_with_regime": total_with, "total_trades_without_regime": total_without, "regimes": regimes, "recommendation": rec}))
 `;
 
-    const pyResult = execSync(
-      `/home/trevor/trevor/venv/bin/python3 -`,
-      { input: pyScript, encoding: "utf-8", timeout: 10000, cwd: "/home/trevor/trevor" }
-    ).trim();
+    const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
     return NextResponse.json(JSON.parse(pyResult));
   } catch (error) {
     console.error("[Analytics Regime] Error:", error);

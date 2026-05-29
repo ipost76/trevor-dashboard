@@ -8,8 +8,8 @@ export async function GET(request: NextRequest) {
   const scope = searchParams.get("scope") || "brain";
 
   try {
-    // Rule 26 — scope crosses to Python as a spawnSync argv element via runPython(), never a shell string.
-    const raw = runPython("query_brain.py", [scope], { timeout: 30000 });
+    // Rule 26 — scope crosses to Python as an argv element via runPython(), never a shell string.
+    const raw = await runPython("query_brain.py", [scope], { timeout: 30000 });
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     const errMsg = String(err);
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      const raw = runPython("manage_brain.py", ["write_file", name, content], { timeout: 15000 });
+      const raw = await runPython("manage_brain.py", ["write_file", name, content], { timeout: 15000 });
       return NextResponse.json(safeJsonParse(raw, { error: "Failed to parse response" }));
     }
 
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       if (!collection) {
         return NextResponse.json({ error: "collection required" }, { status: 400 });
       }
-      const raw = runPython(
+      const raw = await runPython(
         "manage_brain.py",
         ["chroma_browse", collection, String(limit), String(offset)],
         { timeout: 30000 }
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       if (!query) {
         return NextResponse.json({ error: "query required" }, { status: 400 });
       }
-      const raw = runPython(
+      const raw = await runPython(
         "manage_brain.py",
         ["chroma_search", collection, query, String(limit)],
         { timeout: 30000 }
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       if (!document) {
         return NextResponse.json({ error: "document required" }, { status: 400 });
       }
-      const raw = runPython(
+      const raw = await runPython(
         "manage_brain.py",
         ["chroma_add", collection, document, JSON.stringify(metadata)],
         { timeout: 15000 }
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       if (!entry_id) {
         return NextResponse.json({ error: "entry_id required" }, { status: 400 });
       }
-      const raw = runPython(
+      const raw = await runPython(
         "manage_brain.py",
         ["chroma_delete", collection, entry_id],
         { timeout: 15000 }

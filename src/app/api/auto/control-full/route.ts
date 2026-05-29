@@ -45,7 +45,7 @@ const FALLBACK: ControlFullResponse = {
 
 export async function GET() {
   try {
-    const raw = runPython("query_control_full.py", [], { timeout: 8_000 });
+    const raw = await runPython("query_control_full.py", [], { timeout: 8_000 });
     const data = safeJsonParse<ControlFullResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

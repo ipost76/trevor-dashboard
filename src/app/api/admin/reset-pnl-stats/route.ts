@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
 
     console.log("[ADMIN_RESET] P&L stats reset");
-    const raw = runPython("query_admin_reset.py", ["reset_pnl_stats"]);
+    const raw = await runPython("query_admin_reset.py", ["reset_pnl_stats"]);
     return NextResponse.json(safeJsonParse(raw, { success: false }));
   } catch (err) {
     console.error(`[ADMIN_RESET] P&L reset error: ${err}`);

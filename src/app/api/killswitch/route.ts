@@ -25,7 +25,7 @@ export async function GET() {
     if (_cache && now - _cache.ts < CACHE_TTL) {
       return NextResponse.json(_cache.data);
     }
-    const raw = runPython("query_killswitch_state.py", [], { timeout: 5_000 });
+    const raw = await runPython("query_killswitch_state.py", [], { timeout: 5_000 });
     const data = JSON.parse(raw);
     _cache = { data, ts: now };
     return NextResponse.json(data);
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
   try {
     const stdin = JSON.stringify({ action, reason, author });
-    const raw = runPython("set_killswitch.py", [], { timeout: 8_000, input: stdin });
+    const raw = await runPython("set_killswitch.py", [], { timeout: 8_000, input: stdin });
     const data = JSON.parse(raw);
 
     // Bust the GET cache so the topbar pill + System Health card see fresh

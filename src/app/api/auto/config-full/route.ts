@@ -43,7 +43,7 @@ const FALLBACK: ConfigFullResponse = {
 
 export async function GET() {
   try {
-    const raw = runPython("query_config_full.py", [], { timeout: 8_000 });
+    const raw = await runPython("query_config_full.py", [], { timeout: 8_000 });
     const data = safeJsonParse<ConfigFullResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {

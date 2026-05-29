@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { runCommand } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +16,15 @@ const REPO_DIR = "/home/trevor/trevor";
 let cached: { total: number; commits: Commit[] } | null = null;
 let cacheTime = 0;
 
-function loadCommits() {
+async function loadCommits() {
   const now = Date.now();
   if (cached && now - cacheTime < 60_000) return cached;
   try {
-    const raw = execSync(
-      `git -C ${REPO_DIR} log --format="%H|%h|%aI|%an|%s" --no-merges`,
-      { encoding: "utf-8", timeout: 10_000 }
+    // argv (no shell) — the --format token is one element, no quoting needed.
+    const raw = await runCommand(
+      "git",
+      ["-C", REPO_DIR, "log", "--format=%H|%h|%aI|%an|%s", "--no-merges"],
+      { timeout: 10_000 }
     );
     const commits: Commit[] = raw
       .trim()
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50")));
   const search = (searchParams.get("search") || "").toLowerCase().trim();
 
-  const data = loadCommits();
+  const data = await loadCommits();
   let filtered = data.commits;
 
   if (search) {

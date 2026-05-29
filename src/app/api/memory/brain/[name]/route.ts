@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<Param
   const err = validateName(name);
   if (err) return NextResponse.json({ error: err }, { status: 400 });
   try {
-    const stdout = runPython("query_brain_read.py", [name]);
+    const stdout = await runPython("query_brain_read.py", [name]);
     return NextResponse.json(safeJsonParse(stdout, { error: "parse failure" }));
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 200 });
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<Param
   }
 
   try {
-    const stdout = runPython("write_brain_file.py", [name, body.author], { input: body.content });
+    const stdout = await runPython("write_brain_file.py", [name, body.author], { input: body.content });
     const data = safeJsonParse<{ error?: string; ok?: boolean }>(stdout, { error: "parse failure" });
     if (data.error) return NextResponse.json(data, { status: 423 });
     return NextResponse.json(data);

@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPythonResult } from "@/lib/api-helpers";
 
 // PATCH /api/auto/control-full/[key] — D2 (Control Center) write surface.
 //
@@ -56,20 +54,19 @@ export async function PATCH(
   const author = String(body.author ?? "ghost").trim() || "ghost";
   const reason = String(body.reason ?? "").trim();
 
-  const scriptPath = join(DASHBOARD_DIR, "write_control_value.py");
-  const argv = reason
-    ? [scriptPath, key, value, author, reason]
-    : [scriptPath, key, value, author];
-  const result = spawnSync(PYTHON_PATH, argv, {
-    encoding: "utf-8",
-    timeout: 10_000,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor" },
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  const argv = reason ? [key, value, author, reason] : [key, value, author];
+  let result;
+  try {
+    result = await runPythonResult("write_control_value.py", argv, { timeout: 10_000 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
 
-  if (result.error) {
-    return NextResponse.json({ ok: false, error: String(result.error) }, { status: 500 });
+  if (result.timedOut || result.signal) {
+    return NextResponse.json(
+      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
+      { status: 500 },
+    );
   }
 
   let parsed: Record<string, unknown> = {};

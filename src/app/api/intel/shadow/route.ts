@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const stdout = runPython("query_shadow_status.py", []);
+    const stdout = await runPython("query_shadow_status.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (err) {
     return NextResponse.json({ shadow: {}, error: String(err) }, { status: 200 });

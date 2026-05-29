@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const stdout = runPython("query_partial_shadow.py", []);
+    const stdout = await runPython("query_partial_shadow.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (err) {
     return NextResponse.json(

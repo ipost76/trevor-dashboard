@@ -1,26 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { join } from "path";
-import { TREVOR_DIR } from "@/lib/api-helpers";
+import { runPythonInline } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
 
-const PYTHON_PATH = join(TREVOR_DIR, "venv", "bin", "python3");
-
+// Async inline-python wrapper — code via stdin (no shell), never blocks the loop.
 function runInlinePython(
   code: string,
   extraEnv?: Record<string, string>,
   timeout = 10000
-): string {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { execSync } = require("child_process");
-  // Pass code via stdin to avoid shell quoting issues
-  return execSync(`${PYTHON_PATH} -`, {
-    encoding: "utf-8",
-    input: code,
-    timeout,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor", ...extraEnv },
-  }).trim();
+): Promise<string> {
+  return runPythonInline(code, { timeout, env: extraEnv });
 }
 
 export async function GET() {
@@ -108,7 +97,7 @@ print(json.dumps({"entries": entries}))
 `.trim();
 
   try {
-    const raw = runInlinePython(script);
+    const raw = await runInlinePython(script);
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
     return NextResponse.json(
@@ -156,7 +145,7 @@ with open(path, "w", encoding="utf-8") as f:
 print(json.dumps({"ok": True, "filename": filename}))
 `.trim();
 
-    const raw = runInlinePython(script, {
+    const raw = await runInlinePython(script, {
       JOURNAL_TITLE: safeTitle,
       JOURNAL_CONTENT: safeContent,
     });
@@ -210,7 +199,7 @@ else:
     print(json.dumps({"ok": True, "deleted": filename}))
 `.trim();
 
-    const raw = runInlinePython(script, {
+    const raw = await runInlinePython(script, {
       JOURNAL_FILENAME: safeFilename,
     });
 

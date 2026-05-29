@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { spawnSync } from "child_process";
-import { PYTHON_PATH, DASHBOARD_DIR, TREVOR_DIR } from "@/lib/api-helpers";
+import { runPythonResult } from "@/lib/api-helpers";
 
 // PATCH /api/auto/config-full/[key] — D1 (Config editor) write surface.
 //
@@ -49,20 +47,21 @@ export async function PATCH(
   const value = String(body.value);
   const author = String(body.author ?? "ghost").trim() || "ghost";
 
-  // spawnSync directly so non-zero exit codes don't throw — write_config_value.py
+  // runPythonResult (async) so non-zero exit codes don't throw — write_config_value.py
   // signals gate-lock via exit 3 → HTTP 423; bad input via exit 1 → HTTP 400.
-  // argv array per Rule 26 (no shell, no interpolation).
-  const scriptPath = join(DASHBOARD_DIR, "write_config_value.py");
-  const result = spawnSync(PYTHON_PATH, [scriptPath, key, value, author], {
-    encoding: "utf-8",
-    timeout: 10_000,
-    cwd: TREVOR_DIR,
-    env: { ...process.env, HOME: "/home/trevor" },
-    maxBuffer: 1 * 1024 * 1024,
-  });
+  // argv array per Rule 26 (no shell, no interpolation). Async → never blocks the loop.
+  let result;
+  try {
+    result = await runPythonResult("write_config_value.py", [key, value, author], { timeout: 10_000 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
 
-  if (result.error) {
-    return NextResponse.json({ ok: false, error: String(result.error) }, { status: 500 });
+  if (result.timedOut || result.signal) {
+    return NextResponse.json(
+      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
+      { status: 500 },
+    );
   }
 
   let parsed: Record<string, unknown> = {};

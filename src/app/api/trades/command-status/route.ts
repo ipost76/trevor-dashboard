@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "trade_id required" }, { status: 400 });
   }
   try {
-    const raw = runPython("query_hub_commands.py", ["status", tradeId]);
+    const raw = await runPython("query_hub_commands.py", ["status", tradeId]);
     return NextResponse.json(safeJsonParse(raw, { status: "unknown" }));
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
