@@ -4,6 +4,7 @@ import { ScalperHeader } from "./scalper-header";
 import { CapitalHero } from "./capital-hero";
 import { ActivePositionCard } from "./active-position-card";
 import { ProfitRiskPanel } from "./profit-risk-panel";
+import { LeverageRegimePanel } from "./leverage-regime-panel";
 import { WatchlistGrid } from "./watchlist-grid";
 
 export function DashboardTab() {
@@ -13,6 +14,7 @@ export function DashboardTab() {
       <CapitalHero />
       <ActivePositionCard />
       <ProfitRiskPanel />
+      <LeverageRegimePanel />
       <WatchlistGrid />
     </div>
   );
