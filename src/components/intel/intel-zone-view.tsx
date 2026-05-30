@@ -2,6 +2,7 @@
 import * as React from "react";
 import { NotesSection } from "./notes-section";
 import { ShadowOverview } from "./shadow-overview";
+import { ShadowCompareSection } from "./shadow-compare-section";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
 
@@ -36,6 +37,8 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
   switch (subtab) {
     case "shadow":
       return <ShadowOverview />;
+    case "promote":
+      return <ShadowCompareSection />;
     case "lessons":
       return <LessonsSection />;
     case "journal":
