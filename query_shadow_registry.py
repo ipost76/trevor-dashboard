@@ -58,6 +58,7 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     # Data (2)
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "Data",    "ts",              "unix", True),
     ("whale_source_shadow_log",       "Whale Source Log",           "Data",    "ts",              "unix", True),
+    ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "Data",    "created_at",      "iso",  False),
 ]
 
 

@@ -283,6 +283,7 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("partial_trigger_shadow",        "Partial Triggers",           "created_at",      "iso",  False, None),
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "created_at",      "iso",  False, None),
     ("stop_floor_v2_shadow",          "Stop Floor V2",              "created_at",      "iso",  False, None),
+    ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "created_at",      "iso",  False, None),
 ]
 
 
