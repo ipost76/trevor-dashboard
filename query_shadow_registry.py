@@ -35,7 +35,8 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("time_gate_shadow",              "Time Gate (P06)",            "Entry",   "ts",              "iso",  True),
     ("double_filter_shadow_v1",       "Double Filter (Guard+Gate)", "Entry",   "ts",              "iso",  True),
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "Entry",   "created_at",      "iso",  False),
-    # Exit (7)
+    # Exit (8)
+    ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "Exit",    "created_at",      "iso",  False),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "Exit",    "cycle_timestamp", "iso",  True),
     ("gap_watchdog_shadow",           "Gap Watchdog",               "Exit",    "created_at",      "iso",  True),
     ("slippage_audit",                "Slippage Audit",             "Exit",    "created_at",      "iso",  True),

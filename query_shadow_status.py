@@ -275,8 +275,9 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("threshold_recalibration_shadow","Threshold Recalibration",    "timestamp",       "iso",  True,  _ks_threshold_recal),
     ("time_gate_shadow",              "Time Gate (P06)",            "ts",              "iso",  True,  _ks_time_gate),
     ("whale_source_shadow_log",       "Whale Source Log",           "ts",              "unix", True,  _ks_whale_source),
-    # --- DORMANT (6 — expected to be 0 / stale; not BROKEN) ------------------
+    # --- DORMANT (7 — expected to be 0 / stale; not BROKEN) ------------------
     ("exit_engine_shadow",            "Exit Engine",                "created_at",      "iso",  False, None),
+    ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "created_at",      "iso",  False, None),
     ("group_weight_shadow",           "Group Weight",               "timestamp",       "iso",  False, None),
     ("live_partial_shadow",           "Live Partials",              "created_at",      "iso",  False, None),
     ("partial_trigger_shadow",        "Partial Triggers",           "created_at",      "iso",  False, None),
