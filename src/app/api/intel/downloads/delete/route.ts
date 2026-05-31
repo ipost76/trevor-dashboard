@@ -21,6 +21,16 @@ export async function POST(req: NextRequest) {
   try {
     const stdout = await runPython("query_downloads.py", ["delete", filename]);
     const data = JSON.parse(stdout);
+    // Loud on the Hub side: the file is gone locally but the Discord message
+    // was NOT deleted. Surfaces in `journalctl -u trevor-dashboard.service`.
+    // (The 2026-05-31 bug was silent precisely because nothing logged this.)
+    if (data && data.success === true && data.discord_deleted === false) {
+      console.error(
+        `[downloads/delete] LOCAL DELETE OK but DISCORD DELETE FAILED for "${filename}" ` +
+          `(msg_id=${data.discord_msg_id ?? "?"}) — message orphaned in #downloads. ` +
+          `See /home/trevor/trevor/logs/downloads_delete.log for the reason.`,
+      );
+    }
     return NextResponse.json(data, { status: data.success ? 200 : 404 });
   } catch (err) {
     return NextResponse.json({ success: false, filename, error: String(err) }, { status: 500 });
