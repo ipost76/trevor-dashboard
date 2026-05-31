@@ -76,19 +76,34 @@ export function ActivePositionCard() {
 
   React.useEffect(() => {
     let cancelled = false;
-    const fetchAll = async () => {
-      try {
-        const [snapRes, priceRes] = await Promise.all([
-          fetch("/api/auto/trades?type=open&limit=10", { cache: "no-store" }),
-          fetch(`/api/prices?tickers=${WATCH_TICKERS.join(",")}`, {
-            cache: "no-store",
-          }),
-        ]);
 
+    // Open positions come from a Python subprocess (slow) — keep at 15s.
+    const fetchTrades = async () => {
+      try {
+        const snapRes = await fetch("/api/auto/trades?type=open&limit=10", {
+          cache: "no-store",
+        });
         if (snapRes.ok && !cancelled) {
           const j = (await snapRes.json()) as OpenTradesResponse;
           setPositions(j.positions ?? []);
         }
+      } catch {
+        /* keep last good state */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    // LP-01 (2026-05-31): live price half polls at 2s so unrealized P&L
+    // (recomputed below from entry + live price) ticks live. /api/prices serves
+    // the WS-fed store → zero HL REST per poll; single persistent WS. The
+    // expensive open-positions fetch stays at 15s.
+    const fetchPrices = async () => {
+      try {
+        const priceRes = await fetch(
+          `/api/prices?tickers=${WATCH_TICKERS.join(",")}`,
+          { cache: "no-store" },
+        );
         if (priceRes.ok && !cancelled) {
           const j = (await priceRes.json()) as PricesResponse;
           const pm: PriceMap = {};
@@ -99,15 +114,17 @@ export function ActivePositionCard() {
         }
       } catch {
         /* keep last good state */
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     };
-    fetchAll();
-    const id = setInterval(fetchAll, 15_000);
+
+    fetchTrades();
+    fetchPrices();
+    const tradesId = setInterval(fetchTrades, 15_000);
+    const pricesId = setInterval(fetchPrices, 2_000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearInterval(tradesId);
+      clearInterval(pricesId);
     };
   }, []);
 

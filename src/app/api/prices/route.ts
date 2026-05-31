@@ -18,6 +18,49 @@ const COINGECKO_IDS: Record<string, string> = {
 type PriceEntry = { price: number; source: string; stale: boolean };
 type PriceMap = Record<string, PriceEntry>;
 
+// LP-01 (2026-05-31): the Observatory aiohttp endpoint (:3335) serves live HL
+// allMids from its single persistent WebSocket (one WS for the whole system,
+// regardless of UI poll rate). When fresh we serve from it → ZERO HL REST per
+// poll, so the 2s client cadence never touches Hyperliquid. When stale/down/
+// incomplete we fall through to the EXISTING 30s-cached HL→CG SWR chain below,
+// byte-identical to the prior contract (incl. per-ticker `stale`). The 30s
+// cache stays the REST safety net — the WS feeds on top of it, never replaces it.
+const OBSERVATORY_PRICES_URL = "http://127.0.0.1:3335/api/prices";
+
+interface WsPriceState {
+  stale: boolean;
+  mids: Record<string, string>;
+}
+
+// Try the WS feed. Returns a complete PriceMap ONLY when the feed is fresh AND
+// covers every requested ticker (case-insensitive, HL uses mixed-case "kPEPE");
+// otherwise null → caller falls back to the cached REST chain. Never throws.
+async function tryWsPrices(tickers: string[]): Promise<PriceMap | null> {
+  try {
+    const res = await fetch(OBSERVATORY_PRICES_URL, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    const state = (await res.json()) as WsPriceState;
+    if (state.stale || !state.mids) return null;
+    const byUpper: Record<string, number> = {};
+    for (const [sym, val] of Object.entries(state.mids)) {
+      const px = parseFloat(val);
+      if (Number.isFinite(px) && px > 0) byUpper[sym.toUpperCase()] = px;
+    }
+    const out: PriceMap = {};
+    for (const t of tickers) {
+      const px = byUpper[t.toUpperCase()];
+      if (!px) return null; // incomplete coverage → defer to the REST chain
+      out[t] = { price: px, source: "hyperliquid", stale: false };
+    }
+    return out;
+  } catch {
+    return null; // unreachable / timeout / parse error → REST fallback
+  }
+}
+
 // 30s read-through cache keyed by the normalized ticker set, with single-flight
 // dedup + stale-while-revalidate + a per-origin (HL/CG) concurrency cap (RM-DASH
 // 2026-05-29 — kills the cache-stampede wedge: the synchronous JSON.parse of HL's
@@ -118,6 +161,19 @@ export async function GET(request: NextRequest) {
   // by the exact strings the caller passed, so callers read prices back by the
   // same ticker they requested.
   const tickers = tickerParam.split(",").map((t) => t.trim());
+
+  // LP-01: WS-first. When the Observatory feed is fresh + complete, serve it
+  // directly (no HL REST, no SWR cache touched). On stale/down/incomplete this
+  // returns null and we fall through to the unchanged cached REST chain below —
+  // so the fallback path's `stale` semantics stay byte-identical to the prior
+  // contract. Response shape identical either way.
+  const wsPrices = await tryWsPrices(tickers);
+  if (wsPrices) {
+    return NextResponse.json({
+      prices: wsPrices,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   // Cache key = normalized (sorted) ticker set. Case-sensitive so response keys
   // keep the caller's exact casing; all three production callers (PriceStrip,

@@ -26,7 +26,10 @@ export default function PriceStrip() {
       } catch { /* ignore */ }
     };
     fetchPrices();
-    const iv = setInterval(fetchPrices, 30_000);
+    // LP-01 (2026-05-31): 2s live cadence. /api/prices serves the WS-fed store
+    // (zero HL REST per poll); only falls back to the 30s-cached REST chain when
+    // the WS feed is stale. Single persistent WS regardless of this rate.
+    const iv = setInterval(fetchPrices, 2_000);
     return () => clearInterval(iv);
   }, []);
 
