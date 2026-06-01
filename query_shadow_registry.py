@@ -38,7 +38,7 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("exhaustion_entry_shadow",       "Exhaustion Entry (S3-P04)",  "Entry",   "created_at",      "iso",  True),
     ("orderflow_entry_shadow",        "Orderflow Entry (S3-P08)",   "Entry",   "created_at",      "iso",  True),
     ("trend_floor_shadow",            "Trend Floor",                "Entry",   "ts",              "iso",  True),
-    # Exit (12)
+    # Exit (11) — exit_engine_shadow RETIRED 2026-06-01 (P06), see RETIRED_TABLE_DEFS
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "Exit",    "created_at",      "iso",  False),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "Exit",    "cycle_timestamp", "iso",  True),
     ("gap_watchdog_shadow",           "Gap Watchdog",               "Exit",    "created_at",      "iso",  True),
@@ -47,7 +47,6 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("trail_v3_shadow",               "Trail V3",                   "Exit",    "created_at",      "iso",  True),
     ("partial_trigger_shadow",        "Partial Triggers",           "Exit",    "created_at",      "iso",  True),
     ("live_partial_shadow",           "Live Partials",              "Exit",    "created_at",      "iso",  False),
-    ("exit_engine_shadow",            "Exit Engine",                "Exit",    "created_at",      "iso",  False),
     ("cvd_oi_exit_shadow",            "CVD/OI Exit (S3-P02)",       "Exit",    "created_at",      "iso",  True),
     ("reversal_exit_shadow",          "Reversal Exit (S3-P03)",     "Exit",    "created_at",      "iso",  True),
     ("session_exit_shadow",           "Session/Time Exit (S3-P06)", "Exit",    "created_at",      "iso",  True),
@@ -57,14 +56,36 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("calibrator_audit",              "Calibrator V1 Audit",        "Scoring", "timestamp",       "iso",  True),
     ("calibration_v2_audit",          "Calibrator V2 Audit",        "Scoring", "timestamp",       "iso",  True),
     ("group_weight_shadow",           "Group Weight",               "Scoring", "timestamp",       "iso",  False),
-    # Risk (3)
-    ("leverage_v2_shadow",            "Leverage V2",                "Risk",    "created_at",      "iso",  True),
+    # Risk (2) — leverage_v2_shadow RETIRED 2026-06-01 (P06), see RETIRED_TABLE_DEFS
     ("sizing_v2_shadow",              "Sizing V2",                  "Risk",    "created_at",      "iso",  True),
     ("stop_floor_v2_shadow",          "Stop Floor V2",              "Risk",    "created_at",      "iso",  False),
     # Data (3)
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "Data",    "ts",              "unix", True),
     ("whale_source_shadow_log",       "Whale Source Log",           "Data",    "ts",              "unix", True),
     ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "Data",    "created_at",      "iso",  False),
+]
+
+# ── RETIRED shadows (2026-06-01, P06 CUT-leverage-exitengine) ────────────────
+# These two shadow tables were deregistered from the live registry roll-up
+# (removed from TABLE_DEFS above) because their writers are now suppressed
+# flag-OFF in the bot repo (LEVERAGE_V2_SHADOW_ENABLED / EXIT_ENGINE_SHADOW_ENABLED,
+# both default false). The tables + historical rows are RETAINED (additive-DB
+# law) — Ghost may archive manually later. Kept here in-source (NOT iterated
+# into the output) so the registry history stays explicit:
+#
+#   leverage_v2_shadow — 105 rows. 0% divergence, structurally can never disagree
+#     (hard-wired fixed_5x vs fixed-5x production). Was Risk, expected_active=True
+#     (a deliberate retirement, not a drop-to-0 alarm — reverses the 2026-06-01
+#     REG-six-shadows "should alarm" stance for THESE two only).
+#   exit_engine_shadow — 8 rows. Frozen redundant rollup; axis GLOBAL_DEFAULTS vs
+#     per-ticker exit PROFILE, inert with PER_TICKER_EXIT_PROFILES=false. Was Exit,
+#     expected_active=False. Decision-space now covered by the granular exit shadows
+#     (regime_exit / momentum_exit / …) + future exit_attribution_shadow (Wave D ADD-02).
+#
+# To un-retire: move the tuple back into TABLE_DEFS and re-enable the bot-side flag.
+RETIRED_TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
+    ("leverage_v2_shadow",            "Leverage V2 (retired)",      "Risk",    "created_at",      "iso",  False),
+    ("exit_engine_shadow",            "Exit Engine (retired)",      "Exit",    "created_at",      "iso",  False),
 ]
 
 

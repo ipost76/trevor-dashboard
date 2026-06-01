@@ -257,14 +257,13 @@ def _ks_whale_source(conn: sqlite3.Connection) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Connection], Dict[str, Any]]]]] = [
-    # --- ACTIVE (16 — shadow_scoring excluded; covered by dedicated card) ----
+    # --- ACTIVE (15 — shadow_scoring excluded; leverage_v2 RETIRED P06) -------
     ("alo_entry_shadow",              "ALO Entries",                "created_at",      "iso",  True,  _ks_alo),
     ("calibration_v2_audit",          "Calibrator V2 Audit",        "timestamp",       "iso",  True,  _ks_calibration_v2),
     ("calibrator_audit",              "Calibrator V1 Audit",        "timestamp",       "iso",  True,  _ks_calibrator),
     ("double_filter_shadow_v1",       "Double Filter (Guard+Gate)", "ts",              "iso",  True,  _ks_double_filter),
     ("funding_cost_shadow",           "Funding Cost",               "created_at",      "iso",  True,  _ks_funding_cost),
     ("gap_watchdog_shadow",           "Gap Watchdog",               "created_at",      "iso",  True,  _ks_gap_watchdog),
-    ("leverage_v2_shadow",            "Leverage V2",                "created_at",      "iso",  True,  _ks_leverage_v2),
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "ts",              "unix", True,  _ks_meme_onchain),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "cycle_timestamp", "iso",  True,  _ks_momentum_exit),
     ("per_ticker_cap_shadow",         "Per-Ticker Cap",             "ts",              "iso",  True,  _ks_per_ticker_cap),
@@ -275,8 +274,7 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("threshold_recalibration_shadow","Threshold Recalibration",    "timestamp",       "iso",  True,  _ks_threshold_recal),
     ("time_gate_shadow",              "Time Gate (P06)",            "ts",              "iso",  True,  _ks_time_gate),
     ("whale_source_shadow_log",       "Whale Source Log",           "ts",              "unix", True,  _ks_whale_source),
-    # --- DORMANT (7 — expected to be 0 / stale; not BROKEN) ------------------
-    ("exit_engine_shadow",            "Exit Engine",                "created_at",      "iso",  False, None),
+    # --- DORMANT (6 — expected to be 0 / stale; not BROKEN; exit_engine RETIRED P06) --
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "created_at",      "iso",  False, None),
     ("group_weight_shadow",           "Group Weight",               "timestamp",       "iso",  False, None),
     ("live_partial_shadow",           "Live Partials",              "created_at",      "iso",  False, None),
@@ -284,6 +282,19 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "created_at",      "iso",  False, None),
     ("stop_floor_v2_shadow",          "Stop Floor V2",              "created_at",      "iso",  False, None),
     ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "created_at",      "iso",  False, None),
+]
+
+# ── RETIRED shadows (2026-06-01, P06 CUT-leverage-exitengine) ────────────────
+# Deregistered from the Intel-tab inventory grid (removed from TABLE_DEFS above)
+# because their bot-side writers are now suppressed flag-OFF
+# (LEVERAGE_V2_SHADOW_ENABLED / EXIT_ENGINE_SHADOW_ENABLED, default false).
+# Tables + historical rows RETAINED (additive-DB law); Ghost may archive later.
+# Kept in-source (NOT iterated into the grid) so the history stays explicit.
+# _ks_leverage_v2 is preserved above for the same reason (referenced here).
+# To un-retire: move the tuple back into TABLE_DEFS + re-enable the bot flag.
+RETIRED_TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Connection], Dict[str, Any]]]]] = [
+    ("leverage_v2_shadow",            "Leverage V2 (retired)",      "created_at",      "iso",  False, _ks_leverage_v2),
+    ("exit_engine_shadow",            "Exit Engine (retired)",      "created_at",      "iso",  False, None),
 ]
 
 
