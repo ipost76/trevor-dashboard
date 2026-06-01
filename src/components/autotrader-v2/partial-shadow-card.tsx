@@ -251,7 +251,7 @@ export function PartialShadowCard() {
           {byTicker.length > 0 && (
             <div className="mt-4">
               <div className="mb-2 font-sans text-caption uppercase tracking-wider text-fg-muted">
-                By ticker (7d)
+                Partial-exit would-fire by ticker · open live positions only (7d)
               </div>
               <ul className="divide-y divide-border-subtle">
                 {byTicker.slice(0, 6).map((row) => (

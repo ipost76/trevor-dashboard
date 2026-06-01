@@ -27,7 +27,7 @@ STALE_DAYS = 7
 # (table_name, display, function, ts_col, ts_kind, expected_active)
 # function ∈ {"Entry", "Exit", "Scoring", "Risk", "Data"}
 TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
-    # Entry (7)
+    # Entry (10)
     ("alo_entry_shadow",              "ALO Entries",                "Entry",   "created_at",      "iso",  True),
     ("per_ticker_cap_shadow",         "Per-Ticker Cap",             "Entry",   "ts",              "iso",  True),
     ("regime_gate_shadow",            "Regime Gate (V1)",           "Entry",   "ts",              "iso",  True),
@@ -35,7 +35,10 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("time_gate_shadow",              "Time Gate (P06)",            "Entry",   "ts",              "iso",  True),
     ("double_filter_shadow_v1",       "Double Filter (Guard+Gate)", "Entry",   "ts",              "iso",  True),
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "Entry",   "created_at",      "iso",  False),
-    # Exit (8)
+    ("exhaustion_entry_shadow",       "Exhaustion Entry (S3-P04)",  "Entry",   "created_at",      "iso",  True),
+    ("orderflow_entry_shadow",        "Orderflow Entry (S3-P08)",   "Entry",   "created_at",      "iso",  True),
+    ("trend_floor_shadow",            "Trend Floor",                "Entry",   "ts",              "iso",  True),
+    # Exit (12)
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "Exit",    "created_at",      "iso",  False),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "Exit",    "cycle_timestamp", "iso",  True),
     ("gap_watchdog_shadow",           "Gap Watchdog",               "Exit",    "created_at",      "iso",  True),
@@ -45,6 +48,9 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("partial_trigger_shadow",        "Partial Triggers",           "Exit",    "created_at",      "iso",  True),
     ("live_partial_shadow",           "Live Partials",              "Exit",    "created_at",      "iso",  False),
     ("exit_engine_shadow",            "Exit Engine",                "Exit",    "created_at",      "iso",  False),
+    ("cvd_oi_exit_shadow",            "CVD/OI Exit (S3-P02)",       "Exit",    "created_at",      "iso",  True),
+    ("reversal_exit_shadow",          "Reversal Exit (S3-P03)",     "Exit",    "created_at",      "iso",  True),
+    ("session_exit_shadow",           "Session/Time Exit (S3-P06)", "Exit",    "created_at",      "iso",  True),
     # Scoring (5)
     ("shadow_scoring",                "Shadow Scoring (HMM+DS)",    "Scoring", "timestamp",       "iso",  True),
     ("shadow_scorer_v2",              "Shadow Scorer V2 (A-F)",     "Scoring", "timestamp",       "iso",  True),
@@ -55,7 +61,7 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("leverage_v2_shadow",            "Leverage V2",                "Risk",    "created_at",      "iso",  True),
     ("sizing_v2_shadow",              "Sizing V2",                  "Risk",    "created_at",      "iso",  True),
     ("stop_floor_v2_shadow",          "Stop Floor V2",              "Risk",    "created_at",      "iso",  False),
-    # Data (2)
+    # Data (3)
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "Data",    "ts",              "unix", True),
     ("whale_source_shadow_log",       "Whale Source Log",           "Data",    "ts",              "unix", True),
     ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "Data",    "created_at",      "iso",  False),
