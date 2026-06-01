@@ -36,7 +36,10 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("double_filter_shadow_v1",       "Double Filter (Guard+Gate)", "Entry",   "ts",              "iso",  True),
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "Entry",   "created_at",      "iso",  False),
     ("exhaustion_entry_shadow",       "Exhaustion Entry (S3-P04)",  "Entry",   "created_at",      "iso",  True),
-    ("orderflow_entry_shadow",        "Orderflow Entry (S3-P08)",   "Entry",   "created_at",      "iso",  True),
+    # RETIRED 2026-06-01 (TRIAGE-whale-meme-entry): writer flag-gated OFF
+    # (ORDERFLOW_ENTRY_SHADOW_ENABLED=false). 4 frozen rows, no consumer.
+    # expected_active=False so a future drop-to-0 reads DORMANT, not BROKEN.
+    ("orderflow_entry_shadow",        "Orderflow Entry (RETIRED)",  "Entry",   "created_at",      "iso",  False),
     ("trend_floor_shadow",            "Trend Floor",                "Entry",   "ts",              "iso",  True),
     # Exit (12)
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "Exit",    "created_at",      "iso",  False),
@@ -63,7 +66,11 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     ("stop_floor_v2_shadow",          "Stop Floor V2",              "Risk",    "created_at",      "iso",  False),
     # Data (3)
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "Data",    "ts",              "unix", True),
-    ("whale_source_shadow_log",       "Whale Source Log",           "Data",    "ts",              "unix", True),
+    # RETIRED 2026-06-01 (TRIAGE-whale-meme-entry): writer flag-gated OFF
+    # (WHALE_SOURCE_SHADOW_ENABLED=false). MoonDev source dead, 1:1 mirror of
+    # hl_bias (0% divergence). expected_active=False so a future drop-to-0
+    # reads DORMANT, not BROKEN. Rows retained.
+    ("whale_source_shadow_log",       "Whale Source Log (RETIRED)", "Data",    "ts",              "unix", False),
     ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "Data",    "created_at",      "iso",  False),
 ]
 
