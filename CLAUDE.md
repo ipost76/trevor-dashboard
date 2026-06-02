@@ -192,6 +192,7 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 ## Hub-Specific Rules
 
 - **`trevor.db` belongs to the bot.** The Hub reads it `mode=ro`. Writes happen only through the ~30 `POST` API routes — config flags (killswitch, aggressive, autotrader-toggle, DCA), trade actions (close / flip / edit-entry / partial-close / add-position), reminders & DCA CRUD, chat logging, brain-file edits, admin resets. Treat every other route as read-only and keep it that way.
+- **WAL ownership:** litestream/writer owns checkpointing; the Hub is read-only on `trevor.db` (`mode=ro`) and **never** runs `wal_checkpoint`. WAL bloat / TRUNCATE-blocked cadence is a writer/litestream concern (bot repo, RM-SYS) — not a Hub fix.
 - DB changes are **additive** — new rows / new `auto_config` keys, never destructive schema edits.
 - Surgical edits only — change what the prompt asks and nothing more; diagnose before you touch.
 - Verify after every change — build, restart, hit the route — before reporting it done.
