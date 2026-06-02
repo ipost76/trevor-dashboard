@@ -2,7 +2,7 @@ import * as React from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { runPython } from "@/lib/api-helpers";
+import { getAllFlagsCached } from "@/lib/feature-flags-server";
 import { StocksZoneView } from "@/components/stocks/stocks-zone-view";
 import { StockSection } from "@/components/stocks/stock-section";
 
@@ -32,15 +32,8 @@ const isStocksZoneOn = cache(async (): Promise<boolean> => {
     // cookies() unavailable — fall through to DB read
   }
 
-  try {
-    const stdout = await runPython("query_feature_flags.py", []);
-    const data = JSON.parse(stdout) as {
-      flags?: Record<string, { value?: boolean }>;
-    };
-    return data.flags?.HUB_REDESIGN_SCALP?.value === true;
-  } catch {
-    return false;
-  }
+  const flags = await getAllFlagsCached();
+  return flags?.HUB_REDESIGN_SCALP?.value === true;
 });
 
 function StocksDisabled() {

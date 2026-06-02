@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { cache } from "react";
 import { AppShellNav } from "./app-shell-nav";
 import { LegacyAppShell } from "./app-shell-legacy";
-import { runPython } from "@/lib/api-helpers";
+import { getAllFlagsCached } from "@/lib/feature-flags-server";
 
 /**
  * Server component — branches between LegacyAppShell (pre-redesign chrome)
@@ -14,13 +14,15 @@ import { runPython } from "@/lib/api-helpers";
  *  1. Cookie override `hub_redesign_override` containing
  *     `HUB_REDESIGN_NAV=true` — Ghost-only preview without flipping the
  *     global flag.
- *  2. auto_config DB row HUB_REDESIGN_NAV (read directly via runPython
- *     — bypasses /api/feature-flags HTTP self-fetch which would be gated
- *     by middleware auth).
+ *  2. auto_config DB row HUB_REDESIGN_NAV (read directly via the shared
+ *     server reader — bypasses /api/feature-flags HTTP self-fetch which
+ *     would be gated by middleware auth).
  *  3. Default false → render LegacyAppShell.
  *
- * Memoized with React `cache()` so a single page render hits the flag
- * resolver once even if multiple server-component reads occur.
+ * The DB read goes through the shared request-scoped `getAllFlagsCached`
+ * (PERF-03) so this gate plus any zone page's own gate collapse to ONE
+ * `query_feature_flags.py` spawn per render. The outer `cache()` still
+ * memoizes this gate's cookie+flag resolution.
  */
 const isHubRedesignNavOn = cache(async (): Promise<boolean> => {
   try {
@@ -38,15 +40,8 @@ const isHubRedesignNavOn = cache(async (): Promise<boolean> => {
     // cookies() unavailable — fall through to DB read
   }
 
-  try {
-    const stdout = await runPython("query_feature_flags.py", []);
-    const data = JSON.parse(stdout) as {
-      flags?: Record<string, { value?: boolean }>;
-    };
-    return data.flags?.HUB_REDESIGN_NAV?.value === true;
-  } catch {
-    return false;
-  }
+  const flags = await getAllFlagsCached();
+  return flags?.HUB_REDESIGN_NAV?.value === true;
 });
 
 export async function AppShell({ children }: { children: React.ReactNode }) {

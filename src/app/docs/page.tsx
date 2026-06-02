@@ -2,7 +2,7 @@ import * as React from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { runPython } from "@/lib/api-helpers";
+import { getAllFlagsCached } from "@/lib/feature-flags-server";
 import { DocsZoneView } from "./docs-zone-view";
 
 export const dynamic = "force-dynamic";
@@ -32,15 +32,8 @@ const isHubRedesignDocsOn = cache(async (): Promise<boolean> => {
     // cookies() unavailable — fall through to DB read
   }
 
-  try {
-    const stdout = await runPython("query_feature_flags.py", []);
-    const data = JSON.parse(stdout) as {
-      flags?: Record<string, { value?: boolean }>;
-    };
-    return data.flags?.HUB_REDESIGN_DOCS?.value === true;
-  } catch {
-    return false;
-  }
+  const flags = await getAllFlagsCached();
+  return flags?.HUB_REDESIGN_DOCS?.value === true;
 });
 
 interface DocsPageProps {

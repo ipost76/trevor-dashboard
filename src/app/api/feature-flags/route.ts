@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython } from "@/lib/api-helpers";
+import { getAllFlagsCached } from "@/lib/feature-flags-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,19 +11,13 @@ export const dynamic = "force-dynamic";
  * Response shape:
  *   { flags: { HUB_REDESIGN_NAV: { value: false, updated_at: "..." }, ... } }
  *
- * Fail-safe: any error returns { flags: {}, error: "...", fallback: "all_off" }
- * so the Hub renders the old layout.
+ * PERF-03 (2026-06-02): reads through the shared `getAllFlagsCached` so this
+ * route shares the SSR sites' single flag-read path. (This is a standalone HTTP
+ * request, so it's outside the per-render dedup — same spawn, one code path.)
+ * The reader is fail-safe (returns {} on any error → all flags off → old
+ * layout), so this route can never 500 on a flag read.
  */
 export async function GET() {
-  try {
-    const stdout = await runPython("query_feature_flags.py", []);
-    const data = JSON.parse(stdout);
-    return NextResponse.json(data);
-  } catch (err) {
-    return NextResponse.json({
-      flags: {},
-      error: String(err),
-      fallback: "all_off",
-    });
-  }
+  const flags = await getAllFlagsCached();
+  return NextResponse.json({ flags });
 }
