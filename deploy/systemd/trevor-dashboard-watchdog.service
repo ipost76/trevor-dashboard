@@ -1,0 +1,25 @@
+[Unit]
+Description=TREVOR Hub health watchdog — auto-restart trevor-dashboard.service on event-loop wedge
+Documentation=https://github.com/ipost76/TREVOR
+# Start after the thing it watches; don't fail if the dashboard is briefly down.
+After=trevor-dashboard.service
+Wants=trevor-dashboard.service
+
+[Service]
+Type=simple
+User=trevor
+Group=trevor
+# Long-running poll loop (curl /api/health every 30s). Self-contained; reads the
+# Discord bot token from the shared .env read-only. Restarts the dashboard via
+# `sudo systemctl restart` (trevor has NOPASSWD sudo).
+ExecStart=/home/trevor/scripts/dashboard_health_watchdog.sh
+Restart=always
+RestartSec=10
+# It's just curl + sleep — keep it tiny.
+MemoryMax=64M
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

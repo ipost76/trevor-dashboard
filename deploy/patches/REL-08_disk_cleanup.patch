@@ -1,0 +1,49 @@
+--- a/disk_cleanup.sh
++++ b/disk_cleanup.sh
+@@ -100,10 +100,42 @@
+ echo "$LOG_PREFIX RM-04 shadow tables: deleted $SHADOW_DELETED rows total"
+ 
+ # 15. Weekly dashboard restart (prevent memory buildup)
+-echo "$LOG_PREFIX Restarting dashboard for memory hygiene..."
+-sudo systemctl restart trevor-dashboard.service
+-sleep 5
+-echo "$LOG_PREFIX Dashboard: $(systemctl is-active trevor-dashboard.service)"
++# REL-08 (2026-06-02): route this hygiene restart THROUGH the Hub health watchdog,
++# the single restart authority (/home/trevor/scripts/dashboard_health_watchdog.sh).
++# We honor + set the watchdog's shared stand-down marker so this weekly restart can
++# never fight a watchdog mid-recovery (and vice-versa). If the watchdog's state dir
++# is unavailable we fall back to the historic direct restart — never worse than before.
++echo "$LOG_PREFIX Restarting dashboard for memory hygiene (coordinated via watchdog)..."
++WD_STATE_DIR="/home/trevor/scripts/.watchdog_state"
++WD_MARKER="$WD_STATE_DIR/restart_in_progress"
++WD_LOCK="$WD_STATE_DIR/restart.lock"
++WD_GRACE=180
++if mkdir -p "$WD_STATE_DIR" 2>/dev/null; then
++    (
++        # Serialize the act of restarting against the watchdog (flock on the shared lock).
++        flock -w 15 9 || { echo "$LOG_PREFIX Could not acquire watchdog restart lock in 15s — skipping hygiene restart this week"; exit 0; }
++        # Defer if the watchdog (or anyone) is mid-recovery — its restart already refreshed memory.
++        if [ -f "$WD_MARKER" ]; then
++            _wd_m=$(awk '{print $1}' "$WD_MARKER" 2>/dev/null || echo 0)
++            if [ "$(( $(date +%s) - ${_wd_m:-0} ))" -lt "$WD_GRACE" ]; then
++                echo "$LOG_PREFIX Watchdog is mid-recovery (restart in progress) — deferring weekly hygiene restart to avoid a restart fight."
++                exit 0
++            fi
++        fi
++        # Claim the stand-down marker so the watchdog defers during our restart, then restart.
++        printf '%s %s\n' "$(date +%s)" "disk_cleanup" > "$WD_MARKER"
++        sudo systemctl restart trevor-dashboard.service
++        sleep 5
++        echo "$LOG_PREFIX Dashboard: $(systemctl is-active trevor-dashboard.service)"
++        # Leave the marker to auto-expire after ${WD_GRACE}s so the watchdog does not
++        # pile on during the boot window; the watchdog clears it on confirmed recovery.
++    ) 9>"$WD_LOCK"
++else
++    echo "$LOG_PREFIX WARN: watchdog state dir unavailable — falling back to direct restart"
++    sudo systemctl restart trevor-dashboard.service
++    sleep 5
++    echo "$LOG_PREFIX Dashboard: $(systemctl is-active trevor-dashboard.service)"
++fi
+ 
+ # Report
+ DISK_PCT=$(df / | tail -1 | awk '{print $5}' | tr -d '%')
