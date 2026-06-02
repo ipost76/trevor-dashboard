@@ -9,6 +9,9 @@ const next = require("next");
 const { parse } = require("url");
 const { spawn, execFile } = require("child_process");
 const { join } = require("path");
+// INFRA-02 (2026-06-02): systemd watchdog feeder (subordinate backstop beneath
+// the /api/health watchdog). Inert when not under a systemd WatchdogSec.
+const { startSystemdWatchdog } = require("./sd-watchdog");
 
 // Python interpreter under TREVOR's venv (mirrors src/lib/api-helpers.ts).
 const TREVOR_DIR = process.env.TREVOR_PROJECT_DIR || "/home/trevor/trevor";
@@ -44,6 +47,16 @@ app.prepare().then(() => {
 
   server.listen(PORT, HOST, () => {
     console.log(`[HUB] TREVOR Hub ready on http://${HOST}:${PORT}`);
+
+    // INFRA-02 (2026-06-02): start feeding the systemd watchdog now that the
+    // HTTP server is listening. Responsiveness-gated (main-loop timer + fresh
+    // heartbeat + server.listening) so a wedged loop stops pinging and systemd
+    // restarts the Hub. Inert (no-op) when NOTIFY_SOCKET is unset. Never fatal.
+    try {
+      globalThis.__trevorWatchdog = startSystemdWatchdog({ server });
+    } catch (e) {
+      console.error("[HUB] systemd watchdog init failed:", e);
+    }
 
     // PERF-04 (2026-06-02): pre-warm the Python interpreter. Every bridge call
     // spawns a fresh `venv/bin/python3` (there is no persistent interpreter), so
