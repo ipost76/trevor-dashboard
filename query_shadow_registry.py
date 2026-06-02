@@ -27,7 +27,7 @@ STALE_DAYS = 7
 # (table_name, display, function, ts_col, ts_kind, expected_active)
 # function ∈ {"Entry", "Exit", "Scoring", "Risk", "Data"}
 TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
-    # Entry (10)
+    # Entry (11)
     ("alo_entry_shadow",              "ALO Entries",                "Entry",   "created_at",      "iso",  True),
     ("per_ticker_cap_shadow",         "Per-Ticker Cap",             "Entry",   "ts",              "iso",  True),
     ("regime_gate_shadow",            "Regime Gate (V1)",           "Entry",   "ts",              "iso",  True),
@@ -41,6 +41,8 @@ TABLE_DEFS: list[Tuple[str, str, str, str, str, bool]] = [
     # expected_active=False so a future drop-to-0 reads DORMANT, not BROKEN.
     ("orderflow_entry_shadow",        "Orderflow Entry (RETIRED)",  "Entry",   "created_at",      "iso",  False),
     ("trend_floor_shadow",            "Trend Floor",                "Entry",   "ts",              "iso",  True),
+    # P08 (Wave D ADD): entry-side cooldown-suppression telemetry by subtype (dedup/sqlite/guard). Canonical ts col.
+    ("cooldown_suppression_shadow",   "Cooldown Suppression (P08)", "Entry",   "ts",              "iso",  True),
     # Exit (11) — exit_engine_shadow RETIRED 2026-06-01 (P06), see RETIRED_TABLE_DEFS
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "Exit",    "created_at",      "iso",  False),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "Exit",    "cycle_timestamp", "iso",  True),
