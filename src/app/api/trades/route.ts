@@ -134,6 +134,7 @@ db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 trade_id = os.environ.get("PATCH_TRADE_ID", "")
 margin_usd = float(os.environ.get("PATCH_MARGIN_USD", "0") or "0")
 conn = sqlite3.connect(db_path)
+conn.execute("PRAGMA busy_timeout=5000")  # REL-10: wait up to 5s for a write lock instead of failing immediately
 conn.execute("UPDATE active_trades SET margin_usd=? WHERE trade_id=?", (margin_usd, trade_id))
 conn.commit()
 r = conn.execute("SELECT margin_usd, leverage FROM active_trades WHERE trade_id=?", (trade_id,)).fetchone()

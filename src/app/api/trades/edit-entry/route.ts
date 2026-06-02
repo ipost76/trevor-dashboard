@@ -55,6 +55,10 @@ export async function POST(request: NextRequest) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ content }),
+            // REL-11 (2026-06-02): bound the Discord round-trip so an
+            // unresponsive API can't hang the request. AbortError lands in the
+            // existing non-fatal catch below — DB stays the source of truth.
+            signal: AbortSignal.timeout(5000),
           }
         );
       } catch (discordErr) {

@@ -132,6 +132,11 @@ export async function POST(req: NextRequest) {
   const client = new Anthropic({ apiKey });
   const encoder = new TextEncoder();
 
+  // REL-05 (2026-06-02): abort the upstream Anthropic stream when the SSE client
+  // disconnects (ReadableStream cancel) so generation stops and we stop burning
+  // output tokens. Shared by start() + cancel() via this outer closure.
+  const ac = new AbortController();
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (name: string, data: unknown) => {
@@ -146,12 +151,15 @@ export async function POST(req: NextRequest) {
 
       let collected = "";
       try {
-        const resp = client.messages.stream({
-          model: MODEL,
-          max_tokens: MAX_OUTPUT_TOKENS,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: "user", content: userMsg }],
-        });
+        const resp = client.messages.stream(
+          {
+            model: MODEL,
+            max_tokens: MAX_OUTPUT_TOKENS,
+            system: SYSTEM_PROMPT,
+            messages: [{ role: "user", content: userMsg }],
+          },
+          { signal: ac.signal },
+        );
 
         for await (const ev of resp) {
           if (
@@ -195,8 +203,11 @@ export async function POST(req: NextRequest) {
       }
     },
     cancel() {
-      // Client aborted — nothing to clean up server-side; the partial
-      // assistant text was never persisted.
+      // Client disconnected (SSE drop) — abort the upstream Anthropic request so
+      // token generation stops immediately and we don't keep billing for output
+      // the client will never receive (REL-05). The partial assistant text was
+      // never persisted.
+      ac.abort();
     },
   });
 
