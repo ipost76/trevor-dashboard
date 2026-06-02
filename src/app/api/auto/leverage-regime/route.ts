@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 // GET /api/auto/leverage-regime — S2-P05 read-only Leverage + Regime feed.
 //
@@ -128,26 +129,25 @@ const FALLBACK: LeverageRegimeResponse = {
   regime_exit_shadow: { available: false, total: 0, divergent: 0, recent: [] },
 };
 
-// The helper spawns a bot-side HL user_state call + an sqlite read. Cache
-// briefly so the panel's 15s poll can't stampede the bridge.
-let _cache: { data: LeverageRegimeResponse; ts: number } | null = null;
-const CACHE_TTL = 10_000; // 10s
+// The helper spawns a bot-side HL user_state call + an sqlite read.
+// PERF-02 (2026-06-02): single-flight + SWR (10s) so the panel's 15s poll can't
+// stampede the bridge — concurrent expired-hits collapse to ONE refresh. SWR
+// already serves last-good while revalidating; the catch handles the cold (no
+// value) path, preserving the prior fail-safe (never 500 the panel).
+const cache = createSwrCache<LeverageRegimeResponse>({ defaultTtl: 10_000, concurrency: 2 });
 
 export async function GET() {
   try {
-    const now = Date.now();
-    if (_cache && now - _cache.ts < CACHE_TTL) {
-      return NextResponse.json(_cache.data);
-    }
-
-    // 20s timeout: the live HL round-trip can be slower than a pure sqlite read.
-    const raw = await runPython("query_leverage_regime.py", [], { timeout: 20_000 });
-    const data = safeJsonParse<LeverageRegimeResponse>(raw, FALLBACK);
-    _cache = { data, ts: now };
-    return NextResponse.json(data);
+    const { value } = await cache.swr("leverage-regime", async () => {
+      // 20s timeout: the live HL round-trip can be slower than a pure sqlite read.
+      const raw = await runPython("query_leverage_regime.py", [], { timeout: 20_000 });
+      return safeJsonParse<LeverageRegimeResponse>(raw, FALLBACK);
+    });
+    return NextResponse.json(value);
   } catch (e) {
     // Fail-safe: never 500 the panel. Serve last-good if we have it.
-    if (_cache) return NextResponse.json(_cache.data);
+    const stale = cache.peek("leverage-regime");
+    if (stale) return NextResponse.json(stale.value);
     return NextResponse.json({ ...FALLBACK, error: String(e) }, { status: 200 });
   }
 }

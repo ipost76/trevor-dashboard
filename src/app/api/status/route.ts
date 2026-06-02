@@ -1,22 +1,40 @@
 import { NextResponse } from "next/server";
 import { runPythonInline, runCommand } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-// In-memory cache (60s TTL)
-let _statusCache: { data: unknown; ts: number } | null = null;
-const STATUS_CACHE_TTL = 60_000;
+// In-memory cache (60s TTL).
+// PERF-02 (2026-06-02): single-flight + SWR so a concurrent poller burst on this
+// high-traffic route collapses to ONE compute (systemctl + Python child) per
+// window. The per-request `cached` flag + `latencyMs` are preserved; the catch
+// keeps the prior cold-failure error shape (ok:false). A warm failure now serves
+// stale instead of the error shape (strictly better).
+const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 60_000, concurrency: 2 });
 
 export async function GET() {
   const start = Date.now();
+  const servedFromCache = cache.peek("status") !== undefined;
 
-  if (_statusCache && (Date.now() - _statusCache.ts) < STATUS_CACHE_TTL) {
+  try {
+    const { value } = await cache.swr("status", computeStatus);
+    const resp: Record<string, unknown> = { ...value, latencyMs: Date.now() - start };
+    if (servedFromCache) resp.cached = true;
+    return NextResponse.json(resp);
+  } catch (err) {
     return NextResponse.json({
-      ...(_statusCache.data as Record<string, unknown>),
-      cached: true,
+      ok: false,
+      trevor: { running: false, pid: 0 },
+      signals: { total: 0, wins: 0, losses: 0, pending: 0 },
+      recentSignals: [],
+      error: String(err),
+      timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
     });
   }
+}
+
+async function computeStatus(): Promise<Record<string, unknown>> {
   const trevorService = process.env.TREVOR_SERVICE_NAME || "trevor.service";
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
 
@@ -25,10 +43,9 @@ export async function GET() {
   let signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
   let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
 
+  // Get TREVOR PID — argv, no shell (was `systemctl ... || echo 0`). allowFailure
+  // returns empty stdout on a missing unit → parseInt → 0, same as the old fallback.
   try {
-    // Get TREVOR PID — argv, no shell (was `systemctl ... || echo 0`). allowFailure
-    // returns empty stdout on a missing unit → parseInt → 0, same as the old fallback.
-    try {
       const pidResult = (
         await runCommand(
           "systemctl",
@@ -68,25 +85,13 @@ print(json.dumps(result))
       recentSignals = dbData.recent || [];
     } catch { /* DB query failed — graceful */ }
 
-    const responseData = {
-      ok: true,
-      trevor: { running: trevorRunning, pid: trevorPid },
-      signals: signalStats,
-      recentSignals,
-      timestamp: new Date().toISOString(),
-      latencyMs: Date.now() - start,
-    };
-    _statusCache = { data: responseData, ts: Date.now() };
-    return NextResponse.json(responseData);
-  } catch (err) {
-    return NextResponse.json({
-      ok: false,
-      trevor: { running: false, pid: 0 },
-      signals: signalStats,
-      recentSignals,
-      error: String(err),
-      timestamp: new Date().toISOString(),
-      latencyMs: Date.now() - start,
-    });
-  }
+  const responseData = {
+    ok: true,
+    trevor: { running: trevorRunning, pid: trevorPid },
+    signals: signalStats,
+    recentSignals,
+    timestamp: new Date().toISOString(),
+    latencyMs: 0,
+  };
+  return responseData;
 }

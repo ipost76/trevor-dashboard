@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { runPythonInline } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
+
+// PERF-02 (2026-06-02): was uncached — added single-flight + SWR (5min, matching
+// its analytics siblings) so a cold-cache burst spawns ONE Python child per
+// window, not N. The try/catch around swr() preserves the cold-failure 500.
+const cache = createSwrCache<unknown>({ defaultTtl: 300_000, concurrency: 2 });
 
 export async function GET() {
   try {
@@ -36,8 +42,11 @@ else:
     print(json.dumps({"available": True, "total_trades_with_regime": total_with, "total_trades_without_regime": total_without, "regimes": regimes, "recommendation": rec}))
 `;
 
-    const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
-    return NextResponse.json(JSON.parse(pyResult));
+    const { value } = await cache.swr("regime-performance", async () => {
+      const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
+      return JSON.parse(pyResult);
+    });
+    return NextResponse.json(value);
   } catch (error) {
     console.error("[Analytics Regime] Error:", error);
     return NextResponse.json({ available: false, reason: "Query failed", regimes: [] }, { status: 500 });

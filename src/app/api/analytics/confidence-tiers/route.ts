@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import { runPythonInline } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-let _cache: { data: unknown; ts: number } | null = null;
-const CACHE_TTL = 300_000;
+// PERF-02 (2026-06-02): single-flight + SWR (5min) so a cold-cache burst spawns
+// ONE Python child per window, not N. The try/catch around swr() preserves the
+// cold-failure contract (500); a transient warm failure now serves stale instead.
+const cache = createSwrCache<unknown>({ defaultTtl: 300_000, concurrency: 2 });
 
 export async function GET() {
-  if (_cache && Date.now() - _cache.ts < CACHE_TTL) {
-    return NextResponse.json(_cache.data);
-  }
-
   try {
     const pyScript = `
 import sqlite3, json
@@ -139,10 +138,11 @@ result = {
 print(json.dumps(result, default=str))
 `;
 
-    const pyResult = await runPythonInline(pyScript, { timeout: 15000 });
-    const data = JSON.parse(pyResult);
-    _cache = { data, ts: Date.now() };
-    return NextResponse.json(data);
+    const { value } = await cache.swr("confidence-tiers", async () => {
+      const pyResult = await runPythonInline(pyScript, { timeout: 15000 });
+      return JSON.parse(pyResult);
+    });
+    return NextResponse.json(value);
   } catch (error) {
     console.error("[Analytics Confidence Tiers] Error:", error);
     return NextResponse.json({ available: false, reason: "Query failed", tiers: [] }, { status: 500 });

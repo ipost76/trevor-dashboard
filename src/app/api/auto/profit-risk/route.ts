@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 // GET /api/auto/profit-risk — S1-P06 read-only Profit-Taking + Risk feed.
 //
@@ -86,24 +87,23 @@ const FALLBACK: ProfitRiskResponse = {
 };
 
 // The helper spawns a bot-side python import (circuit_breaker) + an sqlite read.
-// Cache briefly so the panel's poll interval can't stampede the bridge.
-let _cache: { data: ProfitRiskResponse; ts: number } | null = null;
-const CACHE_TTL = 10_000; // 10s
+// PERF-02 (2026-06-02): single-flight + SWR (10s) so the panel's poll interval
+// can't stampede the bridge — concurrent expired-hits collapse to ONE refresh.
+// SWR already serves last-good while revalidating; the catch handles the cold
+// (no value) path, preserving the prior fail-safe (never 500 the panel).
+const cache = createSwrCache<ProfitRiskResponse>({ defaultTtl: 10_000, concurrency: 2 });
 
 export async function GET() {
   try {
-    const now = Date.now();
-    if (_cache && now - _cache.ts < CACHE_TTL) {
-      return NextResponse.json(_cache.data);
-    }
-
-    const raw = await runPython("query_profit_risk.py", [], { timeout: 12_000 });
-    const data = safeJsonParse<ProfitRiskResponse>(raw, FALLBACK);
-    _cache = { data, ts: now };
-    return NextResponse.json(data);
+    const { value } = await cache.swr("profit-risk", async () => {
+      const raw = await runPython("query_profit_risk.py", [], { timeout: 12_000 });
+      return safeJsonParse<ProfitRiskResponse>(raw, FALLBACK);
+    });
+    return NextResponse.json(value);
   } catch (e) {
     // Fail-safe: never 500 the panel. Serve last-good if we have it.
-    if (_cache) return NextResponse.json(_cache.data);
+    const stale = cache.peek("profit-risk");
+    if (stale) return NextResponse.json(stale.value);
     return NextResponse.json(
       { ...FALLBACK, error: String(e) },
       { status: 200 },

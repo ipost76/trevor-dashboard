@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // 5-second cache matches the client poll cadence in KillswitchPill.tsx —
 // coalesces multi-tab requests, keeps Python spawn rate to <1/sec.
-let _cache: { data: unknown; ts: number } | null = null;
-const CACHE_TTL = 5_000;
+// PERF-02 (2026-06-02): single-flight + SWR so a multi-tab burst collapses to
+// ONE spawn per window. POST still busts the cache (cache.clear()) so a toggle
+// is reflected on the very next poll.
+const cache = createSwrCache<unknown>({ defaultTtl: 5_000, concurrency: 2 });
 
 /**
  * GET /api/killswitch
@@ -21,14 +24,11 @@ const CACHE_TTL = 5_000;
  */
 export async function GET() {
   try {
-    const now = Date.now();
-    if (_cache && now - _cache.ts < CACHE_TTL) {
-      return NextResponse.json(_cache.data);
-    }
-    const raw = await runPython("query_killswitch_state.py", [], { timeout: 5_000 });
-    const data = JSON.parse(raw);
-    _cache = { data, ts: now };
-    return NextResponse.json(data);
+    const { value } = await cache.swr("killswitch", async () => {
+      const raw = await runPython("query_killswitch_state.py", [], { timeout: 5_000 });
+      return JSON.parse(raw);
+    });
+    return NextResponse.json(value);
   } catch (e) {
     return NextResponse.json(
       { enabled: false, error: String(e) },
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     // Bust the GET cache so the topbar pill + System Health card see fresh
     // state on the very next poll instead of waiting up to 5s.
-    _cache = null;
+    cache.clear();
 
     if (!data.ok) {
       return NextResponse.json(data, { status: 500 });

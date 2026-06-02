@@ -1,22 +1,30 @@
 import { NextResponse } from "next/server";
 import { runPythonInline, runCommand } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-// In-memory cache (30s TTL — shorter for main dashboard polling route)
-let _liveCache: { data: unknown; ts: number } | null = null;
-const LIVE_CACHE_TTL = 30_000;
+// In-memory cache (30s TTL — shorter for main dashboard polling route).
+// PERF-02 (2026-06-02): single-flight + SWR so a concurrent poller burst on this
+// high-traffic dashboard route collapses to ONE Python child per window. The
+// per-request `cached` flag + `latencyMs` are preserved: `cached:true` is set
+// whenever a stored value exists (fresh or stale serve), matching the prior
+// served-from-cache semantics; latencyMs is always computed at response time.
+const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 30_000, concurrency: 2 });
 
 export async function GET() {
   const start = Date.now();
+  // A stored value (fresh or stale) means this response is served from cache.
+  const servedFromCache = cache.peek("live") !== undefined;
 
-  if (_liveCache && (Date.now() - _liveCache.ts) < LIVE_CACHE_TTL) {
-    return NextResponse.json({
-      ...(_liveCache.data as Record<string, unknown>),
-      cached: true,
-      latencyMs: Date.now() - start,
-    });
-  }
+  const { value } = await cache.swr("live", computeLive);
+
+  const resp: Record<string, unknown> = { ...value, latencyMs: Date.now() - start };
+  if (servedFromCache) resp.cached = true;
+  return NextResponse.json(resp);
+}
+
+async function computeLive(): Promise<Record<string, unknown>> {
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
   const logPath = process.env.TREVOR_LOG_PATH || "/home/trevor/trevor/logs/trevor.log";
 
@@ -118,7 +126,5 @@ print(json.dumps(result))
 
   } catch { /* graceful */ }
 
-  data.latencyMs = Date.now() - start;
-  _liveCache = { data: { ...data }, ts: Date.now() };
-  return NextResponse.json(data);
+  return data;
 }

@@ -1,26 +1,36 @@
 import { NextResponse } from "next/server";
 import { runPythonInline } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-// In-memory cache (5 min TTL) — avoids 500ms Hyperliquid API ping on every call
-let _healthCache: { data: unknown; ts: number } | null = null;
-const HEALTH_CACHE_TTL = 300_000; // 5 minutes
+// In-memory cache (5 min TTL) — avoids 500ms Hyperliquid API ping on every call.
+// PERF-02 (2026-06-02): single-flight + SWR so a concurrent burst collapses to
+// ONE compute (subprocess-spawning Python child + HL ping) per window — this is
+// the route whose synchronous subprocess fan-out triggered the original wedge.
+// The per-request `cached` flag + `latencyMs` are preserved; the catch keeps the
+// prior cold-failure 500. A warm failure now serves stale (strictly better).
+const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 300_000, concurrency: 2 });
 
 export async function GET() {
   const start = Date.now();
-
-  // Return cached response if fresh
-  if (_healthCache && (Date.now() - _healthCache.ts) < HEALTH_CACHE_TTL) {
-    return NextResponse.json({
-      ...(_healthCache.data as Record<string, unknown>),
-      cached: true,
-      latencyMs: Date.now() - start,
-    });
-  }
+  const servedFromCache = cache.peek("system-health") !== undefined;
 
   try {
-    const pyScript = `
+    const { value } = await cache.swr("system-health", computeHealth);
+    const resp: Record<string, unknown> = { ...value, latencyMs: Date.now() - start };
+    if (servedFromCache) resp.cached = true;
+    return NextResponse.json(resp);
+  } catch (e) {
+    return NextResponse.json(
+      { error: String(e), timestamp: new Date().toISOString(), latencyMs: Date.now() - start },
+      { status: 500 }
+    );
+  }
+}
+
+async function computeHealth(): Promise<Record<string, unknown>> {
+  const pyScript = `
 import sqlite3, json, time, os
 
 DB_PATH = '/home/trevor/trevor/trevor.db'
@@ -99,20 +109,12 @@ except Exception:
 print(json.dumps(result, default=str))
 `;
 
-    const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
-    const data = JSON.parse(pyResult);
+  const pyResult = await runPythonInline(pyScript, { timeout: 10000 });
+  const data = JSON.parse(pyResult);
 
-    const responseData = {
-      ...data,
-      timestamp: new Date().toISOString(),
-      latencyMs: Date.now() - start,
-    };
-    _healthCache = { data: responseData, ts: Date.now() };
-    return NextResponse.json(responseData);
-  } catch (e) {
-    return NextResponse.json(
-      { error: String(e), timestamp: new Date().toISOString(), latencyMs: Date.now() - start },
-      { status: 500 }
-    );
-  }
+  return {
+    ...data,
+    timestamp: new Date().toISOString(),
+    latencyMs: 0,
+  };
 }

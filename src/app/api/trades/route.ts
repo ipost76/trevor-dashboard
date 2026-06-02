@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPython, runPythonInline } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-// In-memory cache for active trades (15s TTL)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _activeTradesCache: { data: any; ts: number } | null = null;
-const ACTIVE_CACHE_TTL = 15_000;
+// In-memory cache for active trades (15s TTL).
+// PERF-02 (2026-06-02): single-flight + SWR so a concurrent poller burst on the
+// active-trades view collapses to ONE Python child per window. Only the
+// `scope=active` read is cached (as before); history/watchlist reads and the
+// PUT/DELETE/PATCH write handlers are untouched. `cached:true` preserved via peek.
+const activeCache = createSwrCache<Record<string, unknown>>({ defaultTtl: 15_000, concurrency: 2 });
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -16,13 +19,12 @@ export async function GET(request: NextRequest) {
 
   try {
     if (scope === "active") {
-      if (_activeTradesCache && (Date.now() - _activeTradesCache.ts) < ACTIVE_CACHE_TTL) {
-        return NextResponse.json({ ..._activeTradesCache.data, cached: true });
-      }
-      const raw = await runPython("query_trades.py", ["active"], { timeout: 15000 });
-      const parsed = JSON.parse(raw);
-      _activeTradesCache = { data: parsed, ts: Date.now() };
-      return NextResponse.json(parsed);
+      const servedFromCache = activeCache.peek("active") !== undefined;
+      const { value } = await activeCache.swr("active", async () => {
+        const raw = await runPython("query_trades.py", ["active"], { timeout: 15000 });
+        return JSON.parse(raw);
+      });
+      return NextResponse.json(servedFromCache ? { ...value, cached: true } : value);
     }
 
     if (scope === "history") {

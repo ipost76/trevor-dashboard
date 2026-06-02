@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // ChromaDB PersistentClient cold-start ~38s; warm <1s. Cache list responses
 // server-side so the first user pays once and subsequent loads are instant.
-let _listCache: { data: unknown; ts: number } | null = null;
-const LIST_CACHE_TTL = 5 * 60_000;
+// PERF-02 (2026-06-02): single-flight + SWR (5min) on the `list` mode so a
+// concurrent burst during the ~38s cold-start collapses to ONE Python child
+// instead of N. peek/search modes stay uncached passthrough. X-Cache HIT/MISS
+// preserved via peek (HIT = served from a stored value, MISS = freshly computed).
+const listCache = createSwrCache<unknown>({ defaultTtl: 5 * 60_000, concurrency: 2 });
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -26,20 +30,28 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (mode === "list" && _listCache && Date.now() - _listCache.ts < LIST_CACHE_TTL) {
-    return NextResponse.json(_listCache.data, { headers: { "X-Cache": "HIT" } });
+  // list mode — single-flight + SWR (5min) so cold-start bursts collapse to one.
+  if (mode === "list") {
+    const servedFromCache = listCache.peek("list") !== undefined;
+    try {
+      const { value } = await listCache.swr("list", async () => {
+        const stdout = await runPython("query_chroma_browse.py", ["list"], { timeout: 60000 });
+        return safeJsonParse(stdout, { mode, error: "parse failure" });
+      });
+      return NextResponse.json(value, { headers: { "X-Cache": servedFromCache ? "HIT" : "MISS" } });
+    } catch (err) {
+      return NextResponse.json({ mode, error: String(err) }, { status: 200 });
+    }
   }
 
-  let args: string[];
-  if (mode === "list") args = ["list"];
-  else if (mode === "peek") args = ["peek", collection, limit];
-  else args = ["search", collection, q, limit];
+  // peek / search — uncached passthrough (unchanged).
+  const args: string[] =
+    mode === "peek" ? ["peek", collection, limit] : ["search", collection, q, limit];
 
   try {
     const stdout = await runPython("query_chroma_browse.py", args, { timeout: 60000 });
     const data = safeJsonParse(stdout, { mode, error: "parse failure" });
-    if (mode === "list") _listCache = { data, ts: Date.now() };
-    return NextResponse.json(data, mode === "list" ? { headers: { "X-Cache": "MISS" } } : undefined);
+    return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json({ mode, error: String(err) }, { status: 200 });
   }

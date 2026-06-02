@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
+import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
 
-let _cache: { data: unknown; ts: number } | null = null;
-const CACHE_TTL = 15_000; // 15s
+// PERF-02 (2026-06-02): single-flight + SWR (15s) so a cold-cache burst spawns
+// ONE Python child per window, not N. The try/catch around swr() preserves the
+// cold-failure contract (500); a transient warm failure now serves stale instead.
+const cache = createSwrCache<unknown>({ defaultTtl: 15_000, concurrency: 2 });
 
 export async function GET() {
   try {
-    const now = Date.now();
-    if (_cache && now - _cache.ts < CACHE_TTL) {
-      return NextResponse.json(_cache.data);
-    }
-
-    const raw = await runPython("query_circuit_breaker.py", [], { timeout: 10_000 });
-    const data = JSON.parse(raw);
-    _cache = { data, ts: now };
-    return NextResponse.json(data);
+    const { value } = await cache.swr("circuit-breaker", async () => {
+      const raw = await runPython("query_circuit_breaker.py", [], { timeout: 10_000 });
+      return JSON.parse(raw);
+    });
+    return NextResponse.json(value);
   } catch (e) {
     return NextResponse.json(
       { overall_status: "UNKNOWN", error: String(e) },
