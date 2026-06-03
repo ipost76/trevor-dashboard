@@ -18,6 +18,21 @@ const LAG_DEGRADED_P99_MS = 250;
 // as healthy), so a latched degraded never triggers a restart loop.
 const LAG_DEGRADED_MAX_MS = 1000;
 
+// RHR-02 (2026-06-03): boot-grace window for the max_ms latch. A routine Next.js
+// cold-start spike (~1.7-2.5s vs ~13ms healthy p99) trips the max_ms latch the
+// instant the process boots, and because `max_ms` is cumulative since process
+// start that boot spike LATCHES `degraded` for the entire rest of the process
+// life — poisoning the signal even though the event loop is healthy. Fix: ignore
+// max_ms latching for the first LAG_BOOT_GRACE_SEC, then reset the shared
+// histogram's cumulative high-water mark ONCE so the latch thereafter sees only
+// post-warmup lag. A genuine post-warmup wedge >LAG_DEGRADED_MAX_MS still flips
+// `degraded` exactly as before — only the cold-start spike is suppressed. (A bare
+// uptime gate alone would NOT work: the stale boot-spike max persists in the
+// cumulative histogram, so it would just re-trip the latch the moment the window
+// closes. The one-time reset is what actually clears the boot spike.)
+const LAG_BOOT_GRACE_SEC = 30;
+let lagBootGraceCleared = false;
+
 // REL-09 (2026-06-02): liveness probe ONLY — no filesystem syscall. The probe
 // returning 200 *is* the liveness signal: a wedged event loop never reaches this
 // handler, so the watchdog restarts on the HTTP timeout. The prior fs.statSync /
@@ -34,11 +49,25 @@ export async function GET() {
   const freeMem = os.freemem();
   const memPercent = Math.round(((totalMem - freeMem) / totalMem) * 100);
 
+  // RHR-02 boot-grace: while still warming up, the max_ms latch is suppressed so
+  // the cold-start spike can't poison it. At the first request past the window we
+  // reset the shared histogram ONCE (clearing the cumulative boot-spike max) so the
+  // post-grace latch evaluates only post-warmup lag. Reaches the histogram via the
+  // same globalThis key event-loop-lag.ts stashes it under; reset() is a perf_hooks
+  // IntervalHistogram method — optional-chained so a missing/old instance is a no-op.
+  const inBootGrace = process.uptime() < LAG_BOOT_GRACE_SEC;
+  if (!inBootGrace && !lagBootGraceCleared) {
+    const h = (globalThis as { __trevorEloopDelay?: { reset?: () => void } })
+      .__trevorEloopDelay;
+    h?.reset?.();
+    lagBootGraceCleared = true;
+  }
+
   // Event-loop-delay percentiles (ms) from the single process-wide histogram.
   const eventLoop = getEventLoopLag();
   const highLag =
     eventLoop.p99_ms > LAG_DEGRADED_P99_MS ||
-    eventLoop.max_ms > LAG_DEGRADED_MAX_MS;
+    (!inBootGrace && eventLoop.max_ms > LAG_DEGRADED_MAX_MS);
 
   // REL-14: restart_count is the systemd NRestarts captured once at boot by
   // server.js (globalThis) — a plain in-memory read, so this route stays instant
