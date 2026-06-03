@@ -81,27 +81,35 @@ def main():
         offset = int(sys.argv[3]) if len(sys.argv) > 3 else 0
         filters = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
 
+        # Parameterized WHERE build (QUAL-02): user-influenced values (ticker,
+        # direction) bind via ? placeholders, never f-string interpolation.
         conditions = ["status = 'closed'"]
+        params: list = []
         if filters.get("ticker"):
-            conditions.append(f"ticker LIKE '%{filters['ticker']}%'")
+            conditions.append("ticker LIKE ?")
+            params.append(f"%{filters['ticker']}%")  # wildcards live in the bound value
         if filters.get("outcome"):
             if filters["outcome"] == "WIN":
                 conditions.append("pnl_pct > 0")
             elif filters["outcome"] == "LOSS":
                 conditions.append("pnl_pct <= 0")
         if filters.get("direction"):
-            conditions.append(f"direction='{filters['direction']}'")
+            conditions.append("direction = ?")
+            params.append(filters["direction"])
 
         where = " AND ".join(conditions)
 
         try:
-            total = conn.execute(f"SELECT COUNT(*) FROM active_trades WHERE {where}").fetchone()[0]
-            rows = conn.execute(f"""
-                SELECT id, trade_id, ticker, direction, entry_price, exit_price, pnl_pct,
-                       leverage, confidence, opened_at as created_at, closed_at, track
-                FROM active_trades WHERE {where}
-                ORDER BY closed_at DESC LIMIT {limit} OFFSET {offset}
-            """).fetchall()
+            total = conn.execute(
+                "SELECT COUNT(*) FROM active_trades WHERE " + where, params
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT id, trade_id, ticker, direction, entry_price, exit_price, pnl_pct, "
+                "leverage, confidence, opened_at as created_at, closed_at, track "
+                "FROM active_trades WHERE " + where + " "
+                "ORDER BY closed_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
             records = []
             for r in rows:
                 d = dict(r)
