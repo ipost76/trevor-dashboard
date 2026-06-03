@@ -18,6 +18,7 @@ export type FlagName =
   | "HUB_REDESIGN_SCALP"
   | "HUB_REDESIGN_INTEL"
   | "HUB_REDESIGN_MEMORY"
+  | "HUB_REDESIGN_DOCS"
   | "HUB_REDESIGN_CHAT";
 
 export interface FlagState {
@@ -36,19 +37,15 @@ export const ALL_FLAGS: FlagName[] = [
   "HUB_REDESIGN_SCALP",
   "HUB_REDESIGN_INTEL",
   "HUB_REDESIGN_MEMORY",
+  "HUB_REDESIGN_DOCS",
   "HUB_REDESIGN_CHAT",
 ];
 
-/**
- * Server-side flag read. Spawns python query script via api-helpers.
- * Returns false if DB read fails (fail-safe to old layout).
- *
- * Stub for A1: returns default false. Wave B1 wires the real implementation
- * (will fetch from /api/feature-flags or read auto_config directly via runPython).
- */
-export async function readFlag(flag: FlagName): Promise<FlagState> {
-  return { flag, value: false, source: "default" };
-}
+// QUAL-03 (2026-06-03): the dead `readFlag()` stub (always returned default
+// false) + its sole caller `isFlagOn()` were removed. Both were unreferenced —
+// the real server-side flag source is `getAllFlagsCached` in
+// `feature-flags-server.ts` (PERF-03). `readCookieOverride` below + the
+// `FlagName`/`ALL_FLAGS`/`FlagState` type surface are retained.
 
 /**
  * Client-side cookie override read. Lets Ghost preview new layout per-session.
@@ -67,14 +64,4 @@ export function readCookieOverride(flag: FlagName): boolean {
     if (k === flag && v === "true") return true;
   }
   return false;
-}
-
-/**
- * Combined resolver: cookie override beats DB flag.
- * Used by client components.
- */
-export async function isFlagOn(flag: FlagName): Promise<boolean> {
-  if (readCookieOverride(flag)) return true;
-  const state = await readFlag(flag);
-  return state.value;
 }
