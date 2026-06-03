@@ -88,8 +88,9 @@ except:
 
 # Kill switch — auto_config.EMERGENCY_KILLSWITCH is the canonical state
 # (Discord !killswitch and Hub POST /api/killswitch both write here).
-# Fail-open: any DB error reports inactive so a flaky read never falsely
-# signals an emergency stop to the UI.
+# Fail-SAFE (QUAL-01): a safety readout must NEVER report a false all-clear.
+# On any DB read error report active=null / status="unknown" so a human
+# investigates, rather than a stale "inactive" that masks a real engagement.
 try:
     ks_conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
     ks_rows = ks_conn.execute(
@@ -103,8 +104,8 @@ try:
         ks_reason = ks_d.get("EMERGENCY_KILLSWITCH_LAST_REASON", "")
         if ks_reason:
             result["kill_switch"]["reason"] = ks_reason
-except Exception:
-    result["kill_switch"] = {"active": False}
+except Exception as ks_exc:
+    result["kill_switch"] = {"active": None, "status": "unknown", "error": str(ks_exc)}
 
 print(json.dumps(result, default=str))
 `;
