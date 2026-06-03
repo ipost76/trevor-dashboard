@@ -14,14 +14,14 @@ import { JournalSection } from "@/components/docs/journal-section";
  * category tabs). Component source files for Lessons / Journal remain under
  * `components/docs/` — only the dispatcher routing changed. The Similar +
  * Calibration tabs were removed 2026-05-20 and replaced by Notes — a
- * client-side notepad with no backend. Orphan Python helpers
- * `query_similar_trades.py` + `query_calibration_deep.py` remain in the Hub
- * repo at `/home/trevor/trevor-dashboard/query_*.py` (they were never under
- * `/home/trevor/trevor/`) — they stay on disk because the bot's
- * `monitor_center/monitors/11_hub_api.py` `TRACKED_HELPERS` list would emit
- * CRIT alerts on their deletion, and pruning that list requires touching
- * `/home/trevor/trevor/`, forbidden from a Hub prompt. Matches the
- * `dashboard/calibration` orphan pattern. Notes is the default tab.
+ * client-side notepad with no backend. The orphan Python helpers
+ * `query_similar_trades.py` + `query_calibration_deep.py` (Hub-repo root) were
+ * deleted in QUAL-05 (2026-06-03), the cross-repo cleanup that simultaneously
+ * pruned both names from the bot's `monitor_center/monitors/11_hub_api.py`
+ * `TRACKED_HELPERS` list so the missing-tracked-helper CRIT never fires.
+ * (The `dashboard/calibration` orphan route stays — it's still in the bot's
+ * `PROBE_ROUTES`, so removing it needs a paired PROBE_ROUTES prune.)
+ * Notes is the default tab.
  *
  * Wave D4 (2026-05-27): SHADOW sub-tab swapped from the long-scroll
  * `ShadowSection` to the compact `ShadowOverview` (Active/Dormant tabs +
