@@ -59,7 +59,7 @@ set -uo pipefail
 # ── Config (env-overridable) ────────────────────────────────────────────────
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3333/api/health}"
 SERVICE="${WATCHDOG_SERVICE:-trevor-dashboard.service}"
-CHECK_INTERVAL="${CHECK_INTERVAL:-30}"       # seconds between checks
+CHECK_INTERVAL="${CHECK_INTERVAL:-15}"       # seconds between checks (REL-12: 30→15, faster wedge detection ~75s→~45s; stays below 60s WatchdogSec backstop)
 MAX_TIME="${MAX_TIME:-15}"                    # curl hard timeout
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-2}"         # consecutive fails → restart
 RESTART_COOLDOWN="${RESTART_COOLDOWN:-300}"   # min seconds between restarts (5 min)
