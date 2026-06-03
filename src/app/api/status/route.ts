@@ -57,7 +57,9 @@ async function computeStatus(): Promise<Record<string, unknown>> {
       trevorRunning = trevorPid > 0;
     } catch { /* graceful */ }
 
-    // Query DB via Python (sqlite3 CLI not installed)
+    // Query DB via Python — the Hub has no Node SQLite binding, so every DB read
+    // goes through the Python bridge (QUAL-06 2026-06-03: corrected a stale comment
+    // that claimed the sqlite3 CLI wasn't installed — it is; that was never the reason).
     try {
       const pyScript = `
 import sqlite3, json

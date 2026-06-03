@@ -120,11 +120,21 @@ export function ActivePositionCard() {
     fetchTrades();
     fetchPrices();
     const tradesId = setInterval(fetchTrades, 15_000);
-    const pricesId = setInterval(fetchPrices, 2_000);
+    // PERF-06 (2026-06-03): jitter the 2s price poll (±0–400ms, re-randomized each
+    // tick) so it doesn't fire in lockstep with PriceStrip's identical 2s
+    // /api/prices poll — flattens the coordinated burst. ~2.2s avg cadence.
+    let pricesTimer: ReturnType<typeof setTimeout>;
+    const schedulePrices = () => {
+      pricesTimer = setTimeout(async () => {
+        await fetchPrices();
+        if (!cancelled) schedulePrices();
+      }, 2_000 + Math.random() * 400);
+    };
+    schedulePrices();
     return () => {
       cancelled = true;
       clearInterval(tradesId);
-      clearInterval(pricesId);
+      clearTimeout(pricesTimer);
     };
   }, []);
 

@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 const SESSION_COOKIE = "trevor_session";
 const SESSION_SALT = "trevor-mc-2025";
 
+// QUAL-06 (2026-06-03): externalized the VM IP for the direct-IP→domain redirect.
+// Override via the HUB_VM_IP env var; defaults to the current VM IP so the
+// redirect keeps working unchanged if the var is unset. A VM IP change is now a
+// config flip, not a code edit.
+const HUB_VM_IP = process.env.HUB_VM_IP || "34.28.231.36";
+
 function validateTokenLocally(token: string): boolean {
   try {
     const decoded = Buffer.from(token, "base64url").toString("utf-8");
@@ -21,7 +27,7 @@ function isApiRoute(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   // Redirect direct IP access to domain
   const host = request.headers.get("host") || "";
-  if (host.startsWith("34.28.231.36")) {
+  if (host.startsWith(HUB_VM_IP)) {
     const url = request.nextUrl.clone();
     url.host = "trevor-prime.com";
     url.port = "";
