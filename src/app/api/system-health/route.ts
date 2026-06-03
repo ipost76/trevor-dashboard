@@ -12,13 +12,28 @@ export const dynamic = "force-dynamic";
 // prior cold-failure 500. A warm failure now serves stale (strictly better).
 const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 300_000, concurrency: 2 });
 
+// INFRA-05 (2026-06-03): the killswitch readout is a SAFETY field — it must
+// NEVER serve a stale all-clear from the 300s body cache (QUAL-01). It is read
+// on a separate VERY SHORT (2s) single-flight cache so a real engagement shows
+// within ~2s, while the expensive HL-ping/collector body stays cached at 300s.
+// Concurrent bursts still collapse to one tiny auto_config read per 2s window.
+const ksCache = createSwrCache<Record<string, unknown>>({ defaultTtl: 2_000, concurrency: 2 });
+
 export async function GET() {
   const start = Date.now();
   const servedFromCache = cache.peek("system-health") !== undefined;
 
   try {
-    const { value } = await cache.swr("system-health", computeHealth);
-    const resp: Record<string, unknown> = { ...value, latencyMs: Date.now() - start };
+    // Body (300s) + killswitch (2s, always-fresh safety field) in parallel.
+    const [{ value }, { value: ks }] = await Promise.all([
+      cache.swr("system-health", computeHealth),
+      ksCache.swr("kill_switch", computeKillswitch),
+    ]);
+    const resp: Record<string, unknown> = {
+      ...value,
+      kill_switch: ks,
+      latencyMs: Date.now() - start,
+    };
     if (servedFromCache) resp.cached = true;
     return NextResponse.json(resp);
   } catch (e) {
@@ -26,6 +41,39 @@ export async function GET() {
       { error: String(e), timestamp: new Date().toISOString(), latencyMs: Date.now() - start },
       { status: 500 }
     );
+  }
+}
+
+// Fresh killswitch read (fail-SAFE, QUAL-01 semantics): engaged → {active:true,
+// [reason]}, not engaged → {active:false}, ANY DB/spawn error → {active:null,
+// status:"unknown"} — NEVER a false "inactive" all-clear. Never throws (so it
+// can't 500 the whole route or poison the 2s cache).
+async function computeKillswitch(): Promise<Record<string, unknown>> {
+  const ksScript = `
+import sqlite3, json
+DB_PATH = '/home/trevor/trevor/trevor.db'
+try:
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+    rows = conn.execute(
+        "SELECT key, value FROM auto_config WHERE key LIKE 'EMERGENCY_KILLSWITCH%'"
+    ).fetchall()
+    conn.close()
+    d = dict(rows)
+    active = str(d.get("EMERGENCY_KILLSWITCH", "false")).lower() == "true"
+    out = {"active": active}
+    if active:
+        reason = d.get("EMERGENCY_KILLSWITCH_LAST_REASON", "")
+        if reason:
+            out["reason"] = reason
+    print(json.dumps(out))
+except Exception as e:
+    print(json.dumps({"active": None, "status": "unknown", "error": str(e)}))
+`;
+  try {
+    const out = await runPythonInline(ksScript, { timeout: 5000 });
+    return JSON.parse(out) as Record<string, unknown>;
+  } catch (e) {
+    return { active: null, status: "unknown", error: String(e) };
   }
 }
 
@@ -86,25 +134,10 @@ try:
 except:
     result["circuit_breakers"] = []
 
-# Kill switch — auto_config.EMERGENCY_KILLSWITCH is the canonical state
-# (Discord !killswitch and Hub POST /api/killswitch both write here).
-# Fail-open: any DB error reports inactive so a flaky read never falsely
-# signals an emergency stop to the UI.
-try:
-    ks_conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
-    ks_rows = ks_conn.execute(
-        "SELECT key, value FROM auto_config WHERE key LIKE 'EMERGENCY_KILLSWITCH%'"
-    ).fetchall()
-    ks_conn.close()
-    ks_d = dict(ks_rows)
-    ks_active = str(ks_d.get("EMERGENCY_KILLSWITCH", "false")).lower() == "true"
-    result["kill_switch"] = {"active": ks_active}
-    if ks_active:
-        ks_reason = ks_d.get("EMERGENCY_KILLSWITCH_LAST_REASON", "")
-        if ks_reason:
-            result["kill_switch"]["reason"] = ks_reason
-except Exception:
-    result["kill_switch"] = {"active": False}
+# Kill switch is INTENTIONALLY NOT read here (INFRA-05): it is a safety field
+# read fresh on every request via a separate 2s cache (computeKillswitch) so the
+# 300s body cache can never serve a stale all-clear. The GET handler merges
+# result["kill_switch"] from that fresh read.
 
 print(json.dumps(result, default=str))
 `;
