@@ -97,7 +97,7 @@ export function WatchlistGrid() {
       {loading && (
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 10 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 w-full" />
+            <Skeleton key={i} className="h-20 w-full" />
           ))}
         </div>
       )}
@@ -115,38 +115,32 @@ export function WatchlistGrid() {
             return (
               <li
                 key={t.ticker}
-                className="flex flex-col gap-1.5 rounded-md border border-accent-cyan-soft-subtle bg-bg-elevated p-3"
+                className="relative flex flex-col gap-1 rounded-md border border-accent-cyan-soft-subtle bg-bg-elevated p-2.5"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-h3 font-bold tabular-nums">
-                    {t.ticker}
-                  </span>
-                  <Pill intent={TIER_INTENT[t.tier]} size="sm">
-                    {t.tier}
-                  </Pill>
-                </div>
+                <Pill
+                  intent={TIER_INTENT[t.tier]}
+                  size="sm"
+                  className="absolute right-2 top-2 px-1.5 py-0 text-[9px] leading-none"
+                >
+                  {t.tier}
+                </Pill>
+
+                <span className="font-mono text-h3 font-bold tabular-nums">
+                  {t.ticker}
+                </span>
 
                 {livePrice !== undefined && (
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-body tabular-nums text-fg-primary">
-                      ${fmtPrice(livePrice)}
-                    </span>
-                  </div>
+                  <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
+                    ${fmtPrice(livePrice)}
+                  </span>
                 )}
 
-                <div className="grid grid-cols-3 gap-1 pt-1 text-micro tabular-nums">
-                  <div className="text-center">
-                    <div className="font-sans uppercase tracking-wider text-fg-faint">QUIET</div>
-                    <div className="font-mono text-fg-primary">{t.quiet.toFixed(0)}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-sans uppercase tracking-wider text-fg-faint">NORMAL</div>
-                    <div className="font-mono text-fg-primary">{t.normal.toFixed(0)}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="font-sans uppercase tracking-wider text-fg-faint">ACTIVE</div>
-                    <div className="font-mono text-fg-primary">{t.active.toFixed(0)}</div>
-                  </div>
+                <div className="flex items-center gap-1.5 font-mono text-caption tabular-nums text-fg-muted">
+                  <span>{t.quiet.toFixed(0)}</span>
+                  <span className="text-fg-faint">·</span>
+                  <span>{t.normal.toFixed(0)}</span>
+                  <span className="text-fg-faint">·</span>
+                  <span>{t.active.toFixed(0)}</span>
                 </div>
               </li>
             );
