@@ -98,6 +98,14 @@ export function CapitalHero() {
     unrealized,
   ).toFixed(2)}`;
 
+  // EQT-D1 (2026-06-04): de-float the account-value headline. `equity` (HL
+  // accountValue) = margin + UNREALIZED + spot USDC, so it balloons with open
+  // -position paper gains/losses (the "$82 = account value" mislabel). The
+  // honest cash basis is accountValue minus the floating unrealized — that's
+  // the stable number Ghost reasons about. Float is shown as a labeled sub-line;
+  // the raw float-inclusive value is kept as a small footnote (nothing hidden).
+  const realizedEquity = equity - unrealized;
+
   return (
     <Card padding="lg" className="card-elevated space-y-4">
       <div className="flex items-center justify-between">
@@ -154,23 +162,26 @@ export function CapitalHero() {
             ariaLabel="Realized P&L time window"
           />
 
-          {/* ── Greyed secondary block: equity + unrealized + deployed ── */}
+          {/* ── Greyed secondary block: realized acct value + float + deployed ── */}
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
-                ${equity.toFixed(2)}
+                ${realizedEquity.toFixed(2)}
               </span>
               <span className="font-sans text-micro italic text-fg-muted">
-                live account value · floats with open positions
+                realized account value · honest cash (excl. floating)
               </span>
             </div>
             <div className="font-mono text-caption tabular-nums text-fg-faint">
-              unrealized {unrealStr} ·{" "}
+              + floating {unrealStr} unrealized ·{" "}
               {openCount > 0 ? `${openCount} open (floating)` : "no open positions"}
             </div>
             <div className="font-mono text-caption tabular-nums text-fg-faint">
               ${openExposure.toFixed(2)} deployed · {openCount}{" "}
               {openCount === 1 ? "position" : "positions"}
+            </div>
+            <div className="font-mono text-caption tabular-nums text-fg-faint">
+              ${equity.toFixed(2)} incl. floating · live HL account value
             </div>
             {unknownCount > 0 && (
               <div className="font-sans text-micro text-fg-faint">
