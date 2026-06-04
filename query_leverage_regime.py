@@ -288,13 +288,32 @@ def fetch_margin() -> dict:
         info = Info(constants.MAINNET_API_URL, skip_ws=True)
         state = info.user_state(addr)
         margin = state.get("marginSummary", {}) or {}
-        account_value = _as_float(margin.get("accountValue"), 0.0) or 0.0
+        perps_value = _as_float(margin.get("accountValue"), 0.0) or 0.0
         margin_used = _as_float(margin.get("totalMarginUsed"), 0.0) or 0.0
         total_ntl = _as_float(margin.get("totalNtlPos"), 0.0) or 0.0
+
+        # BRK-R3 (2026-06-04): the denominator must be the UNIFIED balance
+        # (perps accountValue + spot USDC), NOT perps-only. With the account's
+        # USDC parked in spot, perps accountValue ≈ margin_used → a false ~100%
+        # utilization. Mirror live_executor.get_account_state_live (:2710-2721):
+        # add spot USDC so utilization reflects the real ~9.6% the bot sizes off.
+        spot_usdc = 0.0
+        try:
+            spot_state = info.spot_user_state(addr)
+            for bal in spot_state.get("balances", []) or []:
+                if (bal or {}).get("coin") == "USDC":
+                    spot_usdc = _as_float(bal.get("total"), 0.0) or 0.0
+                    break
+        except Exception:
+            spot_usdc = 0.0
+
+        account_value = perps_value + spot_usdc
         util = (margin_used / account_value * 100.0) if account_value > 0 else 0.0
         return {
             "available": True,
             "account_value": account_value,
+            "perps_account_value": perps_value,
+            "spot_usdc": spot_usdc,
             "margin_used": margin_used,
             "utilization_pct": util,
             "total_ntl_pos": total_ntl,

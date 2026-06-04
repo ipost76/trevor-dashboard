@@ -144,12 +144,52 @@ def _breaker_status_for(value, limit, *, lower_is_worse: bool,
     return "OK"
 
 
+# BRK-W1 (2026-06-04): the LIVE entry gate is auto_trader/risk_breakers.py,
+# which mirrors its consolidated state into auto_config.RISK_BREAKERS_STATE_JSON
+# on every evaluation. We read THAT (the source of truth) instead of the dormant
+# legacy circuit_breaker.py (CB_SESSION/PORTFOLIO_ENABLED=false → Weekly Loss /
+# Open Positions never fire). After BRK-W1 the live gate has ONE breaker —
+# daily_loss (-25%/day realized). This map renders whatever `detail` keys the
+# live state carries, so a re-armed breaker would show up automatically.
+_BREAKER_LABELS = {
+    "daily_loss": "Daily Loss Cap",
+    "consecutive_losses": "Consecutive Losses",
+    "frequency": "Daily Round-Trips",
+    "equity_curve": "Equity Curve",
+}
+
+
+def _breaker_gauge(code: str, info: dict) -> dict:
+    """Map one live risk_breakers `detail` entry → a display gauge."""
+    label = _BREAKER_LABELS.get(code, code.replace("_", " ").title())
+    active = bool(info.get("active"))
+    status = "RED" if active else "OK"
+    if code == "daily_loss":
+        value, limit, unit = info.get("loss_pct", 0.0), info.get("limit_pct", 0.0), "%"
+    elif code == "consecutive_losses":
+        value, limit, unit = info.get("streak", 0), info.get("limit", 0), "count"
+    elif code == "frequency":
+        value, limit, unit = info.get("trades_today", 0), info.get("cap", 0), "count"
+    elif code == "equity_curve":
+        value, limit, unit = info.get("current_equity", 0.0), info.get("ma", 0.0), "$"
+    else:
+        value, limit, unit = info.get("value", 0.0), info.get("limit", 0.0), ""
+    return {"key": code, "label": label, "status": status,
+            "value": value, "limit": limit, "unit": unit}
+
+
 def build_breakers() -> dict:
-    """Real circuit-breaker state via CircuitBreakerSystem.get_status()."""
+    """Live circuit-breaker state via auto_config.RISK_BREAKERS_STATE_JSON
+    (the risk_breakers.py consolidated mirror — NOT legacy circuit_breaker.py)."""
     try:
-        from circuit_breaker import CircuitBreakerSystem
-        status = CircuitBreakerSystem().get_status()
-    except Exception as exc:  # bot import/read failure — degrade, don't crash
+        with _connect_ro() as conn:
+            rows = dict(conn.execute(
+                "SELECT key, value FROM auto_config "
+                "WHERE key IN ('RISK_BREAKERS_STATE_JSON','RISK_BREAKERS_ENABLED')"
+            ).fetchall())
+        state = json.loads(rows.get("RISK_BREAKERS_STATE_JSON") or "{}")
+        enabled = (rows.get("RISK_BREAKERS_ENABLED") or "true").strip().lower() in ("true", "1", "yes")
+    except Exception as exc:  # DB/parse failure — degrade, don't crash
         return {
             "overall_status": "UNKNOWN",
             "override_active": False,
@@ -159,78 +199,28 @@ def build_breakers() -> dict:
             "error": f"{type(exc).__name__}: {exc}",
         }
 
-    overall = status.get("overall_status", "UNKNOWN")
-    override = bool(status.get("override_active", False))
-    layers = status.get("layers", {}) or {}
-    session = layers.get("session", {}) or {}
-    portfolio = layers.get("portfolio", {}) or {}
+    detail = state.get("detail", {}) or {}
+    entries_allowed = bool(state.get("entries_allowed", True))
+    active_codes = state.get("active_breakers", []) or []
 
-    daily_pnl = session.get("daily_pnl_pct", 0.0)
-    daily_cap = session.get("daily_cap", 0.0)
-    consec = session.get("consecutive_losses", 0)
-    consec_limit = session.get("consec_limit", 0)
-    weekly_pnl = portfolio.get("weekly_pnl_pct", 0.0)
-    weekly_cap = portfolio.get("weekly_cap", 0.0)
-    open_pos = portfolio.get("open_positions", 0)
-    max_pos = portfolio.get("max_positions", 0)
+    all_breakers = [_breaker_gauge(code, info) for code, info in detail.items()]
 
-    all_breakers = [
-        {
-            "key": "daily_loss",
-            "label": "Daily Loss Cap",
-            "status": _breaker_status_for(daily_pnl, daily_cap, lower_is_worse=True),
-            "value": daily_pnl,
-            "limit": daily_cap,
-            "unit": "%",
-        },
-        {
-            "key": "consecutive_losses",
-            "label": "Consecutive Losses",
-            "status": _breaker_status_for(consec, consec_limit, lower_is_worse=False, ge_trips=True),
-            "value": consec,
-            "limit": consec_limit,
-            "unit": "count",
-        },
-        {
-            "key": "weekly_loss",
-            "label": "Weekly Loss Cap",
-            "status": _breaker_status_for(weekly_pnl, weekly_cap, lower_is_worse=True),
-            "value": weekly_pnl,
-            "limit": weekly_cap,
-            "unit": "%",
-        },
-        {
-            "key": "open_positions",
-            "label": "Open Positions",
-            "status": _breaker_status_for(open_pos, max_pos, lower_is_worse=False, ge_trips=True),
-            "value": open_pos,
-            "limit": max_pos,
-            "unit": "count",
-        },
-    ]
-
-    def _detail(b: dict) -> str:
+    def _fmt(b: dict) -> str:
         if b["unit"] == "%":
-            return f"{b['value']:.1f}% vs {b['limit']:.0f}% cap"
+            return f"{float(b['value']):.1f}% vs {float(b['limit']):.0f}% cap"
+        if b["unit"] == "$":
+            return f"${float(b['value']):.2f} vs ${float(b['limit']):.2f} MA"
         return f"{int(b['value'])} / {int(b['limit'])}"
 
     active = [
-        {"key": b["key"], "label": b["label"], "status": b["status"], "detail": _detail(b)}
-        for b in all_breakers if b["status"] != "OK"
+        {"key": b["key"], "label": b["label"], "status": b["status"], "detail": _fmt(b)}
+        for b in all_breakers if b["key"] in active_codes or b["status"] != "OK"
     ]
 
-    # Derived entries gate. Prefer a native consolidated value if S1-P05 ever
-    # adds it to get_status(); otherwise derive from overall_status.
-    if "entries_allowed" in status:
-        entries_allowed = bool(status["entries_allowed"])
-    else:
-        entries_allowed = overall != "RED"
-    if "active_breakers" in status and isinstance(status["active_breakers"], list):
-        active = status["active_breakers"]
-
     return {
-        "overall_status": overall,
-        "override_active": override,
+        # master flag OFF → breakers don't gate (override); else RED iff halted.
+        "overall_status": "OFF" if not enabled else ("RED" if not entries_allowed else "OK"),
+        "override_active": (not enabled),
         "entries_allowed": entries_allowed,
         "active": active,
         "all": all_breakers,
