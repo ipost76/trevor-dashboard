@@ -18,16 +18,18 @@ RM-PNL P01 (2026-05-29): REALIZED-ONLY headline P&L model.
     realized total.
   - `open_exposure_usd` = sum of committed notional of open positions — neutral
     deployed capital, never P&L.
-  - `equity_usd` = live HL `accountValue` (perps margin + unrealized) + spot
-    USDC — the factual account value, shown as-is. It floats with open
-    positions BY DESIGN; the UI labels it "live account value", distinct from
-    the realized booked number.
+  - `equity_usd` = live HL MTM equity = spot USDC `total` (honest cash) + Σ
+    unrealized PnL (EQF-01 2026-06-04: perps `accountValue` is the spot-USDC
+    HELD margin, already inside spot `total` — adding them double-counted).
+    It floats with open positions BY DESIGN; the UI labels it "live account
+    value" and de-floats it (− unrealized) to the realized booked number.
   - `realized_unknown_count` = closed live rows with a NULL `pnl_usd` (older
     `external_close` flattens that never booked a number). Surfaced, never
     silently invented or dropped.
 
-RM-07 P00/P01 (2026-05-28): `equity` is the LIVE Hyperliquid unified balance
-(perps `accountValue` + spot USDC). `live_capital_usd` hardcoded 0 (cap gone).
+EQF-01 (2026-06-04): `equity` = spot USDC `total` + Σ unrealized PnL (MTM). The
+old perps `accountValue` + spot USDC double-counted the held isolated margin.
+`live_capital_usd` hardcoded 0 (cap gone).
 
 Legacy fields (`pnl_today_usd`, `pnl_today_pct`, `trades_today`, `equity`,
 `open_positions_count`, `trades_total`, auto/live/killswitch flags) are
@@ -67,10 +69,10 @@ def _fetch_hl() -> dict | None:
     the SAME `user_state` call — no extra outbound request. Reuses the only HL
     fetch in the Hub (per the no-new-outbound-call constraint).
 
-    RM-07 P01 (2026-05-28): `equity` = `marginSummary.accountValue` (perps margin
-    + unrealized PnL) + spot USDC.total — Hyperliquid "unified account" semantics
-    (USDC migrates between spot and perps margin as trades open/close; the sum is
-    constant modulo realized PnL).
+    EQF-01 (2026-06-04): `equity` = spot USDC.total (honest cash) + Σ unrealized
+    PnL = true MTM equity. The perps `marginSummary.accountValue` is the spot
+    USDC HELD margin (already inside spot total), so the old
+    `accountValue + spot total` double-counted the held margin.
 
     Returns {"equity": float, "unrealized": float} or None on any failure.
     Note `equity` already includes `unrealized` (mark-to-market) — `unrealized`
@@ -94,10 +96,10 @@ def _fetch_hl() -> dict | None:
             return None
         info = Info(constants.MAINNET_API_URL, skip_ws=True)
 
-        # Perps margin + unrealized PnL
+        # EQF-01: honest cash is spot USDC `total`; the perps
+        # `marginSummary.accountValue` is the spot-USDC HELD margin (already
+        # inside spot total), so it's no longer read into the equity formula.
         state = info.user_state(addr)
-        margin = state.get("marginSummary", {})
-        perps_value = float(margin.get("accountValue", 0.0))
 
         # Unrealized = sum of floating PnL across open perp positions (greyed line)
         unrealized = 0.0
@@ -119,7 +121,8 @@ def _fetch_hl() -> dict | None:
         except Exception:
             spot_usdc = 0.0
 
-        return {"equity": perps_value + spot_usdc, "unrealized": unrealized}
+        # EQF-01: MTM equity = honest cash (spot total) + floating PnL.
+        return {"equity": spot_usdc + unrealized, "unrealized": unrealized}
     except Exception:
         return None
 
