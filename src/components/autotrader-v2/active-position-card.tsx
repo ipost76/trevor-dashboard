@@ -69,6 +69,49 @@ function fmtPrice(p: number): string {
   return p.toFixed(6);
 }
 
+const ET_TZ = "America/New_York";
+
+interface ExitEvent {
+  ts?: string;
+  event?: string;
+  entry?: number;
+  stop?: number;
+  regime?: string;
+}
+
+// W-A-P2: parse the raw exit_signals_log JSON string → the most-recent event
+// for a clean glance line. Never render the raw blob. Returns null on any
+// failure (null/empty/malformed/non-array) so the caller omits the line.
+function latestExitEvent(raw: string | null | undefined): ExitEvent | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const last = parsed[parsed.length - 1];
+      return last && typeof last === "object" ? (last as ExitEvent) : null;
+    }
+    return parsed && typeof parsed === "object" ? (parsed as ExitEvent) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Short ET time-of-day (e.g. "4:59 PM ET"), matching dca-section.tsx's ET_TZ
+// convention. Reuses parseUTC (naive stamps are UTC). "" on bad/empty input.
+function fmtEventTime(ts: string | undefined): string {
+  if (!ts) return "";
+  const d = parseUTC(ts);
+  if (!Number.isFinite(d.getTime())) return "";
+  return (
+    d.toLocaleTimeString("en-US", {
+      timeZone: ET_TZ,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }) + " ET"
+  );
+}
+
 export function ActivePositionCard() {
   const [positions, setPositions] = React.useState<OpenPosition[] | null>(null);
   const [prices, setPrices] = React.useState<PriceMap>({});
@@ -240,14 +283,28 @@ export function ActivePositionCard() {
                 )}
               </div>
 
-              {p.exit_signals_log && (
-                <div className="font-sans text-micro text-fg-muted">
-                  exit hint:{" "}
-                  <span className="font-mono text-accent-cyan-soft">
-                    {p.exit_signals_log.slice(0, 80)}
-                  </span>
-                </div>
-              )}
+              {/* W-A-P2: trade-levels glance + most-recent event·time.
+                  Replaces the raw exit_signals_log JSON blob — never rendered. */}
+              <div className="flex flex-col gap-0.5 text-caption text-fg-muted">
+                <span className="tabular-nums">
+                  entry ${fmtPrice(p.entry_price)}
+                  {p.stop_price ? <> · stop ${fmtPrice(p.stop_price)}</> : null}
+                  {p.target_price ? (
+                    <> · tgt ${fmtPrice(p.target_price)}</>
+                  ) : null}
+                </span>
+                {(() => {
+                  const ev = latestExitEvent(p.exit_signals_log);
+                  const when = fmtEventTime(ev?.ts);
+                  if (!ev?.event && !when) return null;
+                  return (
+                    <span className="tabular-nums">
+                      {ev?.event ?? "event"}
+                      {when ? ` · ${when}` : ""}
+                    </span>
+                  );
+                })()}
+              </div>
             </li>
           ))}
         </ul>
