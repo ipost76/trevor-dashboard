@@ -231,7 +231,7 @@ export function ProfitRiskPanel() {
                           showSign
                         />
                       ) : (
-                        <span className="tabular-nums text-fg-faint">$0.00</span>
+                        <span className="tabular-nums text-fg-muted">$0.00</span>
                       )}
                     </span>
                     <span className="tabular-nums">
@@ -296,7 +296,7 @@ export function ProfitRiskPanel() {
 
             {/* Overall status + any active (non-OK) breakers as a quick row. */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-micro uppercase tracking-wider text-fg-faint">
+              <span className="text-micro uppercase tracking-wider text-fg-muted">
                 overall
               </span>
               <Pill tone={statusTone(breakers.overall_status)} size="sm">
