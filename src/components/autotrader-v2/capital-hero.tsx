@@ -86,7 +86,6 @@ export function CapitalHero() {
   const openExposure = data?.open_exposure_usd ?? 0;
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
-  const unknownCount = data?.realized_unknown_count ?? 0;
 
   const headlinePnl = realized[win];
   const headlinePct = realizedPct[win];
@@ -162,33 +161,17 @@ export function CapitalHero() {
             ariaLabel="Realized P&L time window"
           />
 
-          {/* ── Greyed secondary block: realized acct value + float + deployed ── */}
+          {/* ── Greyed secondary block: honest cash + floating glance (2 lines) ── */}
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
                 ${realizedEquity.toFixed(2)}
               </span>
-              <span className="font-sans text-micro italic text-fg-muted">
-                realized account value · honest cash (excl. floating)
-              </span>
+              <span className="font-sans text-micro text-fg-muted">honest cash</span>
             </div>
-            <div className="font-mono text-caption tabular-nums text-fg-faint">
-              + floating {unrealStr} unrealized ·{" "}
-              {openCount > 0 ? `${openCount} open (floating)` : "no open positions"}
+            <div className="font-mono text-caption tabular-nums text-fg-muted">
+              {unrealStr} floating · {openCount} open · ${openExposure.toFixed(2)} deployed
             </div>
-            <div className="font-mono text-caption tabular-nums text-fg-faint">
-              ${openExposure.toFixed(2)} deployed · {openCount}{" "}
-              {openCount === 1 ? "position" : "positions"}
-            </div>
-            <div className="font-mono text-caption tabular-nums text-fg-faint">
-              ${equity.toFixed(2)} incl. floating · live HL account value
-            </div>
-            {unknownCount > 0 && (
-              <div className="font-sans text-micro text-fg-faint">
-                {unknownCount} closed{" "}
-                {unknownCount === 1 ? "trade" : "trades"} with no booked P&L (excluded)
-              </div>
-            )}
           </div>
 
           {/* ── Counts (Trades / Open) ── */}
