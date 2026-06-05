@@ -193,7 +193,20 @@ export function ActivePositionCard() {
             : p.entry_price - live;
         pnl_pct = (directional / p.entry_price) * 100 * (p.leverage || 1);
       }
-      return { ...p, current_price: live, pnl_pct };
+      // PKF-01: peak must never render BELOW the live unrealized % — the stored
+      // peak_pnl_pct ratchet can stall (e.g. while a live trade is stuck in the
+      // PARTIAL_EXIT branch and never reaches the HOLD persist path), so guard
+      // the DISPLAY at max(stored peak, live%). Belt-and-suspenders until the
+      // bot-side ratchet stall (PKF-02) is fixed with the partial-storm bug.
+      const storedPeak =
+        typeof p.peak_pnl_pct === "number" ? p.peak_pnl_pct : null;
+      const peak_display =
+        storedPeak === null
+          ? null
+          : typeof pnl_pct === "number"
+            ? Math.max(storedPeak, pnl_pct)
+            : storedPeak;
+      return { ...p, current_price: live, pnl_pct, peak_display };
     });
   }, [positions, prices]);
 
@@ -269,11 +282,11 @@ export function ActivePositionCard() {
                   <Clock size={12} aria-hidden />
                   {fmtHold(holdMin(p.opened_at))}
                 </span>
-                {typeof p.peak_pnl_pct === "number" && p.peak_pnl_pct !== 0 && (
+                {typeof p.peak_display === "number" && p.peak_display !== 0 && (
                   <span className="flex items-center gap-1">
                     peak
                     <MoneyText
-                      value={p.peak_pnl_pct}
+                      value={p.peak_display}
                       unit="%"
                       size="sm"
                       decimals={2}
