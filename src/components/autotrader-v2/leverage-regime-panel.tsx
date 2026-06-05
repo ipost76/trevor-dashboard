@@ -251,7 +251,7 @@ export function LeverageRegimePanel() {
               const lev = t.leverage_at_entry ?? t.leverage;
               const safe = t.liq_safe;
               return (
-                <li key={t.id} className="flex flex-col gap-2 py-3">
+                <li key={t.id} className="flex flex-col gap-1.5 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-h3 font-bold tabular-nums">
                       {t.ticker}{" "}
@@ -302,7 +302,7 @@ export function LeverageRegimePanel() {
                       <span className="tabular-nums text-fg-default">
                         {fmtPct(t.required_liq_distance)}
                       </span>{" "}
-                      <span className="text-fg-faint">
+                      <span className="text-fg-muted">
                         ({data?.liq_buffer_k ?? 2.5}× stop {fmtPct(t.stop_fraction)})
                       </span>
                     </span>
@@ -329,7 +329,7 @@ export function LeverageRegimePanel() {
                           {fmtMult(t.breakdown.vol_mult)}
                         </span>
                       </span>
-                      <span className="text-fg-faint">→</span>
+                      <span className="text-fg-muted">→</span>
                       <span>
                         cap{" "}
                         <span className="text-fg-default">
@@ -339,7 +339,7 @@ export function LeverageRegimePanel() {
                         </span>
                       </span>
                       {t.breakdown.regime && (
-                        <span className="text-fg-faint">· {t.breakdown.regime}</span>
+                        <span className="text-fg-muted">· {t.breakdown.regime}</span>
                       )}
                     </div>
                   ) : (
@@ -374,14 +374,14 @@ export function LeverageRegimePanel() {
         )}
 
         {regimes.length > 0 && (
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <ul className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
             {regimes.map((r) => {
               const v = regimeVisual(r.state);
               const pct = r.prob != null ? Math.round(r.prob * 100) : null;
               return (
                 <li
                   key={r.ticker}
-                  className="flex flex-col gap-1.5 rounded-md border border-border-subtle bg-bg-elevated/40 p-2.5"
+                  className="flex flex-col gap-1 rounded-md border border-border-subtle bg-bg-elevated/40 p-2"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-caption font-bold tabular-nums">
@@ -400,7 +400,7 @@ export function LeverageRegimePanel() {
                       aria-hidden
                     />
                   </div>
-                  <div className="flex items-center justify-between text-micro text-fg-faint">
+                  <div className="flex items-center justify-between text-micro text-fg-muted">
                     <span className="tabular-nums">{pct != null ? `${pct}%` : "—"}</span>
                     <span className="tabular-nums" title={r.ts ? String(r.ts) : undefined}>
                       {fmtAge(r.age_seconds)}
@@ -451,7 +451,7 @@ export function LeverageRegimePanel() {
                           aria-hidden
                         />
                       </div>
-                      <div className="flex items-center justify-between text-micro text-fg-faint">
+                      <div className="flex items-center justify-between text-micro text-fg-muted">
                         <span>open notional</span>
                         <span className="tabular-nums">
                           ${margin.total_ntl_pos.toFixed(2)}
@@ -515,55 +515,45 @@ export function LeverageRegimePanel() {
 
         {shadow && shadow.recent.length > 0 && (
           <>
-            <p className="mb-2 text-micro text-fg-faint">
+            <p className="mb-2 text-micro text-fg-muted">
               Production exit (actual) vs the regime-aware candidate (would-be) —
               for judging promotion.
             </p>
             <ul className="divide-y divide-border-subtle">
               {shadow.recent.map((s) => {
                 const v = regimeVisual(s.regime);
+                // One compact glance line per row (G4): ticker · dir · regime ·
+                // actual→would-be · pnl% · state. Boilerplate words cut; the
+                // old→new action divergence (gold when divergent) is the point.
                 return (
-                  <li key={s.id} className="flex flex-col gap-1 py-2.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 text-caption font-bold tabular-nums">
-                        {s.ticker}
-                        <span
-                          className={
-                            s.direction === "LONG"
-                              ? "text-accent-mint"
-                              : "text-accent-red"
-                          }
-                        >
-                          {s.direction}
-                        </span>
-                        <span className={`flex items-center gap-1 text-micro font-normal ${v.cls}`}>
-                          {v.icon}
-                          {s.regime ?? "—"}
-                        </span>
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-1.5 text-micro tabular-nums text-fg-muted"
+                  >
+                    <span className="text-caption font-bold tabular-nums">
+                      {s.ticker}{" "}
+                      <span
+                        className={
+                          s.direction === "LONG"
+                            ? "text-accent-mint"
+                            : "text-accent-red"
+                        }
+                      >
+                        {s.direction}
                       </span>
-                      {s.divergent && (
-                        <Pill intent="warn" size="sm">
-                          DIVERGENT
-                        </Pill>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro tabular-nums text-fg-muted">
-                      <span>
-                        actual{" "}
-                        <span className="text-fg-default">{s.old_exit_action ?? "—"}</span>
-                      </span>
-                      <span className="text-fg-faint">vs</span>
-                      <span>
-                        would-be{" "}
-                        <span
-                          className={
-                            s.divergent ? "text-accent-gold" : "text-fg-default"
-                          }
-                        >
-                          {s.new_exit_action ?? "—"}
-                        </span>
-                      </span>
-                      {s.pnl_pct != null && (
+                    </span>
+                    <span className="text-fg-faint">·</span>
+                    <span className={`flex items-center gap-1 font-normal ${v.cls}`}>
+                      {v.icon}
+                      {s.regime ?? "—"}
+                    </span>
+                    <span className="text-fg-faint">·</span>
+                    <span className={s.divergent ? "text-accent-gold" : undefined}>
+                      {s.old_exit_action ?? "—"}→{s.new_exit_action ?? "—"}
+                    </span>
+                    {s.pnl_pct != null && (
+                      <>
+                        <span className="text-fg-faint">·</span>
                         <span
                           className={
                             s.pnl_pct >= 0 ? "text-accent-mint" : "text-accent-red"
@@ -572,8 +562,17 @@ export function LeverageRegimePanel() {
                           {s.pnl_pct >= 0 ? "+" : ""}
                           {Number(s.pnl_pct).toFixed(2)}%
                         </span>
-                      )}
-                    </div>
+                      </>
+                    )}
+                    {s.divergent ? (
+                      <Pill intent="warn" size="sm">
+                        DIVERGENT
+                      </Pill>
+                    ) : (
+                      <Pill tone="neutral" size="sm">
+                        EVAL
+                      </Pill>
+                    )}
                   </li>
                 );
               })}
