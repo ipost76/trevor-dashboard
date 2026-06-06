@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "trevor_session";
-const SESSION_SALT = "trevor-mc-2025";
+const SESSION_SALT = process.env.SESSION_SALT || "trevor-mc-2025";
 
 // QUAL-06 (2026-06-03): externalized the VM IP for the direct-IP→domain redirect.
 // Override via the HUB_VM_IP env var; defaults to the current VM IP so the
