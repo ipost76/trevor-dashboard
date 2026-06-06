@@ -16,3 +16,6 @@ trevor.db-wal
 trevor.db-shm
 # tsconfig build cache (drifts on every build)
 tsconfig.tsbuildinfo
+
+# WSL hub runtime (B-P1 read-path migration)
+venv/
