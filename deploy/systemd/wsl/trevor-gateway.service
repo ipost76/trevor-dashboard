@@ -1,0 +1,16 @@
+[Unit]
+Description=TREVOR Hub Write-Gateway skeleton (:3939, auth only, no DB) [W-C-P1] — RM-WSL
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
+ExecStart=/usr/bin/node gateway/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
