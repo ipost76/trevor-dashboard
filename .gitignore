@@ -19,3 +19,14 @@ tsconfig.tsbuildinfo
 
 # WSL hub runtime (B-P1 read-path migration)
 venv/
+
+# W-C-P2-DELIVERY: downloads runtime tree — commit the scaffolding (.gitkeep),
+# ignore runtime data (delivered files + the manifest/categories the pipeline
+# mutates on every post). download_manager recreates empty ones on demand.
+downloads/active/*
+downloads/archive/*
+!downloads/active/.gitkeep
+!downloads/archive/.gitkeep
+downloads/manifest.json
+downloads/categories.json
+downloads/*.tmp

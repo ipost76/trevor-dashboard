@@ -20,9 +20,13 @@ Usage:
     python3 query_downloads.py path <filename>
 """
 import json
+import os
 import sys
 
-sys.path.insert(0, "/home/trevor/trevor")
+# W-C-P2-DELIVERY: import download_manager from this script's own directory (the
+# dashboard repo root, where download_manager.py was ported) instead of the
+# VM-hardcoded /home/trevor/trevor path, which holds only the read-only replica.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from download_manager import (  # noqa: E402

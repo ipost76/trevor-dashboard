@@ -19,9 +19,13 @@ Always prints exactly one JSON object to stdout and exits 0; callers inspect
 the JSON (success / error / category keys), never the process exit code.
 """
 import json
+import os
 import sys
 
-sys.path.insert(0, "/home/trevor/trevor")
+# W-C-P2-DELIVERY: import download_manager from this script's own directory (the
+# dashboard repo root, where download_manager.py was ported) instead of the
+# VM-hardcoded /home/trevor/trevor path, which holds only the read-only replica.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from download_manager import (  # noqa: E402
     create_category,
