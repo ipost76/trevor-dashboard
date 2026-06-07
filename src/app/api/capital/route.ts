@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export async function GET() {
   try {
@@ -17,8 +18,8 @@ export async function POST(req: Request) {
     if (isNaN(amount) || amount < 0) {
       return NextResponse.json({ error: "Invalid capital amount" }, { status: 400 });
     }
-    const raw = await runPython("query_capital.py", ["set", String(amount)]);
-    return NextResponse.json(safeJsonParse(raw, { capital: amount, updated: true }));
+    // W-C-P2a: write routes through the gateway → VM (no direct replica write).
+    return gatewayWrite("capital.set", { amount }, { reason: "capital.set via Hub" });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

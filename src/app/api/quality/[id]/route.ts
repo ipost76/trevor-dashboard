@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 // /api/quality/[id] — approve or reject a quality pattern
 //
@@ -32,11 +32,8 @@ export async function POST(
       );
     }
 
-    // Rule 26 — argv array via async bridge, no shell. action/pid cross as argv.
-    const raw = await runPython("query_quality.py", [action, String(pid)], { timeout: 10_000 });
-    const result = JSON.parse(raw);
-
-    return NextResponse.json(result);
+    // W-C-P2a: routed through the gateway → VM (HUB_LIST_WRITE_ENABLED, audited).
+    return gatewayWrite("quality.set", { action, pid }, { reason: `quality.${action} via Hub` });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: String(e) },

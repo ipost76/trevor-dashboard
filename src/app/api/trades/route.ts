@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython, runPythonInline } from "@/lib/api-helpers";
+import { runPython } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -89,27 +90,22 @@ export async function DELETE(request: NextRequest) {
   const body = await request.json();
   const { id, ids, trade_id } = body;
 
-  try {
-    // Rule 26 — ids / deleteId cross as argv elements via runPython(), never a shell string.
-    if (Array.isArray(ids) && ids.length > 0) {
-      const raw = await runPython(
-        "query_trades.py",
-        ["bulk_update", JSON.stringify(ids), "EXCLUDE"],
-        { timeout: 15000 }
-      );
-      return NextResponse.json(JSON.parse(raw));
-    }
-
-    const deleteId = trade_id || id;
-    if (deleteId != null) {
-      const raw = await runPython("query_trades.py", ["delete_trade", String(deleteId)], { timeout: 15000 });
-      return NextResponse.json(JSON.parse(raw));
-    }
-
-    return NextResponse.json({ error: "Missing id, trade_id, or ids" }, { status: 400 });
-  } catch (err) {
-    return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
+  // W-C-P2a: routed through the gateway → VM (HUB_TRADE_EDIT_ENABLED, audited).
+  // Both modes preserved: bulk EXCLUDE (ids[]) and single closed-only delete.
+  if (Array.isArray(ids) && ids.length > 0) {
+    return gatewayWrite("trades.delete", { mode: "bulk", ids }, { reason: "trades.delete (bulk) via Hub" });
   }
+
+  const deleteId = trade_id || id;
+  if (deleteId != null) {
+    return gatewayWrite(
+      "trades.delete",
+      { mode: "single", trade_id: String(deleteId) },
+      { reason: "trades.delete (single) via Hub" },
+    );
+  }
+
+  return NextResponse.json({ error: "Missing id, trade_id, or ids" }, { status: 400 });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -128,30 +124,12 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Missing trade_id or invalid margin_usd" }, { status: 400 });
   }
 
-  const code = `
-import sqlite3, json, os
-db_path = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
-trade_id = os.environ.get("PATCH_TRADE_ID", "")
-margin_usd = float(os.environ.get("PATCH_MARGIN_USD", "0") or "0")
-conn = sqlite3.connect(db_path)
-conn.execute("PRAGMA busy_timeout=5000")  # REL-10: wait up to 5s for a write lock instead of failing immediately
-conn.execute("UPDATE active_trades SET margin_usd=? WHERE trade_id=?", (margin_usd, trade_id))
-conn.commit()
-r = conn.execute("SELECT margin_usd, leverage FROM active_trades WHERE trade_id=?", (trade_id,)).fetchone()
-conn.close()
-if r:
-    print(json.dumps({"ok": True, "margin_usd": r[0], "notional": round(r[0] * (r[1] or 1), 2)}))
-else:
-    print(json.dumps({"ok": False, "error": "Trade not found"}))
-`;
-
-  try {
-    const raw = await runPythonInline(code, {
-      timeout: 5000,
-      env: { PATCH_TRADE_ID: trade_id, PATCH_MARGIN_USD: String(margin_usd) },
-    });
-    return NextResponse.json(JSON.parse(raw));
-  } catch (err) {
-    return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
-  }
+  // W-C-P2a: the inline `UPDATE active_trades SET margin_usd=...` no longer runs
+  // client-side. The op is re-expressed and dispatched authoritatively on the VM
+  // (HUB_TRADE_EDIT_ENABLED, audited) — no raw SQL ever leaves the Hub.
+  return gatewayWrite(
+    "trades.patch_margin",
+    { trade_id, margin_usd },
+    { reason: "trades.patch_margin via Hub" },
+  );
 }

@@ -26,7 +26,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const SACRED_FILES = ["IDENTITY", "BRAIN", "SOUL", "AGENTS"];
+// Sacred brain files are INVIOLABLE. Normalize (strip .md, any case) so that
+// IDENTITY.md / identity / SOUL.MD all hit the guard — the pre-W-C-P2a check
+// compared the .md-suffixed request name against suffix-less entries (e.g.
+// "IDENTITY.md".toUpperCase() = "IDENTITY.MD") and MISSED, leaking sacred writes.
+const SACRED_FILES = new Set(["IDENTITY", "BRAIN", "SOUL", "AGENTS"]);
+function isSacredBrainName(name: string): boolean {
+  const base = name.trim().replace(/\.md$/i, "").toUpperCase();
+  return SACRED_FILES.has(base);
+}
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -38,16 +46,22 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "write_file") {
-      const { name, content, confirm_sacred } = body;
+      const { name, content } = body;
       if (!name || content === undefined) {
         return NextResponse.json({ error: "name and content required" }, { status: 400 });
       }
-      if (SACRED_FILES.includes(name.toUpperCase()) && confirm_sacred !== true) {
+      // Sacred files are inviolable — hard 423, NO override (the old
+      // confirm_sacred escape hatch is removed). Matches the robust
+      // /api/memory/brain/[name] guard.
+      if (isSacredBrainName(name)) {
         return NextResponse.json(
-          { error: `${name} is a sacred brain file. Set confirm_sacred: true to overwrite.` },
-          { status: 400 }
+          { error: `sacred brain file — write rejected: ${name}` },
+          { status: 423 }
         );
       }
+      // HUB_BRAIN_EDIT_ENABLED (an auto_config row, default OFF) is enforced in
+      // manage_brain.py as defense in depth — it exits 3 when locked, which the
+      // catch below maps to 423 Locked.
       const raw = await runPython("manage_brain.py", ["write_file", name, content], { timeout: 15000 });
       return NextResponse.json(safeJsonParse(raw, { error: "Failed to parse response" }));
     }
@@ -115,6 +129,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    const msg = String(err);
+    // manage_brain.py exits 3 for sacred / HUB_BRAIN_EDIT_ENABLED-off rejection —
+    // map to 423 Locked (mirrors /api/memory/brain/[name]).
+    if (msg.includes("python exit=3")) {
+      return NextResponse.json({ error: msg }, { status: 423 });
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

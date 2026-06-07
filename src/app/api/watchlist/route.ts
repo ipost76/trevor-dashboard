@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -31,14 +32,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  try {
-    const raw = await runPython("manage_watchlist.py", ["add", ticker], {
-      timeout: 10_000,
-    });
-    return NextResponse.json(JSON.parse(raw));
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
+  // W-C-P2a: routed through the gateway → VM (HUB_LIST_WRITE_ENABLED, audited).
+  return gatewayWrite("watchlist.add", { ticker }, { reason: "watchlist.add via Hub" });
 }
 
 export async function DELETE(request: NextRequest) {
@@ -55,12 +50,6 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
-  try {
-    const raw = await runPython("manage_watchlist.py", ["remove", ticker], {
-      timeout: 10_000,
-    });
-    return NextResponse.json(JSON.parse(raw));
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
+  // W-C-P2a: routed through the gateway → VM (HUB_LIST_WRITE_ENABLED, audited).
+  return gatewayWrite("watchlist.remove", { ticker }, { reason: "watchlist.remove via Hub" });
 }

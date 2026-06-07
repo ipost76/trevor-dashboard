@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { runPython, runPythonResult } from "@/lib/api-helpers";
+import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 // /api/dca — Hub surface for the bot's DCAManager.
 //
@@ -51,43 +52,8 @@ export async function POST(request: Request) {
     );
   }
 
-  let result;
-  try {
-    result = await runPythonResult("set_dca.py", [action], {
-      timeout: 10000,
-      input: JSON.stringify(body),
-    });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
-  }
-
-  if (result.timedOut || result.signal) {
-    return NextResponse.json(
-      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
-      { status: 500 },
-    );
-  }
-
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse((result.stdout || "").trim() || "{}");
-  } catch {
-    parsed = {
-      ok: false,
-      raw: (result.stdout || "").slice(0, 500),
-      error: "non-JSON output",
-    };
-  }
-
-  if (result.status === 0) return NextResponse.json(parsed, { status: 200 });
-  if (result.status === 1 || result.status === 4)
-    return NextResponse.json(parsed, { status: 400 });
-  return NextResponse.json(
-    {
-      ...parsed,
-      stderr: (result.stderr || "").slice(0, 500),
-      exit_code: result.status,
-    },
-    { status: 500 },
-  );
+  // W-C-P2a: routed through the gateway → VM (HUB_TRADE_EDIT_ENABLED, audited).
+  // The full body (action + params) becomes the op args; the VM helper consumes
+  // it exactly as set_dca.py did from stdin.
+  return gatewayWrite("dca.set", { ...body, action }, { reason: `dca.set:${action} via Hub` });
 }

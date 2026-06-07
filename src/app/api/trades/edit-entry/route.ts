@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { callGateway, gatewayResponse } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +12,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "trade_id and positive entry_price required" }, { status: 400 });
     }
 
-    // Update DB via Python helper
-    const raw = await runPython("query_edit_entry.py", [trade_id, String(entry_price)]);
-    const result = safeJsonParse<Record<string, unknown>>(raw, { error: "Unknown error" });
+    // W-C-P2a: DB write routes through the gateway → VM (HUB_TRADE_EDIT_ENABLED,
+    // audited). The helper result still comes back so the Discord card edit
+    // below is unchanged.
+    const gw = await callGateway(
+      "trades.edit_entry",
+      { trade_id, entry_price },
+      { reason: "trades.edit_entry via Hub" },
+    );
+    if (gw.status !== 200) {
+      return gatewayResponse(gw);
+    }
+    const result = ((gw.body.result ?? gw.body) || {}) as Record<string, unknown>;
 
     if (result.error) {
       return NextResponse.json(result, { status: 400 });

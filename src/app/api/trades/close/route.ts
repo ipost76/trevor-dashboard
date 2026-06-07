@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +23,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const raw = await runPython("query_close.py", ["submit", trade_id, String(price)]);
-    const data = safeJsonParse(raw, { error: "Failed to parse response" });
-
-    if (data.error) {
-      return NextResponse.json(data, { status: 400 });
-    }
-
-    return NextResponse.json(data);
+    // W-C-P2a: queue-row write routes through the gateway → VM
+    // (HUB_TRADE_EDIT_ENABLED, audited). Stays queue-style — the VM inserts the
+    // close_requests row; the bot executes the close.
+    return gatewayWrite(
+      "trades.close",
+      { trade_id, exit_price: price },
+      { reason: "trades.close via Hub" },
+    );
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

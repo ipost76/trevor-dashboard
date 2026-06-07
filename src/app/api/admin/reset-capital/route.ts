@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +17,8 @@ export async function POST(request: Request) {
     }
 
     console.log(`[ADMIN_RESET] Capital reset: ${amount}`);
-    const raw = await runPython("query_admin_reset.py", ["reset_capital", String(amount)]);
-    return NextResponse.json(safeJsonParse(raw, { success: false }));
+    // W-C-P2a: routed through the gateway → VM (HUB_CAPITAL_WRITE_ENABLED, audited).
+    return gatewayWrite("capital.reset", { amount, confirmText }, { reason: "capital.reset via Hub" });
   } catch (err) {
     console.error(`[ADMIN_RESET] Capital reset error: ${err}`);
     return NextResponse.json({ error: String(err) }, { status: 500 });

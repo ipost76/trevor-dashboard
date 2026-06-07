@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
+import { callGateway, gatewayResponse } from "@/lib/gateway-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,23 +76,15 @@ export async function POST(request: Request) {
   const reason = String(body.reason ?? "Hub toggle").trim() || "Hub toggle";
   const author = String(body.author ?? "ghost").trim() || "ghost";
 
-  try {
-    const stdin = JSON.stringify({ action, reason, author });
-    const raw = await runPython("set_killswitch.py", [], { timeout: 8_000, input: stdin });
-    const data = JSON.parse(raw);
-
-    // Bust the GET cache so the topbar pill + System Health card see fresh
-    // state on the very next poll instead of waiting up to 5s.
-    cache.clear();
-
-    if (!data.ok) {
-      return NextResponse.json(data, { status: 500 });
-    }
-    return NextResponse.json(data);
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: String(e) },
-      { status: 500 },
-    );
-  }
+  // W-C-P2a: routed through the gateway → VM (audited). The killswitch is the
+  // emergency stop — it intentionally has NO write-enable gate (always actionable).
+  const gw = await callGateway(
+    "killswitch.set",
+    { action, reason, author },
+    { actor: `hub:${author}`, reason: `killswitch.${action}` },
+  );
+  // Bust the GET cache so the topbar pill + System Health card see fresh state
+  // on the very next poll instead of waiting up to 5s.
+  cache.clear();
+  return gatewayResponse(gw);
 }

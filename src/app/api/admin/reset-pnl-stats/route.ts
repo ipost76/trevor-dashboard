@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +13,8 @@ export async function POST(request: Request) {
     }
 
     console.log("[ADMIN_RESET] P&L stats reset");
-    const raw = await runPython("query_admin_reset.py", ["reset_pnl_stats"]);
-    return NextResponse.json(safeJsonParse(raw, { success: false }));
+    // W-C-P2a: routed through the gateway → VM (HUB_CAPITAL_WRITE_ENABLED, audited).
+    return gatewayWrite("pnl_stats.reset", { confirmText }, { reason: "pnl_stats.reset via Hub" });
   } catch (err) {
     console.error(`[ADMIN_RESET] P&L reset error: ${err}`);
     return NextResponse.json({ error: String(err) }, { status: 500 });

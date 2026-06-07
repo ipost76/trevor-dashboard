@@ -18,6 +18,32 @@ def main():
                 print(json.dumps({"error": "File name required"}))
                 return
 
+            # --- W-C-P2a guard (defense in depth; /api/brain also checks) ---
+            # Sacred files are INVIOLABLE. Normalize (strip .md, any case) so
+            # IDENTITY.md / identity / SOUL.MD are ALL rejected. Exit 3 -> HTTP 423.
+            _stripped = name.strip()
+            _norm = (_stripped[:-3] if _stripped.lower().endswith(".md") else _stripped).upper()
+            if _norm in ("IDENTITY", "BRAIN", "SOUL", "AGENTS"):
+                print(json.dumps({"error": f"sacred file — write rejected: {name}"}), file=sys.stderr)
+                sys.exit(3)
+            # HUB_BRAIN_EDIT_ENABLED is an auto_config row (default OFF = absent or
+            # != 'true'); read it read-only, fail CLOSED on any error. Exit 3 -> 423.
+            import sqlite3 as _sqlite3
+            _db = os.environ.get("TREVOR_DB_PATH", os.path.join(trevor_dir, "trevor.db"))
+            _enabled = False
+            try:
+                _conn = _sqlite3.connect(f"file:{_db}?mode=ro", uri=True, timeout=10)
+                _row = _conn.execute(
+                    "SELECT value FROM auto_config WHERE key='HUB_BRAIN_EDIT_ENABLED'"
+                ).fetchone()
+                _conn.close()
+                _enabled = bool(_row) and str(_row[0]).strip().lower() == "true"
+            except Exception:
+                _enabled = False
+            if not _enabled:
+                print(json.dumps({"error": "HUB_BRAIN_EDIT_ENABLED is false"}), file=sys.stderr)
+                sys.exit(3)
+
             file_path = os.path.join(brain_dir, name)
 
             # Backup existing file if it exists

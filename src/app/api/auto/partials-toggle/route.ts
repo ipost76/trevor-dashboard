@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { runPython, runPythonResult } from "@/lib/api-helpers";
+import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 // /api/auto/partials-toggle — Hub write surface for LIVE_PARTIALS_ENABLED
 // (B4, 2026-05-27). Defaults to false; toggle promotes Layer 5 partial
@@ -56,40 +57,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // runPythonResult (async, NOT runPython) so we read stdout regardless of exit
-  // code — set_live_partials_enabled.py exits 3 on gate-lock and we want to
-  // surface its JSON payload while mapping exit 3 → HTTP 423. argv passes
-  // values without shell interpolation per Rule 26. Async → never blocks the loop.
-  let result;
-  try {
-    result = await runPythonResult("set_live_partials_enabled.py", [value, author], { timeout: 10000 });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
-  }
-
-  if (result.timedOut || result.signal) {
-    return NextResponse.json(
-      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
-      { status: 500 },
-    );
-  }
-
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse((result.stdout || "").trim() || "{}");
-  } catch {
-    parsed = { ok: false, raw: (result.stdout || "").slice(0, 500), error: "non-JSON output" };
-  }
-
-  if (result.status === 0) return NextResponse.json(parsed, { status: 200 });
-  if (result.status === 3) return NextResponse.json(parsed, { status: 423 });
-  if (result.status === 1) return NextResponse.json(parsed, { status: 400 });
-  return NextResponse.json(
-    {
-      ...parsed,
-      stderr: (result.stderr || "").slice(0, 500),
-      exit_code: result.status,
-    },
-    { status: 500 },
+  // W-C-P2a: routed through the gateway → VM. HUB_LIVE_PARTIALS_TOGGLE_ENABLED is
+  // re-checked authoritatively VM-side (helper exits 3 → 423 when locked); audit
+  // row lands in autotrader_state_audit there. UX contract unchanged.
+  return gatewayWrite(
+    "partials.toggle",
+    { value, author },
+    { actor: `hub:${author}`, reason: `partials.toggle=${value}` },
   );
 }

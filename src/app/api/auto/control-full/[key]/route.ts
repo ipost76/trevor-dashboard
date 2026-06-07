@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPythonResult } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 // PATCH /api/auto/control-full/[key] — D2 (Control Center) write surface.
 //
@@ -54,37 +54,12 @@ export async function PATCH(
   const author = String(body.author ?? "ghost").trim() || "ghost";
   const reason = String(body.reason ?? "").trim();
 
-  const argv = reason ? [key, value, author, reason] : [key, value, author];
-  let result;
-  try {
-    result = await runPythonResult("write_control_value.py", argv, { timeout: 10_000 });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
-  }
-
-  if (result.timedOut || result.signal) {
-    return NextResponse.json(
-      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
-      { status: 500 },
-    );
-  }
-
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse((result.stdout || "").trim() || "{}");
-  } catch {
-    parsed = { ok: false, raw: (result.stdout || "").slice(0, 500), error: "non-JSON output" };
-  }
-
-  if (result.status === 0) return NextResponse.json(parsed, { status: 200 });
-  if (result.status === 3) return NextResponse.json(parsed, { status: 423 });
-  if (result.status === 1) return NextResponse.json(parsed, { status: 400 });
-  return NextResponse.json(
-    {
-      ...parsed,
-      stderr: (result.stderr || "").slice(0, 500),
-      exit_code: result.status,
-    },
-    { status: 500 },
+  // W-C-P2a: routed through the gateway → VM. LIVE_EDIT_ENABLED + dedicated/
+  // immutable checks are enforced authoritatively VM-side (helper exits 3 → 423,
+  // exit 1 → 400); `reason` lands in change_log.notes there. UX contract unchanged.
+  return gatewayWrite(
+    "control.set",
+    { key, value, author, reason },
+    { actor: `hub:${author}`, reason: reason || `control.set:${key}` },
   );
 }

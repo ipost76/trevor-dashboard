@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +13,19 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const params = JSON.stringify({
-      exit_price: Number(exit_price),
-      new_entry: Number(new_entry),
-      leverage: Number(leverage || 1),
-    });
-    const raw = await runPython("query_hub_commands.py", ["submit", trade_id, "FLIP", params]);
-    const data = safeJsonParse(raw, { error: "Parse error" });
-    return NextResponse.json(data, { status: data.error ? 400 : 200 });
+    // W-C-P2a: queue-row write routes through the gateway → VM
+    // (HUB_TRADE_EDIT_ENABLED, audited). Stays queue-style — the VM inserts the
+    // hub_commands FLIP row; the bot executes it.
+    return gatewayWrite(
+      "trades.flip",
+      {
+        trade_id,
+        exit_price: Number(exit_price),
+        new_entry: Number(new_entry),
+        leverage: Number(leverage || 1),
+      },
+      { reason: "trades.flip via Hub" },
+    );
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
