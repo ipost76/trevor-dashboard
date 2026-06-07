@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TREVOR Hub — gateway health watchdog (WSL TrevorHub box)  [AUTHORED, NOT INSTALLED]
+#
+# STATUS: version-controlled but DELIBERATELY NOT installed/enabled yet. Goes live
+# at the Wave D cutover (when the dashboard runs on WSL as primary) — no auto-restart
+# authority for the gateway exists before then. To install at cutover:
+#   sudo cp deploy/systemd/wsl/trevor-gateway-watchdog.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now trevor-gateway-watchdog
+#
+# WHY: trevor-gateway.service has Restart=on-failure (restarts only on process EXIT).
+# A wedged-but-alive gateway (event loop hung, still bound to :3939, never exits)
+# would never restart. This polls the UNAUTHENTICATED GET /healthz liveness probe
+# (200 {"status":"ok"}) and self-heals a hang — the gateway-side mirror of the VM's
+# trevor-dashboard-watchdog.service.
+#
+# MECHANISM: reuses deploy/scripts/dashboard_health_watchdog.sh UNCHANGED, fully
+# parameterized via Environment= below (HEALTH_URL / WATCHDOG_SERVICE /
+# WATCHDOG_STATE_DIR / ENV_FILE). No script fork.
+#   • ENV_FILE → the Hub's .env.local so restart/recovery/give-up notices post to
+#     #qa-agent (DISCORD_BOT_TOKEN read-only, same idiom as the VM watchdog).
+#   • WATCHDOG_STATE_DIR is gateway-specific so its restart history / give-up window
+#     never collide with any dashboard watchdog's state.
+# ─────────────────────────────────────────────────────────────────────────────
+[Unit]
+Description=TREVOR Hub gateway health watchdog — auto-restart trevor-gateway on a /healthz wedge (WSL)
+Documentation=https://github.com/ipost76/trevor-dashboard
+# Watch the gateway; don't fail if it's briefly down.
+After=trevor-gateway.service
+Wants=trevor-gateway.service
+
+[Service]
+Type=simple
+User=ghost
+# Reuse the dashboard watchdog script verbatim, retargeted to the gateway via env.
+Environment=HEALTH_URL=http://127.0.0.1:3939/healthz
+Environment=WATCHDOG_SERVICE=trevor-gateway.service
+Environment=WATCHDOG_STATE_DIR=/home/ghost/.local/state/trevor-gateway-watchdog
+Environment=ENV_FILE=/home/ghost/projects/trevor-dashboard/.env.local
+ExecStart=/home/ghost/projects/trevor-dashboard/deploy/scripts/dashboard_health_watchdog.sh
+Restart=always
+RestartSec=10
+# It's just curl + sleep — keep it tiny.
+MemoryMax=64M
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
