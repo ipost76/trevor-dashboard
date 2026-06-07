@@ -21,10 +21,11 @@
  * bearer token get 401.
  *
  * Routes:
+ *   GET  /healthz        → 200 {"status":"ok"}  (UNAUTHENTICATED liveness probe — no bearer; reveals nothing else)
  *   GET  /gateway/health → 200 {"status":"ok","gateway":"live","writes_enabled":<vm-configured>}  (with valid bearer)
  *   POST /gateway/write  → op envelope {op,args,actor,source_type,reason,idempotency_key}
  *                          200 {ok,result} · 423 {gate} · 400 {validation|unknown_op} · 401 · 502/504
- *   (no token / bad token on any path) → 401
+ *   (no token / bad token on any OTHER path) → 401
  *   (anything else)      → 404
  *
  * Run:  node gateway/server.js     (reads GATEWAY_ and VM_GATEWAY_ keys from .env.local)
@@ -278,12 +279,21 @@ async function handleWrite(req, res) {
 const server = http.createServer((req, res) => {
   // Every path is wrapped so a thrown handler can never crash the process.
   try {
-    // --- Auth gate: applies to ALL routes. No valid bearer → 401. ---
+    const url = (req.url || "").split("?")[0];
+
+    // --- Unauthenticated liveness probe (GET /healthz). Deliberately placed
+    // BEFORE the auth gate so an external monitor can check up/down without
+    // holding GATEWAY_TOKEN. Reveals NOTHING beyond "the process is serving":
+    // no writes_enabled, no op count, no VM-forward config — those stay behind
+    // the bearer on /gateway/health. ---
+    if (req.method === "GET" && url === "/healthz") {
+      return sendJson(res, 200, { status: "ok" });
+    }
+
+    // --- Auth gate: applies to ALL OTHER routes. No valid bearer → 401. ---
     if (!tokenIsValid(extractBearer(req))) {
       return sendJson(res, 401, { error: "unauthorized" });
     }
-
-    const url = (req.url || "").split("?")[0];
 
     // --- Health endpoint (authenticated). ---
     if (req.method === "GET" && url === "/gateway/health") {
