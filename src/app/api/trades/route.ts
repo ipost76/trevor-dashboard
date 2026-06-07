@@ -75,15 +75,15 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Missing trade id" }, { status: 400 });
   }
 
-  const payload = JSON.stringify({ id, notes, training_status });
-
-  try {
-    // Rule 26 — payload crosses as an argv element via runPython(), never a shell string.
-    const raw = await runPython("query_trades.py", ["annotate", payload], { timeout: 10000 });
-    return NextResponse.json(JSON.parse(raw));
-  } catch (err) {
-    return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
-  }
+  // W-C-P2b: routed through the gateway → VM (HUB_BENIGN_WRITE_ENABLED, audited).
+  // The inline `UPDATE trade_outcomes SET notes,training_status` no longer runs
+  // against the read-only replica — re-expressed as an op, dispatched VM-side.
+  // Fail-closed: VM down → 502 (never a replica write).
+  return gatewayWrite(
+    "trades.annotate",
+    { id, notes, training_status },
+    { reason: "trades.annotate via Hub" },
+  );
 }
 
 export async function DELETE(request: NextRequest) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,8 +22,11 @@ export async function GET(
     return NextResponse.json({ error: "invalid source" }, { status: 400 });
   }
   try {
-    const stdout = await runPython("query_journal_narrative.py", [source, String(id)], {
-      timeout: GEN_TIMEOUT_MS,
+    // W-C-P2b: GET is cache-read-only — returns an existing trade_journal row
+    // and NEVER generates (generation writes + burns Anthropic budget, now
+    // POST-only via the gateway). Pure read; the helper opens the DB read-only.
+    const stdout = await runPython("query_journal_narrative.py", [source, String(id), "--cache-only"], {
+      timeout: 10_000,
     });
     return NextResponse.json(JSON.parse(stdout));
   } catch (err) {
@@ -44,14 +48,13 @@ export async function POST(
   } catch {
     body = {};
   }
-  const args = [source, String(id)];
-  if (body.force) args.push("--force");
-  try {
-    const stdout = await runPython("query_journal_narrative.py", args, {
-      timeout: GEN_TIMEOUT_MS,
-    });
-    return NextResponse.json(JSON.parse(stdout));
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 200 });
-  }
+  // W-C-P2b: generation routes through the gateway → VM (HUB_BENIGN_WRITE_ENABLED,
+  // audited). The Haiku call + trade_journal INSERT + budget increment all run
+  // VM-side against the live DB — never the read-only replica. timeoutMs covers
+  // the VM-side Haiku call. Fail-closed: VM down → 502 (no replica write).
+  return gatewayWrite(
+    "journal.generate",
+    { source, trade_id: Number(id), force: Boolean(body.force) },
+    { reason: "journal.generate via Hub", timeoutMs: GEN_TIMEOUT_MS },
+  );
 }

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { runPython } from "@/lib/api-helpers";
+import { callGateway } from "@/lib/gateway-client";
 import { getAnthropicKey } from "@/lib/anthropic-key";
 
 export const runtime = "nodejs";
@@ -44,13 +45,24 @@ async function readBudget(): Promise<BudgetSnapshot> {
 }
 
 async function persistUserMessage(sessionId: number | null, content: string): Promise<number> {
-  const stdout = await runPython("write_chat_log.py", [
-    "user_message",
-    String(sessionId ?? 0),
-    content,
-  ]);
-  const parsed = JSON.parse(stdout) as { ok: boolean; session_id: number };
-  return parsed.session_id;
+  // W-C-P2b: chat logs route through the gateway → VM (HUB_BENIGN_WRITE_ENABLED).
+  // write_chat_log.py no longer writes the read-only replica. We need the
+  // session_id back synchronously (the stream opens with it), so call the
+  // gateway directly and unwrap the helper result. Throws on any non-200 so the
+  // caller surfaces persist_user_failed — never a silent replica write.
+  const { status, body } = await callGateway(
+    "chat.log_user",
+    { session_id: sessionId ?? 0, content },
+    { reason: "chat.log_user via Hub" },
+  );
+  if (status !== 200) {
+    throw new Error(`gateway ${status}: ${JSON.stringify(body)}`);
+  }
+  const result = (body.result ?? body) as { session_id?: number };
+  if (typeof result.session_id !== "number") {
+    throw new Error("gateway returned no session_id");
+  }
+  return result.session_id;
 }
 
 async function persistAssistantMessage(
@@ -60,14 +72,16 @@ async function persistAssistantMessage(
   tokensOut: number,
   model: string,
 ): Promise<void> {
-  await runPython("write_chat_log.py", [
-    "assistant_message",
-    String(sessionId),
-    content,
-    String(tokensIn),
-    String(tokensOut),
-    model,
-  ]);
+  // W-C-P2b: routed through the gateway → VM (HUB_BENIGN_WRITE_ENABLED). Throws
+  // on non-200 so the caller emits the non-fatal persist_assistant_failed warn.
+  const { status, body } = await callGateway(
+    "chat.log_assistant",
+    { session_id: sessionId, content, tokens_in: tokensIn, tokens_out: tokensOut, model },
+    { reason: "chat.log_assistant via Hub" },
+  );
+  if (status !== 200) {
+    throw new Error(`gateway ${status}: ${JSON.stringify(body)}`);
+  }
 }
 
 function sseChunk(name: string, data: unknown): string {

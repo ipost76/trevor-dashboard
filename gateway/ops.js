@@ -35,6 +35,16 @@ function isNonNegNum(v) {
 }
 const TICKER_RE = /^[A-Z0-9]{1,20}$/;
 const BOOLISH = new Set(["true", "false"]);
+// W-C-P2b: a positive integer or an all-digit string (rowid / trade id / reminder id).
+function isIntId(v) {
+  if (Number.isInteger(v)) return v > 0;
+  return typeof v === "string" && /^\d+$/.test(v) && Number(v) > 0;
+}
+// W-C-P2b: an optional string under a length cap (empty allowed; null/undefined skipped by caller).
+function isStrUnder(v, max) {
+  return typeof v === "string" && v.length <= max;
+}
+const REPEAT_MODES = new Set(["once", "twice", "until_confirmed"]);
 
 // op → { flag: <auto_config key | null>, validate(args) → null (ok) | "<error>" }
 const OPS = {
@@ -126,6 +136,72 @@ const OPS = {
   "watchlist.remove": {
     flag: "HUB_LIST_WRITE_ENABLED",
     validate: (a) => (TICKER_RE.test(String(a.ticker || "")) ? null : "ticker must match [A-Z0-9]{1,20}"),
+  },
+
+  // ---- 🟢 Benign writes (W-C-P2b) — new HUB_BENIGN_WRITE_ENABLED ----
+  // The last unwired trevor.db writers: trade notes, reminders, chat logs, and
+  // per-trade journal generation. Low-risk, but flag-gated for consistent
+  // governance + a kill switch on journal.generate's Anthropic-budget spend.
+  // The VM enforces the flag authoritatively (flag here is informational).
+  "trades.annotate": {
+    flag: "HUB_BENIGN_WRITE_ENABLED",
+    validate: (a) =>
+      isIntId(a.id) &&
+      (a.notes == null || isStrUnder(a.notes, 10000)) &&
+      (a.training_status == null || isStrUnder(a.training_status, 100))
+        ? null
+        : "id (positive integer) required; notes (<=10000) / training_status (<=100) optional strings",
+  },
+  "reminders.set": {
+    flag: "HUB_BENIGN_WRITE_ENABLED",
+    validate: (a) => {
+      const action = String(a.action || "").toLowerCase();
+      if (!["add", "complete", "cancel", "edit"].includes(action)) {
+        return "action must be add|complete|cancel|edit";
+      }
+      if (action === "add") {
+        if (!isNonEmptyStr(String(a.text || ""), 2000)) return "add requires text (non-empty <=2000)";
+        if (!isNonEmptyStr(String(a.due_at || ""), 100)) return "add requires due_at (non-empty <=100)";
+        if (a.repeat_mode != null && !REPEAT_MODES.has(String(a.repeat_mode))) return "invalid repeat_mode";
+        return null;
+      }
+      if (action === "complete" || action === "cancel") {
+        return isIntId(a.id) ? null : `${action} requires an integer id`;
+      }
+      // edit — id + at least one mutable field
+      if (!isIntId(a.id)) return "edit requires an integer id";
+      if (a.text == null && a.due_at == null && a.repeat_mode == null) {
+        return "edit requires at least one of text|due_at|repeat_mode";
+      }
+      if (a.repeat_mode != null && !REPEAT_MODES.has(String(a.repeat_mode))) return "invalid repeat_mode";
+      return null;
+    },
+  },
+  "chat.log_user": {
+    flag: "HUB_BENIGN_WRITE_ENABLED",
+    validate: (a) =>
+      Number.isInteger(a.session_id) && a.session_id >= 0 && isNonEmptyStr(String(a.content ?? ""))
+        ? null
+        : "session_id (integer >= 0; 0 = new session) and non-empty content required",
+  },
+  "chat.log_assistant": {
+    flag: "HUB_BENIGN_WRITE_ENABLED",
+    validate: (a) =>
+      Number.isInteger(a.session_id) &&
+      a.session_id > 0 &&
+      typeof a.content === "string" &&
+      isNonNegNum(a.tokens_in) &&
+      isNonNegNum(a.tokens_out) &&
+      isNonEmptyStr(String(a.model || ""))
+        ? null
+        : "session_id (integer > 0), content (string), tokens_in/out (>=0 numbers), model (non-empty) required",
+  },
+  "journal.generate": {
+    flag: "HUB_BENIGN_WRITE_ENABLED",
+    validate: (a) =>
+      a.source === "auto_trades" && isIntId(a.trade_id) && (a.force == null || typeof a.force === "boolean")
+        ? null
+        : "source must be 'auto_trades', trade_id a positive integer, force optional boolean",
   },
 
   // ---- 🟡 Already-gated state ops — KEEP their EXISTING flags (VM re-checks via helper exit 3) ----

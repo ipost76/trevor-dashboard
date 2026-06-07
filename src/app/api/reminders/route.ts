@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { runPython, runPythonResult } from "@/lib/api-helpers";
+import { runPython } from "@/lib/api-helpers";
+import { gatewayWrite } from "@/lib/gateway-client";
 
 // /api/reminders — Hub surface for the bot's ReminderManager.
 //
@@ -46,46 +47,15 @@ export async function POST(request: Request) {
     );
   }
 
-  // runPythonResult (async) so we can read stdout regardless of exit code —
-  // set_reminders.py emits a JSON payload on exit 1/2/4 too. Async → never
-  // blocks the loop.
-  let result;
-  try {
-    result = await runPythonResult("set_reminders.py", [action], {
-      timeout: 10000,
-      input: JSON.stringify(body),
-    });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
-  }
-
-  if (result.timedOut || result.signal) {
-    return NextResponse.json(
-      { ok: false, error: result.timedOut ? "python timed out" : `python killed by ${result.signal}` },
-      { status: 500 },
-    );
-  }
-
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse((result.stdout || "").trim() || "{}");
-  } catch {
-    parsed = {
-      ok: false,
-      raw: (result.stdout || "").slice(0, 500),
-      error: "non-JSON output",
-    };
-  }
-
-  if (result.status === 0) return NextResponse.json(parsed, { status: 200 });
-  if (result.status === 1 || result.status === 4)
-    return NextResponse.json(parsed, { status: 400 });
-  return NextResponse.json(
-    {
-      ...parsed,
-      stderr: (result.stderr || "").slice(0, 500),
-      exit_code: result.status,
-    },
-    { status: 500 },
+  // W-C-P2b: routed through the gateway → VM (HUB_BENIGN_WRITE_ENABLED, audited).
+  // set_reminders.py no longer runs against the read-only replica. The whole
+  // body (action + params) crosses as the op args; the VM helper owns add/
+  // complete/cancel/edit. Invalid JSON / bad action are already 400'd above;
+  // success unwraps to {ok,id}. Fail-closed: VM down → 502 (never a replica
+  // write, never an orphaned reminder).
+  return gatewayWrite(
+    "reminders.set",
+    { ...body, action },
+    { reason: `reminders.${action} via Hub` },
   );
 }

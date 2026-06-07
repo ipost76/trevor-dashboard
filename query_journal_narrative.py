@@ -182,6 +182,33 @@ def existing_narrative(conn: sqlite3.Connection, source: str, trade_id: int, p_h
     }
 
 
+def fetch_latest_narrative(conn: sqlite3.Connection, source: str, trade_id: int) -> Optional[Dict[str, Any]]:
+    """Cache-only read (W-C-P2b): newest narrative for (source, id), ignoring
+    prompt_hash so a GET still returns an existing entry after minor context
+    drift. NO generation, NO write — used by the read-only GET path."""
+    row = conn.execute(
+        """
+        SELECT id, narrative, model, tokens_input, tokens_output, generated_at, generated_by
+        FROM trade_journal
+        WHERE trade_source=? AND trade_id=?
+        ORDER BY generated_at DESC LIMIT 1
+        """,
+        (source, trade_id),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "narrative": row[1],
+        "model": row[2],
+        "tokens_input": row[3],
+        "tokens_output": row[4],
+        "generated_at": row[5],
+        "generated_by": row[6],
+        "from_cache": True,
+    }
+
+
 def insert_narrative(conn: sqlite3.Connection, source: str, trade_id: int,
                      prompt: str, p_hash: str, narrative: str, tokens_in: int, tokens_out: int,
                      generated_by: str) -> Dict[str, Any]:
@@ -244,6 +271,20 @@ def main():
     if source not in ("auto_trades",):
         print(json.dumps({"error": f"unsupported trade_source '{source}'"}), file=sys.stderr)
         sys.exit(2)
+
+    cache_only = "--cache-only" in sys.argv[3:]
+    if cache_only:
+        # W-C-P2b: pure read — open read-only, return the newest narrative (or a
+        # not-generated marker). NEVER calls the API or writes; generation is
+        # POST-only via the gateway → VM now.
+        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            cached = fetch_latest_narrative(conn, source, trade_id)
+        if cached:
+            print(json.dumps(cached))
+        else:
+            print(json.dumps({"narrative": None, "from_cache": False, "not_generated": True}))
+        return
 
     api_key = env_anthropic_key()
     if not api_key:
