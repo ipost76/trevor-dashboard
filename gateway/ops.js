@@ -198,10 +198,11 @@ const OPS = {
   },
   "journal.generate": {
     flag: "HUB_BENIGN_WRITE_ENABLED",
+    // VM expects `id` (matches trades.annotate's key, confirmed 2026-06-07 probe).
     validate: (a) =>
-      a.source === "auto_trades" && isIntId(a.trade_id) && (a.force == null || typeof a.force === "boolean")
+      a.source === "auto_trades" && isIntId(a.id) && (a.force == null || typeof a.force === "boolean")
         ? null
-        : "source must be 'auto_trades', trade_id a positive integer, force optional boolean",
+        : "source must be 'auto_trades', id a positive integer, force optional boolean",
   },
 
   // ---- 🟡 Already-gated state ops — KEEP their EXISTING flags (VM re-checks via helper exit 3) ----

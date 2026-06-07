@@ -54,7 +54,7 @@ export async function POST(
   // the VM-side Haiku call. Fail-closed: VM down → 502 (no replica write).
   return gatewayWrite(
     "journal.generate",
-    { source, trade_id: Number(id), force: Boolean(body.force) },
+    { source, id: Number(id), force: Boolean(body.force) },
     { reason: "journal.generate via Hub", timeoutMs: GEN_TIMEOUT_MS },
   );
 }
