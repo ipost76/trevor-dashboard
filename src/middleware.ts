@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyToken } from "@/lib/session-token";
 
 const SESSION_COOKIE = "trevor_session";
-const SESSION_SALT = process.env.SESSION_SALT || "trevor-mc-2025";
 
 // QUAL-06 (2026-06-03): externalized the VM IP for the direct-IP→domain redirect.
 // Override via the HUB_VM_IP env var; defaults to the current VM IP so the
 // redirect keeps working unchanged if the var is unset. A VM IP change is now a
 // config flip, not a code edit.
 const HUB_VM_IP = process.env.HUB_VM_IP || "34.28.231.36";
-
-function validateTokenLocally(token: string): boolean {
-  try {
-    const decoded = Buffer.from(token, "base64url").toString("utf-8");
-    const parts = decoded.split(":");
-    // Token format: user:pass:salt — valid if salt matches
-    return parts.length === 3 && parts[2] === SESSION_SALT;
-  } catch {
-    return false;
-  }
-}
 
 function isApiRoute(pathname: string): boolean {
   return pathname.startsWith("/api/");
@@ -79,8 +68,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Validate token locally (no network fetch needed)
-  if (validateTokenLocally(token)) {
+  // Verify the HMAC-signed token (signature + expiry); no network fetch needed.
+  if (await verifyToken(token)) {
     return NextResponse.next();
   }
 

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { signToken, verifyToken, SESSION_MAX_AGE } from "@/lib/session-token";
 
 export const dynamic = "force-dynamic";
 
 const SESSION_COOKIE = "trevor_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 function getCredentials(): { user: string; pass: string } {
   // Read .env.local directly so password changes are picked up immediately
@@ -26,18 +26,6 @@ function getCredentials(): { user: string; pass: string } {
   }
 }
 
-function makeSessionToken(user: string, pass: string): string {
-  const salt = process.env.SESSION_SALT || "trevor-mc-2025";
-  return Buffer.from(`${user}:${pass}:${salt}`).toString("base64url");
-}
-
-function validateSession(token: string): boolean {
-  const { user, pass } = getCredentials();
-  if (!pass) return true;
-  const expected = makeSessionToken(user, pass);
-  return token === expected;
-}
-
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const action = (body.action as string) || "login";
@@ -48,7 +36,7 @@ export async function POST(request: NextRequest) {
     const { user, pass } = getCredentials();
 
     if (!pass) {
-      const token = makeSessionToken(user, "");
+      const token = await signToken(user);
       const res = NextResponse.json({ ok: true, message: "Logged in" });
       res.cookies.set(SESSION_COOKIE, token, {
         httpOnly: true,
@@ -72,7 +60,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const token = makeSessionToken(user, pass);
+    const token = await signToken(user);
     const res = NextResponse.json({ ok: true, message: "Logged in" });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
@@ -147,7 +135,7 @@ export async function POST(request: NextRequest) {
 
       process.env.DASHBOARD_PASS = newPassword;
 
-      const newToken = makeSessionToken(user, newPassword);
+      const newToken = await signToken(user);
       const res = NextResponse.json({
         ok: true,
         message: "Password updated. You will be logged in with the new password.",
@@ -176,6 +164,6 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get("token") ||
     request.cookies.get(SESSION_COOKIE)?.value ||
     "";
-  const valid = validateSession(token);
+  const valid = (await verifyToken(token)) !== null;
   return NextResponse.json({ authenticated: valid });
 }
