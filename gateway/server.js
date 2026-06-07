@@ -169,7 +169,7 @@ function readJsonBody(req) {
 // tailnet is the encrypted transport; NEVER a public/non-tailnet route). Always
 // RESOLVES (never rejects) with {status, body} so the request path can't crash:
 //   timeout → 504 · connection error → 502 · VM 5xx → 502 · else pass through.
-function forwardToVm(envelope) {
+function forwardToVm(envelope, timeoutMs = VM_FORWARD_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const payload = Buffer.from(JSON.stringify(envelope), "utf-8");
     const options = {
@@ -182,7 +182,7 @@ function forwardToVm(envelope) {
         "Content-Length": payload.length,
         Authorization: `Bearer ${VM_TOKEN}`,
       },
-      timeout: VM_FORWARD_TIMEOUT_MS,
+      timeout: timeoutMs,
     };
     let settled = false;
     const done = (status, body) => {
@@ -272,7 +272,7 @@ async function handleWrite(req, res) {
     });
   }
 
-  const r = await forwardToVm(envelope);
+  const r = await forwardToVm(envelope, spec.forwardTimeoutMs ?? VM_FORWARD_TIMEOUT_MS);
   return sendJson(res, r.status, r.body);
 }
 

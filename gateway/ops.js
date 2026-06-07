@@ -198,6 +198,9 @@ const OPS = {
   },
   "journal.generate": {
     flag: "HUB_BENIGN_WRITE_ENABLED",
+    // Haiku generation runs VM-side and can exceed the default 8s forward window;
+    // widen ONLY this op's Hub→VM forward timeout (W-C-P2b, 2026-06-07).
+    forwardTimeoutMs: 30000,
     // VM expects `id` (matches trades.annotate's key, confirmed 2026-06-07 probe).
     validate: (a) =>
       a.source === "auto_trades" && isIntId(a.id) && (a.force == null || typeof a.force === "boolean")
