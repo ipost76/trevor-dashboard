@@ -95,18 +95,124 @@ const FALLBACK: AutoStateResponse = {
 // collapse to ONE upstream HL+Python chain.
 const cache = createSwrCache<AutoStateResponse>({ defaultTtl: 10_000, concurrency: 2 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EQT-A3 (2026-06-07): the dashboard equity readout MIRRORS real HL.
+//
+// This Hub box has NO Hyperliquid credentials, so the local `query_auto_state.py`
+// `_fetch_hl()` cannot reach HL — it degrades to the DB realized-PnL sum (the old
+// "virtual" ~−$28 number). We therefore IGNORE the script's `equity_usd` entirely
+// and source the equity figure from the Observatory heartbeat field
+// `account_value_usd` (real-HL accountValue, published VM-side by Wave A1).
+//
+// Fail-safe contract (never a silent wrong number, never the DB sum):
+//   · field present + fresh   → real-HL value          (equity_source "real-hl")
+//   · upstream briefly down,
+//     but we have a prior value → last-known value      (equity_source "stale")
+//   · never seen a value
+//     (A1 not yet live / null)  → null, available:false (equity_source "unavailable")
+//
+// Same heartbeat upstream as src/app/api/heartbeat/route.ts. A1's exact nesting
+// is not finalized, so we accept the field at top level OR under
+// categories.autotrader — whichever A1 ships, A3 consumes without a re-coordination.
+const OBSERVATORY_HEARTBEAT_URL =
+  "https://trevor-prime.tail068f72.ts.net:8443/api/heartbeat";
+
+// Own cache so a heartbeat hiccup serves the last-known equity (stale) WITHOUT
+// poisoning — independent of the auto-state (Python) cache above.
+const equityCache = createSwrCache<number>({ defaultTtl: 10_000, concurrency: 2 });
+
+type EquitySource = "real-hl" | "stale" | "unavailable";
+interface RealHlEquity {
+  value: number | null; // real-HL accountValue; null when never observed
+  source: EquitySource;
+  stale: boolean;
+  ts: number; // epoch-ms the served value was produced (last-success on stale)
+}
+
+interface HeartbeatPayload {
+  account_value_usd?: number | null;
+  categories?: { autotrader?: { account_value_usd?: number | null } };
+}
+
+async function resolveRealHlEquity(): Promise<RealHlEquity> {
+  try {
+    const { value, stale, ts } = await equityCache.swr("real-hl-equity", async () => {
+      const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`heartbeat ${res.status}`);
+      const hb = (await res.json()) as HeartbeatPayload;
+      const av = hb?.account_value_usd ?? hb?.categories?.autotrader?.account_value_usd;
+      // Absent/null/NaN ⇒ throw so swr keeps serving the last-known value (stale)
+      // instead of caching a bad number. Cold + throw ⇒ caught below ⇒ unavailable.
+      if (typeof av !== "number" || !Number.isFinite(av)) {
+        throw new Error("account_value_usd absent");
+      }
+      return av;
+    });
+    return { value, source: stale ? "stale" : "real-hl", stale, ts };
+  } catch {
+    // Cold (never observed) AND upstream failed/absent. NEVER substitute the
+    // Python DB realized-PnL sum — surface "unavailable" so the UI shows a
+    // placeholder, not a virtual number.
+    return { value: null, source: "unavailable", stale: false, ts: 0 };
+  }
+}
+
 export async function GET() {
   try {
-    const { value, ts } = await cache.swr("auto-state", async () => {
-      // timeout absorbs the live HL info.user_state() round-trip (3-5s cold).
-      const raw = await runPython("query_auto_state.py", [], { timeout: 10_000 });
-      return safeJsonParse<AutoStateResponse>(raw, FALLBACK);
+    const [state, equity] = await Promise.all([
+      cache.swr("auto-state", async () => {
+        // Python still supplies realized windows / counts / exposure / unrealized
+        // / flags. Its own equity is DISCARDED below (see EQT-A3).
+        const raw = await runPython("query_auto_state.py", [], { timeout: 10_000 });
+        return safeJsonParse<AutoStateResponse>(raw, FALLBACK);
+      }),
+      resolveRealHlEquity(),
+    ]);
+
+    const value = state.value;
+    const available = equity.value !== null;
+    const realHlEquity = equity.value ?? 0;
+
+    // EQT-A3: realized_pct is "% of equity" — rebase onto the real-HL equity so
+    // the headline % references the SAME number shown as the account value (not
+    // the discarded Python base). Collapses to 0 when equity is unavailable/≤0.
+    const pct = (v: number) => Math.round((v / realHlEquity) * 100 * 1e4) / 1e4;
+    const realized_pct =
+      available && realHlEquity > 0
+        ? ({
+            today: pct(value.realized.today),
+            yesterday: pct(value.realized.yesterday),
+            week: pct(value.realized.week),
+            month: pct(value.realized.month),
+            all: pct(value.realized.all),
+          } as RealizedWindows)
+        : { ...ZERO_WINDOWS };
+
+    return NextResponse.json({
+      ...value,
+      ts: state.ts,
+      // ── real-HL equity: single source of truth, never the DB realized sum ──
+      equity_usd: realHlEquity,
+      equity: realHlEquity, // legacy alias kept in sync
+      realized_pct,
+      equity_available: available,
+      equity_stale: equity.stale,
+      equity_source: equity.source,
+      equity_ts: equity.ts,
     });
-    // ts = epoch-ms the value was produced (stamped by the cache, not the script).
-    return NextResponse.json({ ...value, ts });
   } catch (err) {
     return NextResponse.json(
-      { ...FALLBACK, error: String(err) },
+      {
+        ...FALLBACK,
+        equity_available: false,
+        equity_stale: false,
+        equity_source: "unavailable" as EquitySource,
+        equity_ts: 0,
+        error: String(err),
+      },
       { status: 200 },
     );
   }

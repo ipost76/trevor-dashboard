@@ -29,6 +29,10 @@ interface AutoState {
   open_exposure_usd: number;
   unrealized_usd: number;
   open_count: number;
+  // EQT-A3: real-HL equity sourcing flags (set by /api/auto/state).
+  equity_available?: boolean;
+  equity_stale?: boolean;
+  equity_source?: "real-hl" | "stale" | "unavailable";
   // legacy back-compat (still read for the equity figure if equity_usd absent)
   equity?: number;
   trades_total?: number;
@@ -97,13 +101,17 @@ export function CapitalHero() {
     unrealized,
   ).toFixed(2)}`;
 
-  // EQT-D1 (2026-06-04): de-float the account-value headline. `equity` (HL
-  // accountValue) = margin + UNREALIZED + spot USDC, so it balloons with open
-  // -position paper gains/losses (the "$82 = account value" mislabel). The
-  // honest cash basis is accountValue minus the floating unrealized — that's
-  // the stable number Ghost reasons about. Float is shown as a labeled sub-line;
-  // the raw float-inclusive value is kept as a small footnote (nothing hidden).
-  const realizedEquity = equity - unrealized;
+  // EQT-A3 (2026-06-07): the account-value line MIRRORS real HL — show HL's
+  // accountValue AS-IS (no de-float). It's sourced server-side from the
+  // Observatory heartbeat (`account_value_usd`, Wave A1), so the prior EQT-D1
+  // `equity - unrealized` de-float is gone (Ghost: "everything mirrors real HL").
+  // When the real-HL value is briefly unreachable the API serves the last-known
+  // figure flagged `equity_stale`; when it has never been observed
+  // (`equity_available:false`, e.g. A1 not yet live) we render "—" rather than a
+  // virtual/DB number. The unrealized split stays on the sub-line below.
+  const equityAvailable = data?.equity_available ?? false;
+  const equityStale = data?.equity_stale ?? false;
+  const liveEquity = equity;
 
   return (
     <Card padding="lg" className="card-elevated space-y-4">
@@ -165,9 +173,12 @@ export function CapitalHero() {
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
-                ${realizedEquity.toFixed(2)}
+                {equityAvailable ? `$${liveEquity.toFixed(2)}` : "—"}
               </span>
-              <span className="font-sans text-micro text-fg-muted">honest cash</span>
+              <span className="font-sans text-micro text-fg-muted">live account</span>
+              {equityStale && (
+                <span className="font-sans text-micro text-accent-gold">· stale</span>
+              )}
             </div>
             <div className="font-mono text-caption tabular-nums text-fg-muted">
               {unrealStr} floating · {openCount} open · ${openExposure.toFixed(2)} deployed
