@@ -6,6 +6,17 @@
 
 ---
 
+## Two-Box Topology
+
+> Current-state operating layout (post-migration). TREVOR runs on **two boxes / two Termius tabs**. Some older dated entries below predate the migration and describe the Hub co-residing with the bot on the VM — those are historical records, not the current layout.
+
+- **This box = TrevorHub (the "WSL Hub").** Ghost's PC — `ghost@Ghost`, hostname `Ghost`, tailnet `100.125.247.52`. **One machine, two names:** also reachable as **`trevorhub-wsl`** via Tailscale MagicDNS (same box). Runs the **Hub dashboard** (Next.js 15) at `/home/ghost/projects/trevor-dashboard`. This is Ghost's default cockpit — monitoring, audits, recon, dashboard work.
+- **The other box = the VM.** `trevor@trevor-prime`, **GCP e2-standard-2** (8 GB RAM, 2 vCPU), tailnet `100.93.113.117`, domain **`trevor-prime.com`**. Runs the **live bot** (`trevor.service`), the exit engine, signals, and the live **`trevor.db`**. All bot code lives here — bot repo `/home/trevor/trevor`, branch `main`.
+- **The pipe (`ssh vm`).** From this WSL tab, **`ssh vm`** reaches the VM (login user `ghost`, passwordless sudo, trevor-group). Use it **read-only** — "run a command on the VM, read the result": audits, status, recon. **NOT** for editing VM files over the pipe; bot-file edits run in the **VM tab** directly.
+- **The live `trevor.db` lives on the VM — never on this PC.** Network SQLite = corruption + latency risk. Dashboard reads reach it through the **gateway/pipe**, not a local DB copy.
+
+---
+
 ## Tech Stack
 
 - **Next.js 15.3.3** (App Router) · **React 19.0.0** · **TypeScript 5.9.3** · **Tailwind CSS 4** (CSS-first; design tokens live in `globals.css @theme`).
