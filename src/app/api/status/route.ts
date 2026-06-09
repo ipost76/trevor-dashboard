@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPythonInline, runCommand } from "@/lib/api-helpers";
+import { runPythonInline } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +34,66 @@ export async function GET() {
   }
 }
 
+// W-F-P3: the bot (trevor.service) runs on the VM, not on this WSL Hub box, so a
+// LOCAL `systemctl show trevor` can never see it → the old check resolved
+// running:false permanently (the OFFLINE-banner bug). Instead derive running from
+// the Observatory heartbeat the Hub already proxies for account_value_usd (same VM
+// endpoint as src/app/api/auto/state/route.ts — no new VM dependency).
+const OBSERVATORY_HEARTBEAT_URL =
+  "https://trevor-prime.tail068f72.ts.net:8443/api/heartbeat";
+
+// The heartbeat republishes on a 2h cadence (HEARTBEAT_CADENCE_SECONDS=7200), so a
+// fresh snapshot is anything younger than that window. 3h (1.5× cadence) gives a
+// full window + 1h grace before we treat the heartbeat as stale — tighter than the
+// cadence would false-OFFLINE between beats (the very bug we're fixing).
+const HEARTBEAT_STALE_MS = 3 * 60 * 60 * 1000;
+
+interface HeartbeatServiceItem {
+  name?: string;
+  active?: boolean;
+  pid?: string;
+}
+interface StatusHeartbeat {
+  timestamp?: string;
+  categories?: { services?: { items?: HeartbeatServiceItem[] } };
+}
+
+// Fresh heartbeat + the trevor.service entry active → running:true. Unreachable /
+// non-200 / timeout / stale (>3h) / missing-or-inactive entry → running:false (honest
+// OFFLINE — the Hub genuinely can't confirm the bot). Never keys off overall_status
+// (a separate, independently-flapping health axis). Catches internally → never throws.
+async function resolveBotRunning(
+  serviceName: string,
+): Promise<{ running: boolean; pid: number }> {
+  try {
+    const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return { running: false, pid: 0 };
+    const hb = (await res.json()) as StatusHeartbeat;
+
+    // Freshness: the snapshot must be within the cadence-derived staleness window.
+    const ts = hb?.timestamp ? Date.parse(hb.timestamp) : NaN;
+    if (!Number.isFinite(ts) || Date.now() - ts > HEARTBEAT_STALE_MS) {
+      return { running: false, pid: 0 };
+    }
+
+    // Bot/service field: the trevor.service entry's `active` flag mirrors the VM's
+    // `systemctl is-active`. Strip a trailing `.service` so env "trevor" matches the
+    // heartbeat's "trevor.service".
+    const want = serviceName.replace(/\.service$/, "");
+    const item = (hb?.categories?.services?.items ?? []).find(
+      (i) => (i?.name ?? "").replace(/\.service$/, "") === want,
+    );
+    if (!item || item.active !== true) return { running: false, pid: 0 };
+
+    return { running: true, pid: parseInt(item.pid ?? "", 10) || 0 };
+  } catch {
+    return { running: false, pid: 0 };
+  }
+}
+
 async function computeStatus(): Promise<Record<string, unknown>> {
   const trevorService = process.env.TREVOR_SERVICE_NAME || "trevor.service";
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
@@ -43,19 +103,13 @@ async function computeStatus(): Promise<Record<string, unknown>> {
   let signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
   let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
 
-  // Get TREVOR PID — argv, no shell (was `systemctl ... || echo 0`). allowFailure
-  // returns empty stdout on a missing unit → parseInt → 0, same as the old fallback.
-  try {
-      const pidResult = (
-        await runCommand(
-          "systemctl",
-          ["show", trevorService, "--property=MainPID", "--value"],
-          { timeout: 3000, allowFailure: true },
-        )
-      ).trim();
-      trevorPid = parseInt(pidResult) || 0;
-      trevorRunning = trevorPid > 0;
-    } catch { /* graceful */ }
+  // Derive running from the Observatory heartbeat the Hub already proxies (W-F-P3) —
+  // the bot runs on the VM, so the old LOCAL `systemctl show trevor` resolved
+  // running:false permanently. resolveBotRunning() reads the heartbeat's
+  // services entry; any failure/staleness → { running:false, pid:0 } (honest OFFLINE).
+  const bot = await resolveBotRunning(trevorService);
+  trevorPid = bot.pid;
+  trevorRunning = bot.running;
 
     // Query DB via Python — the Hub has no Node SQLite binding, so every DB read
     // goes through the Python bridge (QUAL-06 2026-06-03: corrected a stale comment
