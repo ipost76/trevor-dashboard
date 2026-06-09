@@ -1,0 +1,25 @@
+[Unit]
+# TREVOR Hub read-replica refresh (W-H-P2-HUB) — one-shot, pull-only GCS->WSL.
+# Replaces the one-time-restore-at-migration state. The old (dead) litestream.service is a
+# replicate (PUSH) unit and stays disabled+masked; this unit only RESTORES from GCS.
+Description=TREVOR Hub read-replica refresh from GCS (one-shot, pull-only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ghost
+# HOME so litestream finds GCS ADC at ~/.config/gcloud/application_default_credentials.json
+Environment=HOME=/home/ghost
+Environment=PATH=/home/ghost/google-cloud-sdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/ghost/projects/trevor-dashboard/deploy/scripts/trevor-restore.sh
+# A full restore re-downloads the snapshot + entire WAL chain (~14 min at present); give it room.
+TimeoutStartSec=30min
+# Be a good neighbour to the Hub during the heavy restore.
+Nice=10
+IOSchedulingClass=idle
+# Do NOT set RemainAfterExit=yes — the timer must be able to re-trigger this unit.
+
+[Install]
+# Not enabled directly; the timer drives it. (Present for manual `systemctl start` too.)
+WantedBy=multi-user.target

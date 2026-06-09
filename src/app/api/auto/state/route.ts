@@ -121,6 +121,11 @@ const OBSERVATORY_HEARTBEAT_URL =
 // poisoning — independent of the auto-state (Python) cache above.
 const equityCache = createSwrCache<number>({ defaultTtl: 10_000, concurrency: 2 });
 
+// W-H-P2-HUB: the badge's staleness must be an AGE check, NOT the SWR per-call flag
+// (see resolveRealHlEquity below). 60s sits comfortably above the 15s client poll, so a
+// normally-refreshing value is never flagged, while a genuinely stalled heartbeat is.
+const EQUITY_STALE_AGE_MS = 60_000;
+
 type EquitySource = "real-hl" | "stale" | "unavailable";
 interface RealHlEquity {
   value: number | null; // real-HL accountValue; null when never observed
@@ -136,7 +141,7 @@ interface HeartbeatPayload {
 
 async function resolveRealHlEquity(): Promise<RealHlEquity> {
   try {
-    const { value, stale, ts } = await equityCache.swr("real-hl-equity", async () => {
+    const { value, ts } = await equityCache.swr("real-hl-equity", async () => {
       const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
         cache: "no-store",
         signal: AbortSignal.timeout(5000),
@@ -151,7 +156,15 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       }
       return av;
     });
-    return { value, source: stale ? "stale" : "real-hl", stale, ts };
+    // W-H-P2-HUB FIX: the SWR per-call `stale` flag is `true` on EVERY poll because the
+    // equity cache TTL (10s) is shorter than the client poll interval (15s) — so the cache
+    // is always expired at poll time and the badge was pinned to "STALE" forever even though
+    // the served value is live (single-flight refreshes it every poll). Decide staleness by
+    // the WALL-CLOCK AGE of the served value instead: fresh in steady state (ts stays within
+    // ~15s), and only genuinely stale when the heartbeat actually stops updating for >60s —
+    // in which case we keep showing the last-known number, correctly flagged stale.
+    const ageStale = Date.now() - ts > EQUITY_STALE_AGE_MS;
+    return { value, source: ageStale ? "stale" : "real-hl", stale: ageStale, ts };
   } catch {
     // Cold (never observed) AND upstream failed/absent. NEVER substitute the
     // Python DB realized-PnL sum — surface "unavailable" so the UI shows a

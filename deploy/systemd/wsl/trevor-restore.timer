@@ -1,0 +1,17 @@
+[Unit]
+# Periodic driver for trevor-restore.service (W-H-P2-HUB).
+Description=Periodic TREVOR Hub read-replica refresh from GCS
+
+[Timer]
+Unit=trevor-restore.service
+# First refresh shortly after boot...
+OnBootSec=2min
+# ...then 15 min AFTER each restore finishes (OnUnitInactiveSec measures the gap post-run,
+# which is correct when each run takes minutes). Effective freshness ~20-30 min — a massive
+# win over the 79h-frozen state, at a cost-conscious GCS egress (Ghost-approved cadence).
+OnUnitInactiveSec=15min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
