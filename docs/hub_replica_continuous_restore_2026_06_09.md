@@ -52,3 +52,49 @@ journalctl -u trevor-restore.service -f      # watch it publish
 ```
 
 Replica is now **self-refreshing**; never assume it is a frozen one-time restore again.
+
+---
+
+# W-H-P3-HUB (2026-06-09) — re-fix: the badge fix above was never deployed + equity-accuracy audit
+
+**Same box/scope as above. VM, bot, live `trevor.db`, GCS, HL orders, money path: untouched (HL accessed READ-ONLY `user_state` only). Hub rebuild + restart only.**
+
+## Why "Fix 2" survived (the actual root cause)
+
+Fix 2's *source* (`route.ts` age check) was **correct**, but it **was never built or restarted**. Evidence:
+
+- `.next/BUILD_ID` mtime **13:14:45** → Hub process started **13:15:08** → fix commit `ad6eaad` **13:23:07** (8 min *after* the build). `.next` was not rebuilt since.
+- The deployed `route.js` therefore still ran the pre-fix code (`const {value, stale, ts} = swr(...); return {…, stale, …}`) — the always-true per-call flag.
+- **Live behavioral proof:** the running endpoint returned `equity_stale:true` on 15s-spaced polls but `false` on a sub-10s poll (age 0.5s) — a flicker that ONLY the per-call SWR-expiry flag (TTL 10s) produces; the age-logic would return `false` in both cases.
+- The "verification" in Fix 2 above (line: *"Synthetic check of the exact expression…"*) tested the **source expression**, not the **deployed artifact** — so it passed while the bug shipped.
+
+**Lesson (now in CLAUDE.md):** a Hub source fix is inert until `npm run build` **and** `sudo systemctl restart trevor-dashboard.service`. Always prove against the **live endpoint at 15s cadence**, never a synthetic-only check.
+
+## The remediation
+
+1. **Deploy the P2 badge fix:** `npm run build` (exit 0) → `sudo systemctl restart trevor-dashboard.service`. No badge source change — the age-logic was already correct.
+2. **Floating-PnL accuracy fix** (`route.ts`, additive): the Hub has no HL creds, so `query_auto_state.py` reports `unrealized_usd:0` always → the "floating" sub-line showed `$0` even with an open position. `resolveRealHlEquity()` now also pulls `categories.autotrader.unrealized_pnl_usd` from the **same** heartbeat (cached as `{equity, unrealized}`; absent/NaN ⇒ `null`), and the response uses `unrealized_usd = equity.unrealized ?? value.unrealized_usd`. Same source/pattern as `account_value_usd`.
+
+## Equity-value freshness — characterized (NOT a bug, a design limit)
+
+The displayed account value = `heartbeat.account_value_usd` = observatory `collect_account_value()` = **latest `equity_snapshots.equity`**, which the VM monitor-loop writes **~hourly** (observed #247 15:54 `54.04` → #248 16:54 `51.98` → #249 17:59 `53.05` → #250 18:49 `52.88`). So:
+- The prompt's stuck **"$51.98"** was simply snapshot **#248**; the value has since advanced to **$52.88** (#250).
+- The badge's "fresh" = "the Hub is fetching the heartbeat successfully (<60s)", **not** "tick-by-tick HL". The value tracks real HL only to ~1h granularity. Real-time equity needs a VM-side change (observatory/monitor-loop cadence) — a **separate follow-up Ghost will authorize later**, out of scope here (the Hub has no HL creds by design — EQT-A3).
+
+## Accuracy audit (Metric | HL live | VM DB | Hub) — all match source-of-truth
+
+| Metric | HL live (`user_state`, read-only) | VM `trevor.db` | Hub | Verdict |
+|---|---|---|---|---|
+| Equity / LIVE ACCOUNT | spot USDC **52.61** (flat) | `equity_snapshots#250` **52.88** @18:49 | **52.88** | ✅ = latest hourly snapshot (mirrors HL at snapshot time) |
+| Realized P&L today | — | live closed-today Σpnl | matches | ✅ (replica ≤15min trail) |
+| Trades today | — | realized-count (non-null pnl) | matches Hub def | ✅ (heartbeat's larger count is a *different* metric) |
+| Trades total / open / deployed | — | live counts | matches replica | ✅ (replica ≤15min restore trail) |
+| Floating / unrealized | 0 (flat) | heartbeat `unrealized_pnl_usd` | now sourced from heartbeat | ✅ fixed ($0 only when genuinely flat; real value when a position is open) |
+
+## Verification (honesty protocol — proven on the LIVE Hub, not synthetic)
+
+- **Artifact:** `.next/BUILD_ID` mtime now `15:29`; `unrealized_pnl_usd` present in built `route.js`; the `>6e4` (60s) threshold present.
+- **Badge at 15s cadence (live poller, 12s interval):** `equity_stale:false`, `equity_source:real-hl`, value `52.8813`, `equity_ts` advancing **+12s each poll** (background refresh working), age steady **~11.8s (<60s)**.
+- **Genuine-stale fired LIVE:** a poll after a >60s idle gap returned `equity_stale:true` (age 126s), then recovered to `false` on the very next 12s poll — exactly the intended semantics, observed on the real Hub (not a synthetic expression).
+- **Value = real HL:** displayed `52.88` = heartbeat `account_value_usd` = `equity_snapshots#250`; live HL spot USDC `52.61` (within hourly-snapshot drift).
+- **Floating:** flat now ⇒ Hub `$0` (correct); wiring deployed reads the heartbeat's `unrealized_pnl_usd` for the open-position case.

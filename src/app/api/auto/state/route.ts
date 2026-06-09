@@ -119,7 +119,7 @@ const OBSERVATORY_HEARTBEAT_URL =
 
 // Own cache so a heartbeat hiccup serves the last-known equity (stale) WITHOUT
 // poisoning — independent of the auto-state (Python) cache above.
-const equityCache = createSwrCache<number>({ defaultTtl: 10_000, concurrency: 2 });
+const equityCache = createSwrCache<HeartbeatEquity>({ defaultTtl: 10_000, concurrency: 2 });
 
 // W-H-P2-HUB: the badge's staleness must be an AGE check, NOT the SWR per-call flag
 // (see resolveRealHlEquity below). 60s sits comfortably above the 15s client poll, so a
@@ -129,6 +129,7 @@ const EQUITY_STALE_AGE_MS = 60_000;
 type EquitySource = "real-hl" | "stale" | "unavailable";
 interface RealHlEquity {
   value: number | null; // real-HL accountValue; null when never observed
+  unrealized: number | null; // real-HL floating PnL (same heartbeat); null when unavailable
   source: EquitySource;
   stale: boolean;
   ts: number; // epoch-ms the served value was produced (last-success on stale)
@@ -136,7 +137,20 @@ interface RealHlEquity {
 
 interface HeartbeatPayload {
   account_value_usd?: number | null;
-  categories?: { autotrader?: { account_value_usd?: number | null } };
+  categories?: {
+    autotrader?: { account_value_usd?: number | null; unrealized_pnl_usd?: number | null };
+  };
+}
+
+// W-H-P3-HUB: one heartbeat fetch now carries BOTH the required account value AND
+// the best-effort floating PnL. The Hub has no HL credentials, so the Python
+// script's own `unrealized_usd` is always 0 — the real floating number lives in
+// the heartbeat's autotrader category (computed live VM-side each collect). The
+// account value is required (a missing/NaN value fails the fetch so swr serves the
+// last-known number); `unrealized` is optional (a flat account legitimately has 0).
+interface HeartbeatEquity {
+  equity: number;
+  unrealized: number | null;
 }
 
 async function resolveRealHlEquity(): Promise<RealHlEquity> {
@@ -154,7 +168,11 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       if (typeof av !== "number" || !Number.isFinite(av)) {
         throw new Error("account_value_usd absent");
       }
-      return av;
+      // Floating PnL from the SAME heartbeat (best-effort). Absent/NaN ⇒ null so a
+      // flat account never fails the fetch; the UI falls back to the script value.
+      const u = hb?.categories?.autotrader?.unrealized_pnl_usd;
+      const unrealized = typeof u === "number" && Number.isFinite(u) ? u : null;
+      return { equity: av, unrealized };
     });
     // W-H-P2-HUB FIX: the SWR per-call `stale` flag is `true` on EVERY poll because the
     // equity cache TTL (10s) is shorter than the client poll interval (15s) — so the cache
@@ -164,12 +182,18 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
     // ~15s), and only genuinely stale when the heartbeat actually stops updating for >60s —
     // in which case we keep showing the last-known number, correctly flagged stale.
     const ageStale = Date.now() - ts > EQUITY_STALE_AGE_MS;
-    return { value, source: ageStale ? "stale" : "real-hl", stale: ageStale, ts };
+    return {
+      value: value.equity,
+      unrealized: value.unrealized,
+      source: ageStale ? "stale" : "real-hl",
+      stale: ageStale,
+      ts,
+    };
   } catch {
     // Cold (never observed) AND upstream failed/absent. NEVER substitute the
     // Python DB realized-PnL sum — surface "unavailable" so the UI shows a
     // placeholder, not a virtual number.
-    return { value: null, source: "unavailable", stale: false, ts: 0 };
+    return { value: null, unrealized: null, source: "unavailable", stale: false, ts: 0 };
   }
 }
 
@@ -210,6 +234,10 @@ export async function GET() {
       // ── real-HL equity: single source of truth, never the DB realized sum ──
       equity_usd: realHlEquity,
       equity: realHlEquity, // legacy alias kept in sync
+      // W-H-P3-HUB: floating PnL also mirrors real HL — prefer the heartbeat's
+      // unrealized (the Hub has no HL creds, so the script's own value is always
+      // 0). Falls back to the script value only when the heartbeat is unavailable.
+      unrealized_usd: equity.unrealized ?? value.unrealized_usd,
       realized_pct,
       equity_available: available,
       equity_stale: equity.stale,
