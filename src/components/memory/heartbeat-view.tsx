@@ -383,7 +383,7 @@ export function HeartbeatView() {
       status: cats.autotrader.status,
       summary: cats.autotrader.killswitch
         ? "Killswitch ON"
-        : `${cats.autotrader.enabled ? "Enabled" : "Disabled"} · ${cats.autotrader.trades_today} today`,
+        : `${cats.autotrader.enabled ? "Enabled" : "Disabled"} · ${cats.autotrader.trades_today} closed (all modes)`,
     },
     {
       key: "database",
@@ -627,7 +627,7 @@ export function HeartbeatView() {
               tone={cats.autotrader.enabled ? "ok" : "warning"}
             />
             <Stat
-              label="Trades today"
+              label="Closed today · all modes (UTC)"
               value={String(cats.autotrader.trades_today)}
               tone="ok"
             />
@@ -734,7 +734,7 @@ export function HeartbeatView() {
             />
             <StatusRow
               icon="🔁"
-              label="Trades today"
+              label="Closed today · all modes (UTC)"
               value={String(cats.autotrader.trades_today)}
             />
             {cats.autotrader.today_pnl_usd !== undefined &&

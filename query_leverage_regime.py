@@ -69,7 +69,6 @@ JSON output:
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import sys
 import time
@@ -265,63 +264,27 @@ def fetch_regime_exit_shadow(conn) -> dict:
 
 
 def fetch_margin() -> dict:
-    """Live HL margin utilization — marginSummary.totalMarginUsed / accountValue.
+    """W-H-P4-HUB (2026-06-09): margin utilization is now sourced from the
+    Observatory heartbeat in the Node route (/api/auto/leverage-regime), NOT a live
+    HL call here.
 
-    Mirrors query_auto_state._fetch_hl: ONE read-only user_state round-trip.
+    The Hub box has NO `hyperliquid` module and NO HL creds, so the prior live
+    `info.user_state` round-trip ALWAYS failed with `ModuleNotFoundError: No module
+    named 'hyperliquid'` and pinned the panel to "margin read degraded". The route
+    discards whatever this returns and rebuilds the margin block from the heartbeat
+    (account_value_usd + per-open-position notional_usd/leverage). So this function
+    now makes NO outbound call and imports NO HL module — it returns a neutral
+    sentinel that the route always overrides. Mirrors how /api/auto/state sources
+    equity from the heartbeat instead of the script's (credential-less) HL read.
     """
-    try:
-        from dotenv import load_dotenv  # type: ignore[import-not-found]
-        from hyperliquid.info import Info  # type: ignore[import-not-found]
-        from hyperliquid.utils import constants  # type: ignore[import-not-found]
-
-        load_dotenv("/home/trevor/trevor/.env")
-        addr = (
-            os.getenv("HL_WALLET_ADDRESS")
-            or os.getenv("HL_ADDRESS")
-            or os.getenv("HL_ACCOUNT_ADDRESS")
-        )
-        if not addr:
-            return {"available": False, "account_value": 0.0, "margin_used": 0.0,
-                    "utilization_pct": 0.0, "total_ntl_pos": 0.0,
-                    "error": "no HL wallet address"}
-
-        info = Info(constants.MAINNET_API_URL, skip_ws=True)
-        state = info.user_state(addr)
-        margin = state.get("marginSummary", {}) or {}
-        perps_value = _as_float(margin.get("accountValue"), 0.0) or 0.0
-        margin_used = _as_float(margin.get("totalMarginUsed"), 0.0) or 0.0
-        total_ntl = _as_float(margin.get("totalNtlPos"), 0.0) or 0.0
-
-        # BRK-R3 (2026-06-04): the denominator must be the UNIFIED balance
-        # (perps accountValue + spot USDC), NOT perps-only. With the account's
-        # USDC parked in spot, perps accountValue ≈ margin_used → a false ~100%
-        # utilization. Mirror live_executor.get_account_state_live (:2710-2721):
-        # add spot USDC so utilization reflects the real ~9.6% the bot sizes off.
-        spot_usdc = 0.0
-        try:
-            spot_state = info.spot_user_state(addr)
-            for bal in spot_state.get("balances", []) or []:
-                if (bal or {}).get("coin") == "USDC":
-                    spot_usdc = _as_float(bal.get("total"), 0.0) or 0.0
-                    break
-        except Exception:
-            spot_usdc = 0.0
-
-        account_value = perps_value + spot_usdc
-        util = (margin_used / account_value * 100.0) if account_value > 0 else 0.0
-        return {
-            "available": True,
-            "account_value": account_value,
-            "perps_account_value": perps_value,
-            "spot_usdc": spot_usdc,
-            "margin_used": margin_used,
-            "utilization_pct": util,
-            "total_ntl_pos": total_ntl,
-        }
-    except Exception as exc:
-        return {"available": False, "account_value": 0.0, "margin_used": 0.0,
-                "utilization_pct": 0.0, "total_ntl_pos": 0.0,
-                "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "available": False,
+        "account_value": 0.0,
+        "margin_used": 0.0,
+        "utilization_pct": 0.0,
+        "total_ntl_pos": 0.0,
+        "error": "sourced from Observatory heartbeat (route override)",
+    }
 
 
 def main() -> int:

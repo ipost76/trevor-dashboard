@@ -133,12 +133,25 @@ interface RealHlEquity {
   source: EquitySource;
   stale: boolean;
   ts: number; // epoch-ms the served value was produced (last-success on stale)
+  // W-H-P4-HUB: live OPEN numbers from the SAME heartbeat. null ⇒ heartbeat never
+  // observed ⇒ caller keeps the replica (Python) values rather than overriding.
+  openCount: number | null;
+  openExposure: number | null; // Σ open_positions[].notional_usd (deployed)
 }
 
+interface HeartbeatPosition {
+  notional_usd?: number | null;
+}
 interface HeartbeatPayload {
   account_value_usd?: number | null;
   categories?: {
-    autotrader?: { account_value_usd?: number | null; unrealized_pnl_usd?: number | null };
+    autotrader?: {
+      account_value_usd?: number | null;
+      unrealized_pnl_usd?: number | null;
+      // W-H-P4-HUB: live open-count + open positions (each carries notional_usd).
+      open_count?: number | null;
+      open_positions?: HeartbeatPosition[] | null;
+    };
   };
 }
 
@@ -151,6 +164,9 @@ interface HeartbeatPayload {
 interface HeartbeatEquity {
   equity: number;
   unrealized: number | null;
+  // W-H-P4-HUB: live open-count + deployed notional, from the SAME heartbeat.
+  openCount: number | null;
+  openExposure: number | null;
 }
 
 async function resolveRealHlEquity(): Promise<RealHlEquity> {
@@ -172,7 +188,20 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       // flat account never fails the fetch; the UI falls back to the script value.
       const u = hb?.categories?.autotrader?.unrealized_pnl_usd;
       const unrealized = typeof u === "number" && Number.isFinite(u) ? u : null;
-      return { equity: av, unrealized };
+      // W-H-P4-HUB: live OPEN numbers from the SAME heartbeat — kills the ≤15min
+      // litestream-replica lag (phantom open-count + deployed). `open_count` is the
+      // LIVE count; `open_exposure` (deployed) = Σ open_positions[].notional_usd.
+      // Absent ⇒ null so the caller keeps the replica value (never invents 0).
+      const oc = hb?.categories?.autotrader?.open_count;
+      const openCount = typeof oc === "number" && Number.isFinite(oc) ? oc : null;
+      const positions = hb?.categories?.autotrader?.open_positions ?? null;
+      const openExposure = positions
+        ? positions.reduce((sum, p) => {
+            const n = p?.notional_usd;
+            return sum + (typeof n === "number" && Number.isFinite(n) ? n : 0);
+          }, 0)
+        : null;
+      return { equity: av, unrealized, openCount, openExposure };
     });
     // W-H-P2-HUB FIX: the SWR per-call `stale` flag is `true` on EVERY poll because the
     // equity cache TTL (10s) is shorter than the client poll interval (15s) — so the cache
@@ -188,12 +217,23 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       source: ageStale ? "stale" : "real-hl",
       stale: ageStale,
       ts,
+      openCount: value.openCount,
+      openExposure: value.openExposure,
     };
   } catch {
     // Cold (never observed) AND upstream failed/absent. NEVER substitute the
     // Python DB realized-PnL sum — surface "unavailable" so the UI shows a
-    // placeholder, not a virtual number.
-    return { value: null, unrealized: null, source: "unavailable", stale: false, ts: 0 };
+    // placeholder, not a virtual number. open numbers null ⇒ caller keeps the
+    // replica (Python) open-count / deployed rather than inventing 0.
+    return {
+      value: null,
+      unrealized: null,
+      source: "unavailable",
+      stale: false,
+      ts: 0,
+      openCount: null,
+      openExposure: null,
+    };
   }
 }
 
@@ -238,6 +278,16 @@ export async function GET() {
       // unrealized (the Hub has no HL creds, so the script's own value is always
       // 0). Falls back to the script value only when the heartbeat is unavailable.
       unrealized_usd: equity.unrealized ?? value.unrealized_usd,
+      // W-H-P4-HUB: OPEN/live numbers mirror the heartbeat (live), NOT the ≤15min
+      // litestream replica the Python script reads — this kills the transient
+      // phantom open-count + deployed (e.g. a just-closed #100444 lingering for one
+      // restore window). `open_exposure_usd` (deployed) = Σ heartbeat
+      // open_positions[].notional_usd. Closed history / realized stay on the replica
+      // (fine at 15min). Fall back to the replica value only when the heartbeat was
+      // never observed (openCount/openExposure null).
+      open_count: equity.openCount ?? value.open_count,
+      open_positions_count: equity.openCount ?? value.open_positions_count,
+      open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
       realized_pct,
       equity_available: available,
       equity_stale: equity.stale,

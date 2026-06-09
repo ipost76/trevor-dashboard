@@ -18,48 +18,24 @@ const COINGECKO_IDS: Record<string, string> = {
 type PriceEntry = { price: number; source: string; stale: boolean };
 type PriceMap = Record<string, PriceEntry>;
 
-// LP-01 (2026-05-31): the Observatory aiohttp endpoint (:3335) serves live HL
-// allMids from its single persistent WebSocket (one WS for the whole system,
-// regardless of UI poll rate). When fresh we serve from it → ZERO HL REST per
-// poll, so the 2s client cadence never touches Hyperliquid. When stale/down/
-// incomplete we fall through to the EXISTING 30s-cached HL→CG SWR chain below,
-// byte-identical to the prior contract (incl. per-ticker `stale`). The 30s
-// cache stays the REST safety net — the WS feeds on top of it, never replaces it.
-const OBSERVATORY_PRICES_URL = "http://127.0.0.1:3335/api/prices";
+// W-H-P4-HUB (2026-06-09): the WS-first path to the Observatory aiohttp endpoint
+// at :3335 was REMOVED. That source is DEAD on the WSL Hub box (W-E-P2b moved the
+// Observatory to :8443, which serves /api/heartbeat but NOT a prices/allMids
+// endpoint — verified 404), so every poll wasted a doomed connection and the
+// per-ticker `stale` flag never reflected reality. The 30s-cached HL→CG SWR chain
+// below — which already works and tracks live HL within ~0.04% — is now the SOLE,
+// PRIMARY source. Staleness is judged by the WALL-CLOCK AGE of the served value
+// (PRICE_STALE_AGE_MS), mirroring the W-H-P2/P3-HUB equity-badge fix, so a value
+// that is merely mid-refresh (~30-60s old, perfectly good at the ~30s cadence) is
+// no longer falsely flagged stale on the one poll per 30s window that lands on the
+// SWR TTL boundary.
 
-interface WsPriceState {
-  stale: boolean;
-  mids: Record<string, string>;
-}
-
-// Try the WS feed. Returns a complete PriceMap ONLY when the feed is fresh AND
-// covers every requested ticker (case-insensitive, HL uses mixed-case "kPEPE");
-// otherwise null → caller falls back to the cached REST chain. Never throws.
-async function tryWsPrices(tickers: string[]): Promise<PriceMap | null> {
-  try {
-    const res = await fetch(OBSERVATORY_PRICES_URL, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(1500),
-    });
-    if (!res.ok) return null;
-    const state = (await res.json()) as WsPriceState;
-    if (state.stale || !state.mids) return null;
-    const byUpper: Record<string, number> = {};
-    for (const [sym, val] of Object.entries(state.mids)) {
-      const px = parseFloat(val);
-      if (Number.isFinite(px) && px > 0) byUpper[sym.toUpperCase()] = px;
-    }
-    const out: PriceMap = {};
-    for (const t of tickers) {
-      const px = byUpper[t.toUpperCase()];
-      if (!px) return null; // incomplete coverage → defer to the REST chain
-      out[t] = { price: px, source: "hyperliquid", stale: false };
-    }
-    return out;
-  } catch {
-    return null; // unreachable / timeout / parse error → REST fallback
-  }
-}
+// A served price is only "stale" once it is genuinely old — i.e. the 30s SWR
+// revalidation has failed to land for >3 cadence windows. 90s sits well above the
+// ~30s refresh cadence, so steady-state polling is never falsely flagged, while a
+// genuinely stalled HL+CG chain (no successful refresh for >90s) correctly shows
+// stale. Mirrors EQUITY_STALE_AGE_MS in src/app/api/auto/state/route.ts.
+const PRICE_STALE_AGE_MS = 90_000;
 
 // 30s read-through cache keyed by the normalized ticker set, with single-flight
 // dedup + stale-while-revalidate + a per-origin (HL/CG) concurrency cap (RM-DASH
@@ -162,35 +138,29 @@ export async function GET(request: NextRequest) {
   // same ticker they requested.
   const tickers = tickerParam.split(",").map((t) => t.trim());
 
-  // LP-01: WS-first. When the Observatory feed is fresh + complete, serve it
-  // directly (no HL REST, no SWR cache touched). On stale/down/incomplete this
-  // returns null and we fall through to the unchanged cached REST chain below —
-  // so the fallback path's `stale` semantics stay byte-identical to the prior
-  // contract. Response shape identical either way.
-  const wsPrices = await tryWsPrices(tickers);
-  if (wsPrices) {
-    return NextResponse.json({
-      prices: wsPrices,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  // Cache key = normalized (sorted) ticker set. Case-sensitive so response keys
-  // keep the caller's exact casing; all three production callers (PriceStrip,
-  // watchlist-grid, active-position-card) send the identical 10-ticker array, so
-  // they collapse onto a single in-flight refresh per 30s window.
+  // W-H-P4-HUB: WS-first path removed (dead :3335). The 30s SWR HL→CG chain is the
+  // sole source. Cache key = normalized (sorted) ticker set. Case-sensitive so
+  // response keys keep the caller's exact casing; all production callers
+  // (PriceStrip, watchlist-grid, active-position-card) send the identical ticker
+  // array, so they collapse onto a single in-flight refresh per 30s window.
   const key = [...tickers].sort().join(",");
 
-  const { value, stale, ts } = await pricesCache.swr(key, (prev) => computePrices(tickers, prev));
+  const { value, ts } = await pricesCache.swr(key, (prev) => computePrices(tickers, prev));
 
-  // Build the response in request order. When serving a stale (expired) payload
-  // during background revalidation, mark every entry stale:true (clients already
-  // render stale:true). Response shape is byte-identical to the prior contract:
-  // { prices: { <ticker>: { price, source, stale } }, timestamp }.
+  // W-H-P4-HUB: per-ticker staleness is now AGE-based, not the SWR per-call flag.
+  // The SWR flag is `true` on every poll that lands after the 30s TTL expires —
+  // even though the served value is only ~30s old and perfectly good — which
+  // produced a false "stale" blip once per 30s window. Flag stale only when the
+  // served payload is genuinely old (age > PRICE_STALE_AGE_MS) OR when the
+  // per-ticker entry itself is a degraded fallback (computePrices already marks a
+  // ticker stale:true when HL+CG both failed and it served a prior/zero value).
+  // Response shape unchanged: { prices: { <ticker>: { price, source, stale } },
+  // timestamp }.
+  const ageStale = Date.now() - ts > PRICE_STALE_AGE_MS;
   const result: PriceMap = {};
   for (const t of tickers) {
     const entry = value[t] || { price: 0, source: "none", stale: true };
-    result[t] = stale ? { ...entry, stale: true } : entry;
+    result[t] = { ...entry, stale: entry.stale || ageStale };
   }
 
   return NextResponse.json({ prices: result, timestamp: new Date(ts).toISOString() });
