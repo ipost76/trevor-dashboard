@@ -90,6 +90,11 @@ TS_PRIORITY = ["created_at", "ts", "timestamp", "cycle_timestamp", "time"]
 
 # Boolean divergence / would-fire column preference (first present wins).
 DIV_PRIORITY = ["divergent", "would_block", "would_fire", "would_fire_v1", "is_divergent"]
+# Realized per-trade outcome columns, in preference order. When a table carries
+# one of these AND it is linked (NOT NULL), HUB-C2 surfaces read-only aggregate
+# stats (mean / min / max / win-rate over linked rows). A would-fire/divergence
+# boolean is NOT an outcome — divergence_pct must never be relabelled a win-rate.
+OUTCOME_PRIORITY = ["realized_pnl_usd", "actual_pnl_usd"]
 
 # Ordered (substring, function) heuristic for auto-derived tables. First match wins,
 # so Exit/Risk/Scoring/Data specifics are checked before the generic Entry terms.
@@ -190,6 +195,13 @@ def _pick_div(cols: dict[str, str]) -> Optional[str]:
     return None
 
 
+def _pick_outcome(cols: dict[str, str]) -> Optional[str]:
+    for c in OUTCOME_PRIORITY:
+        if c in cols:
+            return c
+    return None
+
+
 def _inspect(conn: sqlite3.Connection, table: str) -> dict:
     ov = OVERRIDE.get(table, {})
     cols = _columns(conn, table)
@@ -221,6 +233,14 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
         "divergence_pct": None,
         "promotion": "na",
         "promotion_n": None,
+        # Realized-outcome aggregates (HUB-C2) — null when the table has no
+        # realized P&L column (Group C: count-only / "no per-trade outcome").
+        "outcome_col": None,
+        "outcome_linked_n": None,
+        "outcome_mean_pnl": None,
+        "outcome_min_pnl": None,
+        "outcome_max_pnl": None,
+        "outcome_win_rate": None,
     }
 
     try:
@@ -279,6 +299,32 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
                 info["promotion"] = "ready" if _wilson_lb(n_div, total) > 0.0 else "accruing"
         except Exception as exc:
             info["error"] = (info.get("error") or "") + f" | div: {exc}"
+
+    # Realized-outcome aggregation (HUB-C2) — READ-ONLY over an EXISTING column,
+    # pure SELECT (AVG/MIN/MAX/COUNT), no write/schema/persisted field. Computed
+    # over LINKED (NOT NULL) rows only, with linked-n surfaced, so a partly-
+    # linked table reports an honest sample size rather than a silent full-count
+    # win-rate. WR = share of linked rows with realized P&L > 0.
+    out_col = _pick_outcome(cols)
+    if out_col and total:
+        try:
+            r = conn.execute(
+                f"SELECT COUNT({out_col}) AS linked, "
+                f"SUM(CASE WHEN {out_col} > 0 THEN 1 ELSE 0 END) AS wins, "
+                f"AVG({out_col}) AS mean_pnl, "
+                f"MIN({out_col}) AS lo, MAX({out_col}) AS hi "
+                f"FROM {table} WHERE {out_col} IS NOT NULL"
+            ).fetchone()
+            linked = int(r["linked"] or 0)
+            info["outcome_col"] = out_col
+            info["outcome_linked_n"] = linked
+            if linked > 0:
+                info["outcome_mean_pnl"] = round(float(r["mean_pnl"]), 2)
+                info["outcome_min_pnl"] = round(float(r["lo"]), 2)
+                info["outcome_max_pnl"] = round(float(r["hi"]), 2)
+                info["outcome_win_rate"] = round(100.0 * int(r["wins"] or 0) / linked, 1)
+        except Exception as exc:
+            info["error"] = (info.get("error") or "") + f" | outcome: {exc}"
 
     return info
 

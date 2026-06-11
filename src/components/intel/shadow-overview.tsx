@@ -27,6 +27,14 @@ export interface ShadowRegistryTable {
   divergence_pct: number | null;
   promotion: Promotion;
   promotion_n: number | null;
+  // HUB-C2 realized-outcome aggregates (read-only over existing columns). null
+  // when the table has no realized-outcome column (Group C → count-only / n/a).
+  outcome_col: string | null;
+  outcome_linked_n: number | null;
+  outcome_mean_pnl: number | null;
+  outcome_min_pnl: number | null;
+  outcome_max_pnl: number | null;
+  outcome_win_rate: number | null;
   error?: string;
 }
 
@@ -91,6 +99,13 @@ function adaptCard(t: ShadowRegistryTable) {
     promotion: t.promotion,
     promotionN: t.promotion_n,
     retired: t.retired,
+    // Realized-outcome aggregates (null ⇒ Group C ⇒ "n/a — no per-trade outcome")
+    outcomeCol: t.outcome_col,
+    outcomeLinkedN: t.outcome_linked_n,
+    outcomeMeanPnl: t.outcome_mean_pnl,
+    outcomeMinPnl: t.outcome_min_pnl,
+    outcomeMaxPnl: t.outcome_max_pnl,
+    outcomeWinRate: t.outcome_win_rate,
     extraMetrics: t.error ? { error: t.error } : undefined,
   };
 }

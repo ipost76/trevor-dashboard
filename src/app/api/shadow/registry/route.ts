@@ -34,6 +34,15 @@ interface ShadowTable {
   divergence_pct: number | null;
   promotion: "ready" | "accruing" | "na";
   promotion_n: number | null;
+  // HUB-C2 realized-outcome aggregates (read-only over existing realized_pnl_usd /
+  // actual_pnl_usd columns). null when the table has no realized-outcome column
+  // (Group C: count-only — must render "n/a — no per-trade outcome", never a WR).
+  outcome_col: string | null;
+  outcome_linked_n: number | null;
+  outcome_mean_pnl: number | null;
+  outcome_min_pnl: number | null;
+  outcome_max_pnl: number | null;
+  outcome_win_rate: number | null;
   error?: string;
 }
 
