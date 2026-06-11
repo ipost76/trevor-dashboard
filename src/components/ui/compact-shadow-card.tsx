@@ -37,18 +37,36 @@ function fmtNum(n: number): string {
   return String(n);
 }
 
-function PromotionPill({ promotion, promotionN }: { promotion: CompactPromotion; promotionN?: number | null }) {
-  if (promotion === "ready") {
-    return <Pill intent="active" size="sm">READY</Pill>;
-  }
-  if (promotion === "accruing") {
+/**
+ * Readiness badge — the ONLY thing on a collapsed row (and reused in the
+ * leaderboard). Four states off the existing payload, all on A4 tokens:
+ *   ready (gate-clear, mint) · accruing N/30 (building sample, gold) ·
+ *   n/a (no divergence signal, neutral) · dormant (0-row / retired, dim).
+ * Dormant status wins over promotion (a dormant table is never "ready").
+ */
+export function ReadinessBadge({
+  status,
+  promotion,
+  promotionN,
+}: {
+  status: CompactShadowStatus;
+  promotion: CompactPromotion;
+  promotionN?: number | null;
+}) {
+  if (status === "dormant") {
     return (
-      <Pill intent="warn" size="sm">
-        {`${promotionN ?? 0}/30`}
+      <Pill tone="neutral" size="sm" className="text-fg-faint">
+        dormant
       </Pill>
     );
   }
-  return null;
+  if (promotion === "ready") {
+    return <Pill intent="active" size="sm">ready</Pill>;
+  }
+  if (promotion === "accruing") {
+    return <Pill intent="warn" size="sm">{`${promotionN ?? 0}/30`}</Pill>;
+  }
+  return <Pill tone="neutral" size="sm">n/a</Pill>;
 }
 
 export function CompactShadowCard(props: CompactShadowCardProps) {
@@ -89,33 +107,20 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
         className="tap-target flex w-full items-center gap-3 px-3 py-2 text-left"
       >
         <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-pill", dot)} />
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-caption">
+        {/* Collapsed row is name + badge ONLY — every number lives in the
+            expand-on-tap panel below. Tightest scannable line. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-caption">
           <span className="truncate font-sans font-semibold text-fg-primary">
             {name}
           </span>
           {retired && (
-            <span className="font-sans text-micro uppercase tracking-wider text-fg-faint">
+            <span className="shrink-0 font-sans text-micro uppercase tracking-wider text-fg-faint">
               retired
             </span>
           )}
-          <span className="font-mono text-micro text-fg-muted tabular-nums">
-            {fmtNum(totalRows)} rows
-          </span>
-          <span className="font-mono text-micro text-fg-muted tabular-nums">
-            {fmtNum(rows48h)} 48h
-          </span>
-          {hasDiv && (
-            <span
-              className="font-mono text-micro tabular-nums text-accent-gold-strong"
-              title={divergenceCol ? `divergent on "${divergenceCol}"` : "divergent"}
-            >
-              {fmtNum(divergentN ?? 0)} div · {divergencePct}%
-            </span>
-          )}
-          <span className="font-mono text-micro text-fg-faint">{latestAge}</span>
         </div>
         <span className="shrink-0">
-          <PromotionPill promotion={promotion} promotionN={promotionN} />
+          <ReadinessBadge status={status} promotion={promotion} promotionN={promotionN} />
         </span>
         <ChevronDown
           size={14}

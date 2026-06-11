@@ -1,17 +1,11 @@
 "use client";
 import * as React from "react";
-import {
-  CollapsibleSection,
-  EmptyState,
-  Pill,
-  Skeleton,
-  TabBar,
-  type TabBarItem,
-} from "@/components/ui";
+import { EmptyState, Skeleton } from "@/components/ui";
 import { CompactShadowCard } from "@/components/ui/compact-shadow-card";
 import { cn } from "@/lib/utils";
 import { ShadowScoringHero, type IntelShadowState } from "./shadow-scoring-hero";
 import { PartialShadowCard } from "@/components/autotrader-v2/partial-shadow-card";
+import { PromotionLeaderboard } from "./promotion-leaderboard";
 
 type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN";
 type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data" | "Other";
@@ -54,16 +48,9 @@ interface IntelShadowResponse {
   error?: string;
 }
 
-const FUNCTION_ORDER: ReadonlyArray<FunctionGroup> = [
-  "Entry",
-  "Exit",
-  "Scoring",
-  "Risk",
-  "Data",
-  "Other",
-];
-
 const HERO_TABLE = "shadow_scoring";
+// Phone-friendly leaderboard size — the headline "show me your best" view.
+const LEADERBOARD_N = 6;
 
 function fmtReplicaAge(sec: number | null): string {
   if (sec === null || sec === undefined || !Number.isFinite(sec)) return "unknown";
@@ -89,13 +76,6 @@ function fmtAge(iso: string | null | undefined): string {
   return `${Math.floor(ageSec / 86400)}d ago`;
 }
 
-function activityBorder(rows48h: number, status: RegistryStatus): string {
-  if (status !== "ACTIVE" || rows48h <= 0) return "border-l-border-subtle";
-  if (rows48h > 100) return "border-l-accent-cyan-soft-strong";
-  if (rows48h >= 10) return "border-l-accent-cyan-soft/50";
-  return "border-l-fg-faint";
-}
-
 function adaptCard(t: ShadowRegistryTable) {
   return {
     name: t.display,
@@ -115,56 +95,32 @@ function adaptCard(t: ShadowRegistryTable) {
   };
 }
 
-interface FunctionBlockProps {
-  title: FunctionGroup;
-  tables: ShadowRegistryTable[];
-  sortKey: "rows_48h" | "rows";
+const promoRank = (p: Promotion): number => (p === "ready" ? 0 : p === "accruing" ? 1 : 2);
+
+// Default dense list + leaderboard ranking: ready → accruing, then
+// divergence strength (%div desc), then recency (48h desc).
+function bySignal(a: ShadowRegistryTable, b: ShadowRegistryTable): number {
+  const r = promoRank(a.promotion) - promoRank(b.promotion);
+  if (r !== 0) return r;
+  const pd = (b.divergence_pct ?? 0) - (a.divergence_pct ?? 0);
+  if (pd !== 0) return pd;
+  return (b.rows_48h ?? 0) - (a.rows_48h ?? 0);
 }
 
-function FunctionBlock({ title, tables, sortKey }: FunctionBlockProps) {
-  const sorted = React.useMemo(
-    () =>
-      [...tables].sort((a, b) => {
-        if (sortKey === "rows_48h") return b.rows_48h - a.rows_48h;
-        return b.rows - a.rows;
-      }),
-    [tables, sortKey],
-  );
-  if (sorted.length === 0) return null;
-
-  // ≤5 → default open; >5 → collapsed (per Phase 1 spec).
-  const defaultOpen = sorted.length <= 5;
-  const intent = sorted[0].status === "ACTIVE" ? "active" : ("warn" as const);
-
-  return (
-    <CollapsibleSection
-      title={title}
-      defaultOpen={defaultOpen}
-      rightSlot={
-        <Pill intent={intent} size="sm">
-          {sorted.length}
-        </Pill>
-      }
-    >
-      <div className="space-y-2 p-3">
-        {sorted.map((t) => (
-          <div
-            key={t.table_name}
-            className={cn("border-l-2 pl-2", activityBorder(t.rows_48h, t.status))}
-          >
-            <CompactShadowCard {...adaptCard(t)} />
-          </div>
-        ))}
-      </div>
-    </CollapsibleSection>
-  );
+// Hidden set ordering: active-but-no-signal (na) first, then dormant/0-row,
+// each by activity (48h desc, then total rows desc).
+function byHidden(a: ShadowRegistryTable, b: ShadowRegistryTable): number {
+  const sa = a.status === "ACTIVE" ? 0 : 1;
+  const sb = b.status === "ACTIVE" ? 0 : 1;
+  if (sa !== sb) return sa - sb;
+  return (b.rows_48h ?? 0) - (a.rows_48h ?? 0) || (b.rows ?? 0) - (a.rows ?? 0);
 }
 
 export function ShadowOverview() {
   const [registry, setRegistry] = React.useState<ShadowRegistryResponse | null>(null);
   const [intel, setIntel] = React.useState<IntelShadowResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [tab, setTab] = React.useState<"active" | "dormant">("active");
+  const [showHidden, setShowHidden] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -195,36 +151,28 @@ export function ShadowOverview() {
 
   const tables = registry?.tables ?? [];
   const heroTable = tables.find((t) => t.table_name === HERO_TABLE) ?? null;
-  // Hero owns shadow_scoring — strip it from the Scoring section to avoid
-  // visual duplication (Ghost decision at D4 Phase 0 gate).
+  // Hero owns shadow_scoring — strip it from every list (its surface is the hero).
   const tablesExHero = tables.filter((t) => t.table_name !== HERO_TABLE);
-  const active = tablesExHero.filter((t) => t.status === "ACTIVE");
-  const dormant = tablesExHero.filter(
-    (t) => t.status === "DORMANT" || t.status === "BROKEN",
-  );
 
-  // Promotion-ready shadows surface FIRST, pulled out of their function group
-  // (most-divergent first); the rest of Active stays function-grouped below.
-  const promotionReady = active
-    .filter((t) => t.promotion === "ready")
-    .sort((a, b) => (b.divergence_pct ?? 0) - (a.divergence_pct ?? 0));
-  const activeRest = active.filter((t) => t.promotion !== "ready");
+  // Signal-carriers = ACTIVE shadows with a real divergence/readiness signal,
+  // ranked. The top N become the leaderboard; the rest are the dense default list.
+  const ranked = tablesExHero
+    .filter((t) => t.status === "ACTIVE" && t.promotion !== "na")
+    .sort(bySignal);
+  const leaderboardTables = ranked.slice(0, LEADERBOARD_N);
+  const denseSignal = ranked.slice(LEADERBOARD_N);
+  const readyCount = ranked.filter((t) => t.promotion === "ready").length;
 
-  const groupByFn = (rows: ShadowRegistryTable[]) =>
-    FUNCTION_ORDER.map((fn) => ({
-      fn,
-      rows: rows.filter((r) => r.function === fn),
-    }));
-
-  const activeGroups = groupByFn(activeRest);
-  const dormantGroups = groupByFn(dormant);
-
-  const items: ReadonlyArray<TabBarItem<"active" | "dormant">> = [
-    { key: "active", label: `Active (${active.length + (heroTable ? 1 : 0)})` },
-    { key: "dormant", label: `Dormant (${dormant.length})` },
-  ];
+  // Hidden behind the toggle: active-no-signal (na) + dormant + 0-row, together.
+  const hidden = tablesExHero
+    .filter((t) => t.status !== "ACTIVE" || t.promotion === "na")
+    .sort(byHidden);
 
   const replicaAge = registry?.replica_age_seconds ?? null;
+
+  const renderRow = (t: ShadowRegistryTable) => (
+    <CompactShadowCard key={t.table_name} {...adaptCard(t)} />
+  );
 
   if (registry?.error) {
     return (
@@ -236,8 +184,6 @@ export function ShadowOverview() {
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
-      <TabBar items={items} active={tab} onChange={setTab} />
-
       {/* Replica freshness — the WSL litestream replica refreshes every ~15 min,
           so a glance knows the divergent counts may lag. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
@@ -247,74 +193,63 @@ export function ShadowOverview() {
         </span>
         <span className="text-fg-faint">·</span>
         <span>
-          {registry?.total ?? tables.length} shadows · {promotionReady.length} promotion-ready
+          {registry?.total ?? tables.length} shadows · {readyCount} gate-ready
         </span>
       </div>
 
       {loading && tables.length === 0 ? (
         <Skeleton className="h-48 w-full" />
-      ) : tab === "active" ? (
+      ) : (
         <div className="space-y-4">
+          {/* ── Zone 1: leaderboard (the headline) ───────────────────────── */}
+          <PromotionLeaderboard candidates={leaderboardTables} readyCount={readyCount} />
+
+          {/* ── Hero feature cards (kept — distinct from the dense list) ──── */}
           <ShadowScoringHero
             registry={heroTable}
             intel={intel?.shadow ?? null}
             loading={loading && !registry}
           />
           <PartialShadowCard />
-          {promotionReady.length > 0 && (
-            <CollapsibleSection
-              title="🎯 Promotion-Ready"
-              defaultOpen
-              rightSlot={
-                <Pill intent="active" size="sm">
-                  {promotionReady.length}
-                </Pill>
-              }
-            >
-              <div className="space-y-2 p-3">
-                <p className="font-sans text-micro text-fg-muted">
-                  n ≥ 30 divergent samples and a Wilson 95% lower bound that
-                  excludes no-divergence — statistically ready to evaluate for
-                  live promotion.
-                </p>
-                {promotionReady.map((t) => (
-                  <div
-                    key={t.table_name}
-                    className={cn(
-                      "border-l-2 pl-2",
-                      activityBorder(t.rows_48h, t.status),
-                    )}
-                  >
-                    <CompactShadowCard {...adaptCard(t)} />
-                  </div>
-                ))}
-              </div>
-            </CollapsibleSection>
-          )}
-          {activeGroups.map(({ fn, rows }) =>
-            rows.length === 0 ? null : (
-              <FunctionBlock key={fn} title={fn} tables={rows} sortKey="rows_48h" />
-            ),
-          )}
-          {active.length === 0 && !heroTable && (
-            <EmptyState
-              title="No active shadows"
-              body="The registry returned no ACTIVE rows."
-            />
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {dormantGroups.map(({ fn, rows }) =>
-            rows.length === 0 ? null : (
-              <FunctionBlock key={fn} title={fn} tables={rows} sortKey="rows" />
-            ),
-          )}
-          {dormant.length === 0 && (
-            <EmptyState
-              title="No dormant shadows"
-              body="Every tracked shadow is currently active."
-            />
+
+          {/* ── Zone 2: dense collapsed rows (active ready + accruing) ────── */}
+          <section className="space-y-1.5">
+            <h3 className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              Active signal · tap a row for detail
+            </h3>
+            {denseSignal.length > 0 ? (
+              denseSignal.map(renderRow)
+            ) : ranked.length === 0 ? (
+              <EmptyState
+                title="No active signal"
+                body="No ready/accruing shadows right now — everything is behind the toggle below."
+              />
+            ) : (
+              <p className="font-sans text-micro text-fg-faint">
+                All ready/accruing shadows are in the leaderboard above.
+              </p>
+            )}
+          </section>
+
+          {/* ── Zone 3: dormant / na hidden behind a toggle (default off) ─── */}
+          {hidden.length > 0 && (
+            <section className="space-y-1.5">
+              <button
+                type="button"
+                aria-expanded={showHidden}
+                onClick={() => setShowHidden((x) => !x)}
+                className={cn(
+                  "tap-target flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2",
+                  "border-border-subtle bg-bg-card font-sans text-caption text-fg-muted",
+                  "transition-colors duration-fast hover:border-accent-cyan-soft/40",
+                )}
+              >
+                {showHidden
+                  ? "Hide dormant / no-signal"
+                  : `Show dormant / no-signal (${hidden.length})`}
+              </button>
+              {showHidden && <div className="space-y-1.5">{hidden.map(renderRow)}</div>}
+            </section>
           )}
         </div>
       )}
