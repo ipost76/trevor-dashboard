@@ -94,6 +94,16 @@ export function PartialShadowCard() {
     };
   }, []);
 
+  // Fold the ~1.8k near-unique partial_level_r rows into a handful of coarse
+  // R-bands — aggregate sub-rows, shown only on expand. NEVER the raw levels.
+  // MUST run unconditionally (before the early return below) — calling it after
+  // the `if (loading && !data) return` made the hook count jump 4→5 once data
+  // arrived → React #310 "Rendered more hooks than during the previous render".
+  const bands = React.useMemo(
+    () => bandRTriggers(data?.by_level ?? []),
+    [data?.by_level],
+  );
+
   if (loading && !data) {
     return <Skeleton className="h-56 w-full" />;
   }
@@ -102,10 +112,6 @@ export function PartialShadowCard() {
   const byLevel = data?.by_level ?? [];
   const byTicker = data?.by_ticker ?? [];
   const hasAnyData = summary && summary.rows_7d > 0;
-
-  // Fold the ~1.8k near-unique partial_level_r rows into a handful of coarse
-  // R-bands — aggregate sub-rows, shown only on expand. NEVER the raw levels.
-  const bands = React.useMemo(() => bandRTriggers(byLevel), [byLevel]);
 
   // Eval-level would-fire rate. This is a COUNTING shadow — partial_trigger_shadow
   // has no realized per-trade P&L (SH-HUB), so there is no honest win-rate or
