@@ -14,7 +14,8 @@ import { ShadowScoringHero, type IntelShadowState } from "./shadow-scoring-hero"
 import { PartialShadowCard } from "@/components/autotrader-v2/partial-shadow-card";
 
 type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN";
-type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data";
+type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data" | "Other";
+type Promotion = "ready" | "accruing" | "na";
 
 export interface ShadowRegistryTable {
   table_name: string;
@@ -25,6 +26,13 @@ export interface ShadowRegistryTable {
   latest_write: string | null;
   status: RegistryStatus;
   expected_active: boolean;
+  retired: boolean;
+  auto_derived: boolean;
+  divergence_col: string | null;
+  divergent_n: number | null;
+  divergence_pct: number | null;
+  promotion: Promotion;
+  promotion_n: number | null;
   error?: string;
 }
 
@@ -33,7 +41,11 @@ interface ShadowRegistryResponse {
   by_function: Record<string, string[]>;
   by_status: Record<string, number>;
   total: number;
+  promotion_ready: number;
   stale_days: number;
+  promotion_min_n: number;
+  replica_age_seconds: number | null;
+  replica_mtime: string | null;
   error?: string;
 }
 
@@ -48,9 +60,17 @@ const FUNCTION_ORDER: ReadonlyArray<FunctionGroup> = [
   "Scoring",
   "Risk",
   "Data",
+  "Other",
 ];
 
 const HERO_TABLE = "shadow_scoring";
+
+function fmtReplicaAge(sec: number | null): string {
+  if (sec === null || sec === undefined || !Number.isFinite(sec)) return "unknown";
+  if (sec < 60) return `${Math.floor(sec)}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  return `${Math.floor(sec / 3600)}h ago`;
+}
 
 function fmtAge(iso: string | null | undefined): string {
   if (!iso) return "never";
@@ -85,6 +105,12 @@ function adaptCard(t: ShadowRegistryTable) {
     latestAge: fmtAge(t.latest_write),
     status: (t.status === "ACTIVE" ? "active" : "dormant") as "active" | "dormant",
     function: t.function,
+    divergentN: t.divergent_n,
+    divergencePct: t.divergence_pct,
+    divergenceCol: t.divergence_col,
+    promotion: t.promotion,
+    promotionN: t.promotion_n,
+    retired: t.retired,
     extraMetrics: t.error ? { error: t.error } : undefined,
   };
 }
@@ -177,19 +203,28 @@ export function ShadowOverview() {
     (t) => t.status === "DORMANT" || t.status === "BROKEN",
   );
 
+  // Promotion-ready shadows surface FIRST, pulled out of their function group
+  // (most-divergent first); the rest of Active stays function-grouped below.
+  const promotionReady = active
+    .filter((t) => t.promotion === "ready")
+    .sort((a, b) => (b.divergence_pct ?? 0) - (a.divergence_pct ?? 0));
+  const activeRest = active.filter((t) => t.promotion !== "ready");
+
   const groupByFn = (rows: ShadowRegistryTable[]) =>
     FUNCTION_ORDER.map((fn) => ({
       fn,
       rows: rows.filter((r) => r.function === fn),
     }));
 
-  const activeGroups = groupByFn(active);
+  const activeGroups = groupByFn(activeRest);
   const dormantGroups = groupByFn(dormant);
 
   const items: ReadonlyArray<TabBarItem<"active" | "dormant">> = [
     { key: "active", label: `Active (${active.length + (heroTable ? 1 : 0)})` },
     { key: "dormant", label: `Dormant (${dormant.length})` },
   ];
+
+  const replicaAge = registry?.replica_age_seconds ?? null;
 
   if (registry?.error) {
     return (
@@ -203,6 +238,19 @@ export function ShadowOverview() {
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
       <TabBar items={items} active={tab} onChange={setTab} />
 
+      {/* Replica freshness — the WSL litestream replica refreshes every ~15 min,
+          so a glance knows the divergent counts may lag. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-cyan-soft" />
+          replica {fmtReplicaAge(replicaAge)} · refreshes ~15 min
+        </span>
+        <span className="text-fg-faint">·</span>
+        <span>
+          {registry?.total ?? tables.length} shadows · {promotionReady.length} promotion-ready
+        </span>
+      </div>
+
       {loading && tables.length === 0 ? (
         <Skeleton className="h-48 w-full" />
       ) : tab === "active" ? (
@@ -213,6 +261,36 @@ export function ShadowOverview() {
             loading={loading && !registry}
           />
           <PartialShadowCard />
+          {promotionReady.length > 0 && (
+            <CollapsibleSection
+              title="🎯 Promotion-Ready"
+              defaultOpen
+              rightSlot={
+                <Pill intent="active" size="sm">
+                  {promotionReady.length}
+                </Pill>
+              }
+            >
+              <div className="space-y-2 p-3">
+                <p className="font-sans text-micro text-fg-muted">
+                  n ≥ 30 divergent samples and a Wilson 95% lower bound that
+                  excludes no-divergence — statistically ready to evaluate for
+                  live promotion.
+                </p>
+                {promotionReady.map((t) => (
+                  <div
+                    key={t.table_name}
+                    className={cn(
+                      "border-l-2 pl-2",
+                      activityBorder(t.rows_48h, t.status),
+                    )}
+                  >
+                    <CompactShadowCard {...adaptCard(t)} />
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
           {activeGroups.map(({ fn, rows }) =>
             rows.length === 0 ? null : (
               <FunctionBlock key={fn} title={fn} tables={rows} sortKey="rows_48h" />

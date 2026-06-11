@@ -16,10 +16,11 @@ interface ShadowSummary {
   rows_7d: number;
   would_fire_24h: number;
   would_fire_7d: number;
+  would_fire_trades_24h: number;
+  would_fire_trades_7d: number;
   near_miss_24h: number;
   near_miss_7d: number;
   modes: Record<string, number>;
-  would_have_profit_usd_7d: number;
   live_partials_enabled: boolean;
 }
 interface ByLevel {
@@ -33,8 +34,8 @@ interface ByLevel {
 interface ByTicker {
   ticker: string;
   would_fire: number;
+  would_fire_trades: number;
   near_miss: number;
-  would_have_profit_usd: number;
 }
 interface RecentRow {
   created_at: string;
@@ -93,11 +94,6 @@ function fmtAge(iso: string | null): string {
   const h = Math.floor(m / 60);
   if (h < 48) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
-}
-
-function fmtMoney(n: number): string {
-  const v = Number.isFinite(n) ? n : 0;
-  return `${v >= 0 ? "$" : "-$"}${Math.abs(v).toFixed(2)}`;
 }
 
 export function PartialShadowCard() {
@@ -170,34 +166,42 @@ export function PartialShadowCard() {
         />
       ) : (
         <>
-          {/* Summary tiles */}
+          {/* Summary tiles — distinct-TRADE counts (honest), not eval-rows.
+              The old green "Would-have P&L 7d" tile was removed (SH-HUB): it
+              summed one profit per per-cycle row → ~40-70x inflated, never
+              realizable. Counts can't be inflated. */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <MetricTile
-              label="Would-fire 24h"
-              value={(summary?.would_fire_24h ?? 0).toLocaleString()}
-              sub={`${summary?.would_fire_7d ?? 0} in 7d`}
+              label="Would-fire trades 7d"
+              value={(summary?.would_fire_trades_7d ?? 0).toLocaleString()}
+              sub={`${(summary?.would_fire_7d ?? 0).toLocaleString()} eval-rows`}
               size="sm"
             />
             <MetricTile
-              label="Near-miss 24h"
-              value={(summary?.near_miss_24h ?? 0).toLocaleString()}
-              sub={`${summary?.near_miss_7d ?? 0} in 7d`}
+              label="Would-fire trades 24h"
+              value={(summary?.would_fire_trades_24h ?? 0).toLocaleString()}
+              sub={`${(summary?.would_fire_24h ?? 0).toLocaleString()} eval-rows`}
               size="sm"
             />
             <MetricTile
-              label="Would-have P&L 7d"
-              value={fmtMoney(summary?.would_have_profit_usd_7d ?? 0)}
-              sub="sum of fired-slice profit"
+              label="Near-miss 7d"
+              value={(summary?.near_miss_7d ?? 0).toLocaleString()}
+              sub={`${summary?.near_miss_24h ?? 0} in 24h`}
               size="sm"
-              tone={(summary?.would_have_profit_usd_7d ?? 0) >= 0 ? "positive" : "negative"}
             />
             <MetricTile
-              label="Total evals 24h"
-              value={(summary?.rows_24h ?? 0).toLocaleString()}
-              sub={`${summary?.rows_7d ?? 0} in 7d`}
+              label="Total evals 7d"
+              value={(summary?.rows_7d ?? 0).toLocaleString()}
+              sub={`${(summary?.rows_24h ?? 0).toLocaleString()} in 24h`}
               size="sm"
             />
           </div>
+
+          <p className="mt-2 font-sans text-micro italic text-fg-muted">
+            Counts are distinct trades. The bot re-evaluates every monitor cycle,
+            so eval-rows run ~40–70× higher. No would-have $ is shown — the
+            per-cycle profit sum was a counting artifact, not realizable money.
+          </p>
 
           {/* Modes breakdown */}
           {summary && Object.keys(summary.modes).length > 0 && (
@@ -251,20 +255,18 @@ export function PartialShadowCard() {
           {byTicker.length > 0 && (
             <div className="mt-4">
               <div className="mb-2 font-sans text-caption uppercase tracking-wider text-fg-muted">
-                Partial-exit would-fire by ticker · open live positions only (7d)
+                Would-fire trades by ticker · open live positions only (7d)
               </div>
               <ul className="divide-y divide-border-subtle">
                 {byTicker.slice(0, 6).map((row) => (
                   <li key={row.ticker} className="flex flex-wrap items-center gap-3 py-2">
                     <span className="font-mono text-sm text-fg-primary">{row.ticker}</span>
                     <span className="ml-auto flex items-center gap-2 font-sans text-micro">
-                      <span className="text-accent-mint-strong">{row.would_fire} would-fire</span>
+                      <span className="text-accent-mint-strong">{row.would_fire_trades} trades</span>
                       <span className="text-fg-muted">·</span>
                       <span className="text-accent-gold-strong">{row.near_miss} near</span>
                       <span className="text-fg-muted">·</span>
-                      <span className="font-mono text-fg-primary">
-                        {fmtMoney(row.would_have_profit_usd)}
-                      </span>
+                      <span className="font-mono text-fg-faint">{row.would_fire} eval-rows</span>
                     </span>
                   </li>
                 ))}
@@ -297,11 +299,6 @@ export function PartialShadowCard() {
                       {r.partial_level_r !== null ? r.partial_level_r.toFixed(2) : "—"}R
                     </span>
                     <span className="font-sans text-fg-muted">{fmtMode(r.partials_mode)}</span>
-                    {r.profit_usd !== null && (
-                      <span className="font-mono text-fg-primary">
-                        {fmtMoney(r.profit_usd)}
-                      </span>
-                    )}
                     <span className="ml-auto font-mono text-fg-faint" title={r.created_at}>
                       {fmtAge(r.created_at)}
                     </span>
