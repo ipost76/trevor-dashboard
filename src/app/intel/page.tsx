@@ -52,5 +52,5 @@ export default async function IntelPage({ searchParams }: IntelPageProps) {
   const { tab } = await searchParams;
   const useNew = await isHubRedesignIntelOn();
   if (!useNew) return <IntelDisabled />;
-  return <IntelZoneView subtab={tab ?? "notes"} />;
+  return <IntelZoneView subtab={tab ?? "shadow"} />;
 }

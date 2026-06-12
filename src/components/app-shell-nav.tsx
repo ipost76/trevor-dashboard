@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BottomNav } from "@/components/navigation/bottom-nav";
 import { SidebarRail } from "@/components/navigation/sidebar-rail";
-import { ChatFAB } from "@/components/navigation/chat-fab";
+import { NotesWidget } from "@/components/intel/NotesWidget";
 import { ZoneSubTabs } from "@/components/navigation/zone-sub-tabs";
 import { Header } from "@/components/header";
 
@@ -15,13 +15,12 @@ import { Header } from "@/components/header";
  *  - Header (topbar — rebuilt in B2)
  *  - ZoneSubTabs (sub-tab strip; auto-hides when zone has no sub-tabs)
  *  - BottomNav (mobile only)
- *  - ChatFAB (everywhere except /chat itself)
+ *  - NotesWidget (global bottom-right notepad — replaced the chat FAB, W1-P1)
  *
  * /login bypasses chrome entirely (mirrors LegacyAppShell behavior).
  */
 export function AppShellNav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const onChat = pathname === "/chat";
 
   if (pathname === "/login") {
     return <>{children}</>;
@@ -45,7 +44,7 @@ export function AppShellNav({ children }: { children: React.ReactNode }) {
         </main>
         <BottomNav />
       </div>
-      {!onChat && <ChatFAB />}
+      <NotesWidget />
     </div>
   );
 }

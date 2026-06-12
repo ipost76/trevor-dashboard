@@ -1,13 +1,12 @@
 "use client";
 import * as React from "react";
-import { NotesSection } from "./notes-section";
 import { ShadowOverview } from "./shadow-overview";
 import { ShadowCompareSection } from "./shadow-compare-section";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
 
 /**
- * /intel zone view — Notes / Shadow / Lessons / Journal.
+ * /intel zone view — Shadow / Lessons / Journal / Promote.
  *
  * Wave D2 moved Lessons / Journal out to /docs; a 2026-05-19 follow-up brought
  * them back to /intel (Downloads stays on /docs as the sole surface, now with
@@ -21,7 +20,11 @@ import { JournalSection } from "@/components/docs/journal-section";
  * `TRACKED_HELPERS` list so the missing-tracked-helper CRIT never fires.
  * (The `dashboard/calibration` orphan route stays — it's still in the bot's
  * `PROBE_ROUTES`, so removing it needs a paired PROBE_ROUTES prune.)
- * Notes is the default tab.
+ *
+ * W1-P1 (2026-06-12): the NOTES sub-tab was removed; the notepad relocated
+ * to the global bottom-right `<NotesWidget>` (replacing the old chat FAB,
+ * same `trevor-hub-notes` localStorage). `notes-section.tsx` is left on disk
+ * (no longer imported) for a later cleanup prompt. Shadow is now the default.
  *
  * Wave D4 (2026-05-27): SHADOW sub-tab swapped from the long-scroll
  * `ShadowSection` to the compact `ShadowOverview` (Active/Dormant tabs +
@@ -43,8 +46,7 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
       return <LessonsSection />;
     case "journal":
       return <JournalSection />;
-    case "notes":
     default:
-      return <NotesSection />;
+      return <ShadowOverview />;
   }
 }
