@@ -2,25 +2,36 @@
 import * as React from "react";
 import {
   Card,
-  CardHeader,
-  CardTitle,
-  Pill,
   MetricTile,
+  Pill,
   EmptyState,
   Skeleton,
   CollapsibleSection,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, HelpCircle, MinusCircle, CheckCircle2 } from "lucide-react";
+import {
+  TrendingUp,
+  TrendingDown,
+  HelpCircle,
+  MinusCircle,
+  CheckCircle2,
+  ChevronDown,
+} from "lucide-react";
 
 // S3-P07 — Signal-Overlay Shadow Comparison panel (Intel→Promote).
 //
 // READ-ONLY go/no-go read for promoting Stage-2/3 shadow overlays to live.
-// One card per overlay: sample size, would-have-helped metric, estimated
-// P&L delta vs actual, and a promote-readiness verdict. Underperformers are
-// flagged loudly; overlays with too few samples honestly show "needs more
-// data" (never a fabricated number); overlay #6 (S3-P06, built in parallel)
-// shows "not reporting" until its shadow table lands.
+// One COMPACT, tap-to-expand card per overlay: verdict + gating reason +
+// glance metrics first; full prose + metric breakdown + recent decisions on
+// tap. Underperformers are flagged loudly; overlays with too few resolved
+// divergent decisions honestly show "needs more data" (never a fabricated
+// number); overlay #6 (S3-P06) shows "metric wiring pending" until its
+// schema lands.
+//
+// W3-P1 (2026-06-12): display-only overhaul — tall prose blocks → compact
+// glance-readable readiness cards. Data source, read route, verdict
+// thresholds and bucket math are UNCHANGED (all computed in
+// query_shadow_compare.py; this component only renders what it returns).
 //
 // Data via /api/shadow/compare only (no browser storage). Matches the repo's
 // data-fetching convention — raw fetch + setInterval; the dashboard has no
@@ -77,33 +88,51 @@ interface CompareResponse {
 }
 
 // ── readiness presentation ───────────────────────────────────────────────────
+// Compact buckets: short pill label + bucket-colored left edge + gating-reason
+// text color. Pill labels mirror the header SummaryLegend (Candidate /
+// Underperforms / Needs data / Not reporting).
 const READINESS: Record<
   Readiness,
-  { label: string; pill: React.ComponentProps<typeof Pill>; glow: React.ComponentProps<typeof Card>["glow"]; Icon: typeof CheckCircle2 }
+  {
+    label: string;
+    pill: React.ComponentProps<typeof Pill>;
+    Icon: typeof CheckCircle2;
+    border: string;
+    reasonText: string;
+    noteText: string;
+  }
 > = {
   candidate: {
-    label: "Beats baseline — candidate",
+    label: "Candidate",
     pill: { intent: "active" },
-    glow: "green",
     Icon: CheckCircle2,
+    border: "border-l-accent-mint",
+    reasonText: "text-accent-mint",
+    noteText: "text-accent-mint",
   },
   underperforms: {
-    label: "Underperforms baseline",
+    label: "Underperforms",
     pill: { intent: "error" },
-    glow: "red",
     Icon: TrendingDown,
+    border: "border-l-accent-red",
+    reasonText: "text-accent-red",
+    noteText: "text-accent-red",
   },
   insufficient_data: {
-    label: "Needs more data",
+    label: "Needs data",
     pill: { intent: "warn" },
-    glow: "none",
     Icon: HelpCircle,
+    border: "border-l-accent-gold",
+    reasonText: "text-accent-gold",
+    noteText: "text-fg-muted",
   },
   not_reporting: {
-    label: "Not reporting yet",
+    label: "Not reporting",
     pill: { tone: "neutral" },
-    glow: "none",
     Icon: MinusCircle,
+    border: "border-l-border-subtle",
+    reasonText: "text-fg-muted",
+    noteText: "text-fg-muted",
   },
 };
 
@@ -127,6 +156,41 @@ function fmtAge(iso: string | null): string {
 function fmtDelta(v: number, unit: "R" | null): string {
   const sign = v > 0 ? "+" : v < 0 ? "−" : "";
   return `${sign}${Math.abs(v).toFixed(2)}${unit ?? ""}`;
+}
+
+// One-line gating reason — derived from STRUCTURED fields only (no prose
+// re-parse, no fabrication). The full readiness_note prose still renders
+// verbatim in the expanded detail. Returns null for candidate/underperforms
+// (the verdict pill carries those).
+function gatingReason(o: Overlay, minSamples: number): string | null {
+  if (o.readiness === "not_reporting") return "Not reporting yet";
+  if (o.readiness === "candidate" || o.readiness === "underperforms") return null;
+  // insufficient_data ↓
+  // S3-P06 schema-pending probe: the backend flags it explicitly. Keying on the
+  // authoritative note self-corrects — once the metric is wired the note
+  // changes and this special-case stops firing, falling to the logic below.
+  if (/metric wiring pending/i.test(o.readiness_note)) return "Metric wiring pending";
+  // Linkage gap: divergence well past threshold but no derivable outcome metric.
+  if (o.helped_pct === null && o.divergent_resolved >= minSamples) {
+    return "No outcome metric derivable yet";
+  }
+  // Threshold countdown.
+  if (o.divergent_resolved < minSamples) {
+    const need = minSamples - o.divergent_resolved;
+    return `Needs ${need.toLocaleString()} more divergent decision${need === 1 ? "" : "s"}`;
+  }
+  return "Verdict pending";
+}
+
+// Inline est-P&L-delta for the glance row. Honest: null → muted "n/a", never a
+// fabricated number.
+function GlanceDelta({ overlay }: { overlay: Overlay }) {
+  if (overlay.est_pnl_delta === null) {
+    return <span className="text-fg-muted">Δ n/a</span>;
+  }
+  const d = overlay.est_pnl_delta;
+  const tone = d > 0 ? "text-accent-mint" : d < 0 ? "text-accent-red" : "text-fg-muted";
+  return <span className={tone}>Δ {fmtDelta(d, overlay.delta_unit)}</span>;
 }
 
 function DeltaTile({ overlay }: { overlay: Overlay }) {
@@ -164,7 +228,7 @@ function HelpedTile({ overlay }: { overlay: Overlay }) {
       <MetricTile
         label="Would-have-helped"
         value="—"
-        sub={n > 0 ? `${n} divergent` : "no divergent decisions"}
+        sub={n > 0 ? `${n.toLocaleString()} divergent` : "no divergent decisions"}
         tone="neutral"
         size="sm"
       />
@@ -175,7 +239,7 @@ function HelpedTile({ overlay }: { overlay: Overlay }) {
     <MetricTile
       label={isHitRate ? "Signal hit-rate" : "Would-have-helped"}
       value={`${h.toFixed(0)}%`}
-      sub={`of ${n} ${isHitRate ? "resolved" : "divergent"}`}
+      sub={`of ${n.toLocaleString()} ${isHitRate ? "resolved" : "divergent"}`}
       tone={tone}
       size="sm"
     />
@@ -229,72 +293,123 @@ function RecentList({ rows }: { rows: RecentRow[] }) {
   );
 }
 
-function OverlayCard({ overlay }: { overlay: Overlay }) {
+// ── compact, tap-to-expand readiness card ────────────────────────────────────
+function OverlayCard({
+  overlay,
+  minSamples,
+}: {
+  overlay: Overlay;
+  minSamples: number;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
   const meta = READINESS[overlay.readiness];
   const { Icon } = meta;
+  const reason = gatingReason(overlay, minSamples);
+
   return (
-    <Card glow={meta.glow} padding="sm" className="flex flex-col gap-3">
-      <CardHeader className="mb-0 items-start">
-        <div className="flex flex-col gap-1">
-          <CardTitle className="text-body font-semibold text-fg-primary">
-            {overlay.display}
-          </CardTitle>
-          <div className="flex items-center gap-2 text-micro text-fg-muted">
-            <span className="font-mono text-accent-cyan">{overlay.stage}</span>
-            <span className="text-fg-faint">·</span>
-            <span className="uppercase tracking-wide">{overlay.function}</span>
+    <Card
+      padding="sm"
+      className={cn("flex flex-col border-l-2", meta.border)}
+    >
+      {/* ── collapsed glance (the toggle) ── */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full flex-col gap-1.5 text-left"
+      >
+        {/* Line 1 — lead + verdict pill + chevron */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate text-body font-semibold text-fg-primary">
+              {overlay.display}
+            </span>
+            <span className="flex items-center gap-1.5 text-micro text-fg-muted">
+              <span className="font-mono text-accent-cyan">{overlay.stage}</span>
+              <span className="text-fg-faint">·</span>
+              <span className="uppercase tracking-wide">{overlay.function}</span>
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Pill {...meta.pill} size="sm">
+              <span className="inline-flex items-center gap-1">
+                <Icon className="h-3 w-3" />
+                {meta.label}
+              </span>
+            </Pill>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 text-fg-muted transition-transform",
+                expanded && "rotate-180",
+              )}
+            />
           </div>
         </div>
-        <Pill {...meta.pill} size="sm">
-          <span className="inline-flex items-center gap-1">
-            <Icon className="h-3 w-3" />
-            {meta.label}
+
+        {/* Line 2 — glance metrics */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-caption tabular-nums text-fg-muted">
+          <span>
+            <span className="text-fg-primary">
+              {overlay.decisions_total.toLocaleString()}
+            </span>{" "}
+            dec
           </span>
-        </Pill>
-      </CardHeader>
+          <span className="text-fg-faint">·</span>
+          <span>
+            <span className="text-fg-primary">
+              {overlay.divergent.toLocaleString()}
+            </span>{" "}
+            div
+          </span>
+          <span className="text-fg-faint">·</span>
+          <GlanceDelta overlay={overlay} />
+        </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <MetricTile
-          label="Decisions"
-          value={overlay.decisions_total.toLocaleString()}
-          sub={`${overlay.decisions_7d} in 7d`}
-          tone="neutral"
-          size="sm"
-        />
-        <HelpedTile overlay={overlay} />
-        <DeltaTile overlay={overlay} />
-      </div>
+        {/* Line 3 — gating reason (left) + last write (right) */}
+        <div className="flex items-baseline justify-between gap-2">
+          {reason ? (
+            <span className={cn("text-caption", meta.reasonText)}>{reason}</span>
+          ) : (
+            <span />
+          )}
+          <span className="shrink-0 text-micro text-fg-faint">
+            {overlay.latest_write ? `last write ${fmtAge(overlay.latest_write)}` : ""}
+          </span>
+        </div>
+      </button>
 
-      <p
-        className={cn(
-          "text-caption",
-          overlay.readiness === "underperforms"
-            ? "text-accent-red"
-            : overlay.readiness === "candidate"
-              ? "text-accent-green"
-              : "text-fg-muted",
-        )}
-      >
-        {overlay.readiness_note}
-      </p>
+      {/* ── expanded detail ── */}
+      {expanded && (
+        <div className="mt-3 flex flex-col gap-3 border-t border-border-subtle pt-3">
+          <p className={cn("text-caption leading-relaxed", meta.noteText)}>
+            {overlay.readiness_note}
+          </p>
 
-      {overlay.error && (
-        <p className="text-micro text-accent-amber">⚠ {overlay.error}</p>
-      )}
+          <div className="grid grid-cols-3 gap-2">
+            <MetricTile
+              label="Decisions"
+              value={overlay.decisions_total.toLocaleString()}
+              sub={`${overlay.decisions_7d.toLocaleString()} in 7d`}
+              tone="neutral"
+              size="sm"
+            />
+            <HelpedTile overlay={overlay} />
+            <DeltaTile overlay={overlay} />
+          </div>
 
-      <CollapsibleSection
-        title={`Recent decisions (${overlay.recent.length})`}
-        defaultOpen={false}
-      >
-        <RecentList rows={overlay.recent} />
-        <p className="border-t border-border-subtle px-3 py-2 text-micro leading-relaxed text-fg-faint">
-          {overlay.metric_basis}
-        </p>
-      </CollapsibleSection>
+          {overlay.error && (
+            <p className="text-micro text-accent-amber">⚠ {overlay.error}</p>
+          )}
 
-      {overlay.latest_write && (
-        <div className="text-micro text-fg-faint">
-          last write {fmtAge(overlay.latest_write)}
+          <CollapsibleSection
+            title={`Recent decisions (${overlay.recent.length})`}
+            defaultOpen={false}
+          >
+            <RecentList rows={overlay.recent} />
+            <p className="border-t border-border-subtle px-3 py-2 text-micro leading-relaxed text-fg-faint">
+              {overlay.metric_basis}
+            </p>
+          </CollapsibleSection>
         </div>
       )}
     </Card>
@@ -351,9 +466,9 @@ export function ShadowCompareSection() {
     return (
       <div className="space-y-4 p-4 md:p-6 lg:px-8">
         <Skeleton className="h-6 w-64" />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-56 w-full" />
+            <Skeleton key={i} className="h-24 w-full" />
           ))}
         </div>
       </div>
@@ -380,27 +495,24 @@ export function ShadowCompareSection() {
     );
   }
 
+  const minSamples = data?.min_samples ?? 20;
+
   return (
-    <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
-      <div className="space-y-2">
-        <div className="flex items-baseline justify-between gap-2">
+    <div className="space-y-4 p-4 md:p-6 lg:px-8 animate-fade-in">
+      {/* compact header band: title + count pills on one row, threshold caption below */}
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <h2 className="text-h3 text-fg-primary">Promote Readiness</h2>
-          <span className="text-micro text-fg-muted">
-            ≥{data?.min_samples ?? 20} divergent decisions for a verdict
-          </span>
+          {data?.summary && <SummaryLegend summary={data.summary} />}
         </div>
-        <p className="max-w-2xl text-caption text-fg-muted">
-          Would-be-vs-actual for every Stage-2/3 shadow overlay — the go/no-go
-          read for promoting a shadow to live. Metrics stay blank until an
-          overlay has enough resolved divergent decisions; no number is shown
-          as conclusive below threshold.
+        <p className="text-micro text-fg-muted">
+          ≥{minSamples} divergent decisions for a verdict · tap a card for detail
         </p>
-        {data?.summary && <SummaryLegend summary={data.summary} />}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {overlays.map((o) => (
-          <OverlayCard key={o.key} overlay={o} />
+          <OverlayCard key={o.key} overlay={o} minSamples={minSamples} />
         ))}
       </div>
     </div>
