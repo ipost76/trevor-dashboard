@@ -35,11 +35,24 @@ interface RealizedWindows {
   all: number;
 }
 
+// WA-P1 (2026-06-12): per-window realized % / start-of-window base. A window
+// whose start-of-window equity base is missing or ≤floor is `null` (UI renders
+// "—") rather than a garbage number — so these are nullable, unlike `realized`.
+interface NullableWindows {
+  today: number | null;
+  yesterday: number | null;
+  week: number | null;
+  month: number | null;
+  all: number | null;
+}
+
 interface AutoStateResponse {
   // realized-only model
   equity_usd: number;
   realized: RealizedWindows;
-  realized_pct: RealizedWindows;
+  realized_pct: NullableWindows;
+  // WA-P1: realized-basis account equity at each window's START (the % denominator).
+  realized_base: NullableWindows;
   realized_count: { today: number; yesterday: number; week: number; month: number; all: number };
   realized_unknown_count: number;
   open_exposure_usd: number;
@@ -64,11 +77,20 @@ interface AutoStateResponse {
 }
 
 const ZERO_WINDOWS: RealizedWindows = { today: 0, yesterday: 0, week: 0, month: 0, all: 0 };
+// WA-P1: pct/base default to null (no data → UI shows "—"), never a misleading 0.
+const NULL_WINDOWS: NullableWindows = {
+  today: null,
+  yesterday: null,
+  week: null,
+  month: null,
+  all: null,
+};
 
 const FALLBACK: AutoStateResponse = {
   equity_usd: 0,
   realized: { ...ZERO_WINDOWS },
-  realized_pct: { ...ZERO_WINDOWS },
+  realized_pct: { ...NULL_WINDOWS },
+  realized_base: { ...NULL_WINDOWS },
   realized_count: { today: 0, yesterday: 0, week: 0, month: 0, all: 0 },
   realized_unknown_count: 0,
   open_exposure_usd: 0,
@@ -253,20 +275,14 @@ export async function GET() {
     const available = equity.value !== null;
     const realHlEquity = equity.value ?? 0;
 
-    // EQT-A3: realized_pct is "% of equity" — rebase onto the real-HL equity so
-    // the headline % references the SAME number shown as the account value (not
-    // the discarded Python base). Collapses to 0 when equity is unavailable/≤0.
-    const pct = (v: number) => Math.round((v / realHlEquity) * 100 * 1e4) / 1e4;
-    const realized_pct =
-      available && realHlEquity > 0
-        ? ({
-            today: pct(value.realized.today),
-            yesterday: pct(value.realized.yesterday),
-            week: pct(value.realized.week),
-            month: pct(value.realized.month),
-            all: pct(value.realized.all),
-          } as RealizedWindows)
-        : { ...ZERO_WINDOWS };
+    // WA-P1 (2026-06-12): realized_pct is NO LONGER rebased onto the current
+    // real-HL equity. Dividing EVERY window by the *current* account value made
+    // each window read like a % of today's equity (ALL ≈ −133%, impossible). The
+    // Python now computes each window's % against the account's equity at THAT
+    // window's START (equity_snapshots realized basis) — a true return over the
+    // window, HL-independent. We pass `realized_pct` + `realized_base` through
+    // from `...value` unchanged. `equity_usd`/`equity` below still mirror real HL
+    // (the live account-value line is correct as-is — EQT-A3 untouched).
 
     return NextResponse.json({
       ...value,
@@ -288,7 +304,7 @@ export async function GET() {
       open_count: equity.openCount ?? value.open_count,
       open_positions_count: equity.openCount ?? value.open_positions_count,
       open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
-      realized_pct,
+      // realized_pct + realized_base pass through from `...value` (Python, WA-P1).
       equity_available: available,
       equity_stale: equity.stale,
       equity_source: equity.source,

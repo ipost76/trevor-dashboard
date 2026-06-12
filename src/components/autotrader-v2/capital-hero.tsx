@@ -20,10 +20,21 @@ interface RealizedWindows {
   all: number;
 }
 
+// WA-P1 (2026-06-12): each window's % is computed against the account equity at
+// that window's START. A window whose start-of-window base is missing/≤floor is
+// `null` → rendered "—", never a garbage number.
+interface NullableWindows {
+  today: number | null;
+  yesterday: number | null;
+  week: number | null;
+  month: number | null;
+  all: number | null;
+}
+
 interface AutoState {
   equity_usd: number;
   realized: RealizedWindows;
-  realized_pct: RealizedWindows;
+  realized_pct: NullableWindows;
   realized_count: RealizedWindows;
   realized_unknown_count: number;
   open_exposure_usd: number;
@@ -145,7 +156,11 @@ export function CapitalHero() {
                 decimals={2}
                 showSign
               />
-              {equity > 0 && (
+              {/* WA-P1: % of the account's equity at THIS window's start (a true
+                  return over the window). Snapshot-based, so it shows even when
+                  live equity is momentarily unreachable; a window with no usable
+                  start-of-window base renders "—", never a garbage number. */}
+              {headlinePct != null ? (
                 <MoneyText
                   value={headlinePct}
                   unit="%"
@@ -153,6 +168,13 @@ export function CapitalHero() {
                   decimals={2}
                   showSign
                 />
+              ) : (
+                <span
+                  className="font-mono text-body tabular-nums text-fg-muted"
+                  title="no start-of-window equity snapshot for this window"
+                >
+                  —
+                </span>
               )}
             </div>
             <span className="font-sans text-micro text-fg-faint">

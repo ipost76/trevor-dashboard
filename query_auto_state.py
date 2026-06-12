@@ -41,10 +41,14 @@ Notes:
 - READ-ONLY (`file:...?mode=ro`) for SQL paths; HL fetch is a network call.
 - `per_ticker_thresholds_enabled` is read at runtime from
   /home/trevor/trevor/ticker_thresholds.py — no hardcoded drift.
-- `realized_pct[w]` base = current live equity (`equity_usd`); collapses to 0
-  when HL is unreachable. This is the only honest base available — the Hub
-  stores no historical equity snapshots, so a true per-window "% of equity at
-  window start" is not computable. (Future infra: daily equity snapshot.)
+- `realized_pct[w]` base = the account's realized-basis equity at the START of
+  window `w` (WA-P1 2026-06-12), read from the `equity_snapshots` series
+  (`realized_equity`, de-floated per EQT-W1; COALESCE to legacy `equity` for
+  pre-EQT-W1 rows). Each window's % is therefore a true return over its own span
+  — NOT every window divided by the current live equity (the old bug that
+  produced impossible figures like ALL = −133%). HL-INDEPENDENT (the base is the
+  snapshot series, not the live HL fetch). A missing/≤floor base → None → the UI
+  renders "—". `realized_base[w]` exposes the base used, per window.
 """
 from __future__ import annotations
 
@@ -59,6 +63,11 @@ from zoneinfo import ZoneInfo
 DB = "/home/trevor/trevor/trevor.db"
 ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
+
+# WA-P1 (PCT-D2): floor below which a start-of-window equity base is unusable —
+# the window % renders "—" rather than dividing by a near-zero base (no garbage %,
+# never a divide-by-zero).
+EQUITY_BASE_FLOOR = 1.0
 
 
 def _fetch_hl() -> dict | None:
@@ -202,6 +211,45 @@ def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
+def get_equity_at(conn: sqlite3.Connection, window_start_ts: str | None) -> float | None:
+    """Realized-basis account equity at the START of a window (WA-P1 PCT-D1/D2).
+
+    Returns the most recent `equity_snapshots` realized-basis value with
+    `ts <= window_start_ts`. Realized basis = `realized_equity` (de-floated per
+    EQT-W1); for pre-EQT-W1 rows where `realized_equity` is NULL we COALESCE to
+    the legacy `equity` (at those early points float≈0, so MTM≈realized — the
+    honest "start" base).
+
+    Fallback (PCT-D2): if no snapshot exists at/before the window start (the
+    window opens before the series begins, e.g. 1M when history is <30d old),
+    use the NEAREST snapshot AFTER it — the earliest available equity. Returns
+    None only when the table is empty or `window_start_ts` is None; the caller
+    renders "—" rather than dividing by a missing base.
+
+    Read-only: reuses the caller's `mode=ro` connection, parameterized query,
+    error-handled. NEVER writes.
+    """
+    if window_start_ts is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(realized_equity, equity) "
+            "FROM equity_snapshots WHERE ts <= ? ORDER BY ts DESC LIMIT 1",
+            (window_start_ts,),
+        ).fetchone()
+        if row is None:  # window opens before the series — nearest snapshot AFTER
+            row = conn.execute(
+                "SELECT COALESCE(realized_equity, equity) "
+                "FROM equity_snapshots WHERE ts > ? ORDER BY ts ASC LIMIT 1",
+                (window_start_ts,),
+            ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return float(row[0])
+    except Exception:
+        return None
+
+
 def _per_ticker_enabled() -> bool:
     """Runtime import — no hardcoded drift. Matches query_auto_per_ticker_thresholds.py."""
     try:
@@ -217,7 +265,8 @@ def main() -> int:
         # --- realized-only P&L model (RM-PNL P01) ---
         "equity_usd": 0.0,
         "realized": {"today": 0.0, "yesterday": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
-        "realized_pct": {"today": 0.0, "yesterday": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
+        "realized_pct": {"today": None, "yesterday": None, "week": None, "month": None, "all": None},
+        "realized_base": {"today": None, "yesterday": None, "week": None, "month": None, "all": None},
         "realized_count": {"today": 0, "yesterday": 0, "week": 0, "month": 0, "all": 0},
         "realized_unknown_count": 0,
         "open_exposure_usd": 0.0,
@@ -277,7 +326,28 @@ def main() -> int:
                 "SELECT COUNT(*) AS n FROM auto_trades WHERE status='closed'"
             ).fetchone()
 
-        now_utc = datetime.now(UTC)
+            # WA-P1 (PCT-D1/D2): start-of-window realized-basis equity per window,
+            # read inside the SAME mode=ro connection. Each window's % divides its
+            # realized P&L by the account equity at that window's START (not the
+            # current live equity), so it's a true return over the window's span.
+            # ALL anchors to the earliest snapshot ts (account's earliest known
+            # equity). None for any window whose base is missing → UI renders "—".
+            now_utc = datetime.now(UTC)
+            starts = _et_window_starts(now_utc)
+            earliest_ts = conn.execute(
+                "SELECT MIN(ts) FROM equity_snapshots"
+            ).fetchone()[0]
+            base_starts = {
+                "today": starts["today"],
+                "yesterday": starts["yesterday"],
+                "week": starts["week"],
+                "month": starts["month"],
+                "all": earliest_ts,
+            }
+            realized_base = {
+                k: get_equity_at(conn, ts) for k, ts in base_starts.items()
+            }
+
         win = compute_windows(
             ((r["closed_at"], r["pnl_usd"]) for r in closed_rows), now_utc
         )
@@ -294,19 +364,25 @@ def main() -> int:
             equity = realized["all"]
             unrealized = 0.0
 
-        # realized_pct[w] = realized[w] / current live equity * 100.
-        # Base = current equity (the only honest base — no equity-snapshot
-        # history exists). Collapses to 0 when equity <= 0 (HL unreachable).
-        realized_pct = {
-            k: (round((v / equity) * 100.0, 4) if equity > 0 else 0.0)
-            for k, v in realized.items()
-        }
+        # WA-P1 (PCT-D1/D2): realized_pct[w] = realized[w] / start-of-window
+        # realized-basis equity * 100 — HL-INDEPENDENT (the base is the
+        # equity_snapshots series, not the live HL equity). A missing or ≤floor
+        # base yields None (UI renders "—"), never a divide-by-zero or garbage %.
+        realized_pct = {}
+        for k, v in realized.items():
+            base = realized_base.get(k)
+            realized_pct[k] = (
+                round((v / base) * 100.0, 4)
+                if base is not None and base > EQUITY_BASE_FLOOR
+                else None
+            )
 
         open_count = int(open_row["n"] or 0)
         out.update({
             "equity_usd": equity,
             "realized": realized,
             "realized_pct": realized_pct,
+            "realized_base": realized_base,
             "realized_count": win["realized_count"],
             "realized_unknown_count": win["realized_unknown_count"],
             "open_exposure_usd": round(float(open_row["notional"] or 0.0), 4),
@@ -317,7 +393,8 @@ def main() -> int:
             "live_capital_usd": 0.0,        # vestigial; collapses Hub "of $X cap" line
             "equity": equity,              # alias of equity_usd
             "pnl_today_usd": realized["today"],          # now ET-calendar (was rolling-24h)
-            "pnl_today_pct": realized_pct["today"],
+            # legacy/dead field (no consumer): keep numeric — None base → 0.0
+            "pnl_today_pct": realized_pct["today"] if realized_pct["today"] is not None else 0.0,
             "trades_today": win["realized_count"]["today"],
             "trades_total": int(total_count_row["n"] or 0),
             "open_positions_count": open_count,
