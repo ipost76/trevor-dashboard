@@ -12,6 +12,7 @@ import {
   BottomSheet,
 } from "@/components/ui";
 import { BookOpen, Sparkles, Lock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface JournalTrade {
   trade_uri: string;
@@ -52,6 +53,114 @@ interface NarrativeResponse {
   error?: string;
   tokens_used_today?: number;
   tokens_cap?: number;
+}
+
+// ---- display helpers (presentation only; underlying data untouched) ----
+
+const ACRONYMS = new Set([
+  "rsi",
+  "oi",
+  "cvd",
+  "atr",
+  "ema",
+  "sma",
+  "macd",
+  "vwap",
+  "hmm",
+  "pnl",
+  "roi",
+]);
+
+function prettify(s: string): string {
+  const tokens = s.replace(/[()]/g, " ").split(/[_\s]+/).filter(Boolean);
+  if (tokens.length === 0) return s;
+  return tokens
+    .map((t, i) =>
+      ACRONYMS.has(t.toLowerCase())
+        ? t.toUpperCase()
+        : i === 0
+          ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()
+          : t.toLowerCase(),
+    )
+    .join(" ");
+}
+
+/**
+ * Map a raw bot/DB exit-reason code to a terse human label. The exact raw code
+ * is always preserved elsewhere (row secondary line + detail sheet), so an
+ * unknown/new code never loses precision — it falls back to a gentle prettify
+ * and the feed never breaks.
+ */
+function humanizeExitReason(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  const code = raw.trim();
+  if (!code || code.toLowerCase() === "none") return "—";
+  const lc = code.toLowerCase();
+  let m: RegExpMatchArray | null;
+  if (/^momentum_exit_\d+$/.test(lc)) return "Momentum exit";
+  if ((m = lc.match(/^stale_(\d+)min$/))) return `Stale (${m[1]}m)`;
+  if ((m = lc.match(/^timeout_(\d+)min$/))) return `Timeout (${m[1]}m)`;
+  if ((m = lc.match(/^hard_stop_(\d+)pct$/))) return `Hard stop (${m[1]}%)`;
+  if ((m = lc.match(/^tech_signals?\((.+)\)$/))) return `Tech signal · ${prettify(m[1])}`;
+  if (lc === "external_close") return "Closed externally";
+  if (lc === "stop_hit") return "Stop hit";
+  if (lc === "manual_orphan_close") return "Manual orphan close";
+  return prettify(code);
+}
+
+/**
+ * SQLite naive "YYYY-MM-DD HH:MM:SS" stamps are UTC — append Z so the browser
+ * doesn't read them as local time (house standard: active-position-card,
+ * shadow-table-card).
+ */
+function parseUTC(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const t = s.includes("T") ? s : s.replace(" ", "T");
+  const withZ = /[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t : `${t}Z`;
+  const d = new Date(withZ);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Tight time-of-day, e.g. "11:54p" (24h locales render "23:54"). */
+function fmtTime(d: Date): string {
+  return d
+    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    .replace(/\s?([AaPp])\.?[Mm]\.?$/, (_, ap) => ap.toLowerCase());
+}
+
+/** Day-divider label: Today / Yesterday / "Jun 9" / "Jun 9, 2025". */
+function fmtDay(d: Date): string {
+  const startOfDay = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const now = new Date();
+  const diff = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(
+    undefined,
+    d.getFullYear() === now.getFullYear()
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" },
+  );
+}
+
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function DirectionTag({ direction }: { direction: "LONG" | "SHORT" }) {
+  const isLong = direction === "LONG";
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-bold uppercase tracking-wide",
+        isLong ? "bg-accent-green/10 text-accent-green" : "bg-accent-red/10 text-accent-red",
+      )}
+    >
+      <span aria-hidden>{isLong ? "▲" : "▼"}</span>
+      {direction}
+    </span>
+  );
 }
 
 export function JournalSection() {
@@ -128,6 +237,65 @@ export function JournalSection() {
     }
   };
 
+  const renderFeed = (trades: ReadonlyArray<JournalTrade>) => {
+    const items: React.ReactNode[] = [];
+    let lastDay = "";
+    for (const t of trades) {
+      const closed = parseUTC(t.closed_at);
+      const dk = closed ? dayKey(closed) : "no-date";
+      if (dk !== lastDay) {
+        lastDay = dk;
+        items.push(
+          <li key={`day-${dk}`} className="px-2 pb-1 pt-3 first:pt-1">
+            <span className="text-micro font-semibold uppercase tracking-wider text-fg-faint">
+              {closed ? fmtDay(closed) : "Unknown date"}
+            </span>
+          </li>,
+        );
+      }
+      items.push(
+        <li key={t.trade_uri}>
+          <button
+            type="button"
+            onClick={() => openSheet(t)}
+            className="tap-target group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors duration-fast hover:bg-bg-elevated/40"
+          >
+            {/* line 1 — glance: direction · ticker · humanized reason · P&L */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <DirectionTag direction={t.direction} />
+                <span className="font-bold text-fg-primary">{t.ticker}</span>
+                <span className="truncate text-caption text-fg-muted">
+                  {humanizeExitReason(t.exit_reason)}
+                </span>
+              </div>
+              <MoneyText value={t.pnl_pct} unit="%" size="lg" showSign />
+            </div>
+            {/* line 2 — secondary: tight time · raw code · demoted narrative mark */}
+            <div className="flex items-center gap-1.5 text-micro text-fg-faint">
+              <span className="font-mono tabular-nums">{closed ? fmtTime(closed) : "—"}</span>
+              {t.exit_reason && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate font-mono">{t.exit_reason}</span>
+                </>
+              )}
+              {t.has_narrative && (
+                <span
+                  className="ml-auto shrink-0 text-accent-cyan-soft-strong"
+                  title="Journal entry written"
+                >
+                  📝
+                </span>
+              )}
+            </div>
+          </button>
+        </li>,
+      );
+    }
+    return <ul className="divide-y divide-border-subtle">{items}</ul>;
+  };
+
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
       <Card padding="md">
@@ -160,59 +328,7 @@ export function JournalSection() {
           />
         )}
 
-        {!loading && data && data.trades.length > 0 && (
-          <ul className="divide-y divide-border-subtle">
-            {data.trades.map((t) => (
-              <li key={t.trade_uri}>
-                <button
-                  type="button"
-                  onClick={() => openSheet(t)}
-                  className="tap-target group flex w-full items-center justify-between gap-3 rounded-md px-2 py-2.5 text-left text-caption transition-colors duration-fast hover:bg-bg-elevated/40"
-                >
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="font-bold">
-                      {t.ticker}{" "}
-                      <span
-                        className={
-                          t.direction === "LONG" ? "text-accent-green" : "text-accent-red"
-                        }
-                      >
-                        {t.direction}
-                      </span>
-                    </span>
-                    <span className="text-micro text-fg-muted">
-                      {new Date(t.closed_at).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                    {t.exit_reason && (
-                      <span className="text-micro text-fg-faint">· {t.exit_reason}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
-                    {t.has_narrative ? (
-                      <Pill
-                        tone="cyan"
-                        size="sm"
-                        className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
-                      >
-                        📝
-                      </Pill>
-                    ) : (
-                      <Pill tone="neutral" size="sm">
-                        —
-                      </Pill>
-                    )}
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        {!loading && data && data.trades.length > 0 && renderFeed(data.trades)}
       </Card>
 
       <BottomSheet
@@ -233,8 +349,15 @@ export function JournalSection() {
               <Pill tone="neutral" size="sm">
                 {openTrade.trade_uri}
               </Pill>
-              <span>closed {new Date(openTrade.closed_at).toLocaleString()}</span>
-              {openTrade.exit_reason && <span>· {openTrade.exit_reason}</span>}
+              <span>
+                closed {parseUTC(openTrade.closed_at)?.toLocaleString() ?? openTrade.closed_at}
+              </span>
+              {openTrade.exit_reason && (
+                <span>
+                  · {humanizeExitReason(openTrade.exit_reason)}
+                  <span className="ml-1 font-mono text-fg-faint">({openTrade.exit_reason})</span>
+                </span>
+              )}
             </div>
 
             {!narrative && !generating && (
