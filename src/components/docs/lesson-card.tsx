@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
-import { Card, CardHeader, CardTitle, MetricTile, MoneyText, Pill } from "@/components/ui";
-import { CheckCircle2, AlertCircle, Repeat, Hourglass } from "lucide-react";
+import { Card, MetricTile, MoneyText, Pill } from "@/components/ui";
+import { CheckCircle2, AlertCircle, Repeat, Hourglass, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Category = "PRIORITIZE" | "AVOID" | "REGIME_DEPENDENT" | "ACTIVE_LEARNING";
@@ -9,40 +9,37 @@ type Category = "PRIORITIZE" | "AVOID" | "REGIME_DEPENDENT" | "ACTIVE_LEARNING";
 type CategoryIntent = "active" | "error" | "warn" | "meme";
 
 type CategoryMeta = {
-  label: string;
+  /** Verdict pill text (kept short for the glance row). */
+  shortLabel: string;
   pillIntent: CategoryIntent;
-  cardClass: "card-elevated" | "card-warn";
-  iconClass: string;
+  /** Colored left edge that reinforces the verdict at a glance. */
+  borderClass: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
 };
 
 const META: Record<Category, CategoryMeta> = {
   PRIORITIZE: {
-    label: "PRIORITIZE",
+    shortLabel: "PRIORITIZE",
     pillIntent: "active",
-    cardClass: "card-elevated",
-    iconClass: "text-accent-mint",
+    borderClass: "border-l-accent-mint",
     icon: CheckCircle2,
   },
   AVOID: {
-    label: "AVOID",
+    shortLabel: "AVOID",
     pillIntent: "error",
-    cardClass: "card-warn",
-    iconClass: "text-accent-red",
+    borderClass: "border-l-accent-red",
     icon: AlertCircle,
   },
   REGIME_DEPENDENT: {
-    label: "REGIME-DEPENDENT",
+    shortLabel: "REGIME",
     pillIntent: "warn",
-    cardClass: "card-elevated",
-    iconClass: "text-accent-gold",
+    borderClass: "border-l-accent-gold",
     icon: Repeat,
   },
   ACTIVE_LEARNING: {
-    label: "ACTIVE LEARNING",
+    shortLabel: "LEARNING",
     pillIntent: "meme",
-    cardClass: "card-elevated",
-    iconClass: "text-accent-plum",
+    borderClass: "border-l-accent-plum",
     icon: Hourglass,
   },
 };
@@ -79,78 +76,135 @@ export interface LessonCardData {
   note?: string | null;
 }
 
+/** MetricTile tone for the expanded win-rate tile. */
+function wrToneEnum(wr: number): "positive" | "neutral" | "negative" {
+  return wr >= 55 ? "positive" : wr >= 40 ? "neutral" : "negative";
+}
+
+/** Inline text color for the collapsed-row win rate. */
+function wrColorClass(wr: number): string {
+  return wr >= 55 ? "text-accent-mint" : wr >= 40 ? "text-fg-primary" : "text-accent-red";
+}
+
+function fmtPct(v: number): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+/**
+ * Compact, glance-readable cohort row. Collapsed: verdict pill + identity +
+ * inline win-rate & expectancy + trades + chevron. Tap expands to the full
+ * 4-metric breakdown + best/worst + cohort chips + conclusion/recommendation.
+ */
 export function LessonCard({ data }: { data: LessonCardData }) {
+  const [open, setOpen] = React.useState(false);
   const meta = META[data.category];
   const Icon = meta.icon;
+  const m = data.metric;
   const cohortChips = buildCohortChips(data.cohort);
-  const wrTone =
-    data.metric.win_rate_pct >= 55
-      ? "positive"
-      : data.metric.win_rate_pct >= 40
-        ? "neutral"
-        : "negative";
 
   return (
-    <Card padding="md" className={cn(meta.cardClass, "space-y-3")}>
-      <CardHeader>
-        <CardTitle>
-          <span className={cn("flex items-center gap-2", meta.iconClass)}>
-            <Icon size={14} />
-            {meta.label}
-          </span>
-        </CardTitle>
-        <Pill intent={meta.pillIntent} size="sm">
-          {data.confidence_level === "high"
-            ? "high conf"
-            : data.confidence_level === "medium"
-              ? "medium"
-              : "low"}
+    <Card padding="sm" className={cn("card-base border-l-2", meta.borderClass)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <Pill intent={meta.pillIntent} size="sm" className="shrink-0">
+          <Icon size={11} />
+          {meta.shortLabel}
         </Pill>
-      </CardHeader>
 
-      <h3 className="font-sans text-h3 font-semibold text-fg-primary">{data.title}</h3>
+        <span className="min-w-0 flex-1 truncate font-sans text-caption font-medium text-fg-primary">
+          {data.title}
+        </span>
 
-      {cohortChips.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {cohortChips.map((chip) => (
-            <span
-              key={chip}
-              className="rounded-pill border border-border-subtle bg-bg-elevated px-2 py-0.5 font-sans text-micro text-fg-muted"
-            >
-              {chip}
+        <span className="flex shrink-0 items-center gap-2 font-mono text-caption tabular-nums">
+          <span className={wrColorClass(m.win_rate_pct)}>{m.win_rate_pct.toFixed(0)}%</span>
+          <MoneyText value={m.expectancy_pct} unit="%" size="sm" decimals={2} showSign />
+        </span>
+
+        <span className="shrink-0 font-sans text-micro text-fg-muted">{m.trades}t</span>
+
+        <ChevronDown
+          size={14}
+          className={cn(
+            "shrink-0 text-fg-muted transition-transform duration-fast",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="space-y-3 pt-3">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <MetricTile label="Trades" value={String(m.trades)} size="sm" />
+            <MetricTile
+              label="Win Rate"
+              value={`${m.win_rate_pct.toFixed(1)}%`}
+              tone={wrToneEnum(m.win_rate_pct)}
+              size="sm"
+            />
+            <MetricTile
+              label="Avg P&L"
+              value={<MoneyText value={m.avg_pnl_pct} unit="%" size="sm" decimals={2} showSign />}
+              size="sm"
+            />
+            <MetricTile
+              label="Expectancy"
+              value={
+                <MoneyText value={m.expectancy_pct} unit="%" size="sm" decimals={2} showSign />
+              }
+              size="sm"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 font-sans text-micro text-fg-muted">
+            <span>
+              best <span className="font-mono text-accent-mint">{fmtPct(m.best_pct)}</span>
             </span>
-          ))}
-        </div>
-      )}
+            <span>
+              worst <span className="font-mono text-accent-red">{fmtPct(m.worst_pct)}</span>
+            </span>
+            {typeof m.avg_win_pct === "number" && (
+              <span>
+                avg win <span className="font-mono text-accent-mint">{fmtPct(m.avg_win_pct)}</span>
+              </span>
+            )}
+            {typeof m.avg_loss_pct === "number" && (
+              <span>
+                avg loss <span className="font-mono text-accent-red">{fmtPct(m.avg_loss_pct)}</span>
+              </span>
+            )}
+          </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricTile label="Trades" value={String(data.metric.trades)} size="sm" />
-        <MetricTile
-          label="Win Rate"
-          value={`${data.metric.win_rate_pct.toFixed(1)}%`}
-          tone={wrTone}
-          size="sm"
-        />
-        <MetricTile
-          label="Avg P&L"
-          value={<MoneyText value={data.metric.avg_pnl_pct} unit="%" size="sm" decimals={2} showSign />}
-          size="sm"
-        />
-        <MetricTile
-          label="Expectancy"
-          value={<MoneyText value={data.metric.expectancy_pct} unit="%" size="sm" decimals={2} showSign />}
-          size="sm"
-        />
-      </div>
+          <div className="font-sans text-micro text-fg-muted">
+            {data.confidence_level} confidence · sample {data.sample_size}
+          </div>
 
-      <div className="space-y-1 pt-1">
-        <div className="font-sans text-caption text-fg-primary">{data.conclusion}</div>
-        <div className="font-sans text-micro text-fg-muted">→ {data.recommendation}</div>
-      </div>
+          {cohortChips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {cohortChips.map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-pill border border-border-subtle bg-bg-elevated px-2 py-0.5 font-sans text-micro text-fg-muted"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+          )}
 
-      {data.note && (
-        <div className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 font-sans text-micro text-fg-muted">
-          {data.note}
+          <div className="space-y-1">
+            <div className="font-sans text-caption text-fg-primary">{data.conclusion}</div>
+            <div className="font-sans text-micro text-fg-muted">→ {data.recommendation}</div>
+          </div>
+
+          {data.note && (
+            <div className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 font-sans text-micro text-fg-muted">
+              {data.note}
+            </div>
+          )}
         </div>
       )}
     </Card>

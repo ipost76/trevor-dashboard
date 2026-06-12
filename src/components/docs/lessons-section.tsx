@@ -1,15 +1,6 @@
 "use client";
 import * as React from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  EmptyState,
-  Skeleton,
-  SegmentedToggle,
-  Pill,
-} from "@/components/ui";
-import type { SegmentedToggleOption } from "@/components/ui";
+import { Card, CardHeader, CardTitle, EmptyState, Skeleton, Pill, FilterChips } from "@/components/ui";
 import { Brain, Filter as FilterIcon } from "lucide-react";
 import { LessonCard, type LessonCardData } from "./lesson-card";
 
@@ -22,13 +13,24 @@ interface LessonsResponse {
 
 type LessonFilter = "all" | "PRIORITIZE" | "AVOID" | "REGIME_DEPENDENT" | "ACTIVE_LEARNING";
 
-const FILTER_OPTIONS: ReadonlyArray<SegmentedToggleOption<LessonFilter>> = [
-  { value: "all", label: "All" },
-  { value: "PRIORITIZE", label: "Prioritize" },
-  { value: "AVOID", label: "Avoid" },
-  { value: "REGIME_DEPENDENT", label: "Regime" },
-  { value: "ACTIVE_LEARNING", label: "Learning" },
-];
+// FilterChips speaks display strings; map them to/from the typed filter values.
+const FILTER_LABELS: ReadonlyArray<string> = ["All", "Prioritize", "Avoid", "Regime", "Learning"];
+
+const LABEL_TO_FILTER: Record<string, LessonFilter> = {
+  All: "all",
+  Prioritize: "PRIORITIZE",
+  Avoid: "AVOID",
+  Regime: "REGIME_DEPENDENT",
+  Learning: "ACTIVE_LEARNING",
+};
+
+const FILTER_TO_LABEL: Record<LessonFilter, string> = {
+  all: "All",
+  PRIORITIZE: "Prioritize",
+  AVOID: "Avoid",
+  REGIME_DEPENDENT: "Regime",
+  ACTIVE_LEARNING: "Learning",
+};
 
 export function LessonsSection() {
   const [data, setData] = React.useState<LessonsResponse | null>(null);
@@ -73,17 +75,16 @@ export function LessonsSection() {
 
   return (
     <div className="space-y-4 p-4 animate-fade-in md:space-y-6 md:p-6 lg:px-8">
-      <Card padding="md">
-        <CardHeader>
+      <Card padding="md" className="space-y-3">
+        <CardHeader className="mb-0">
           <CardTitle>
             <span className="flex items-center gap-2">
               <Brain size={14} />
               LESSONS
             </span>
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-1.5 font-sans text-micro text-fg-muted">
+          <div className="flex flex-wrap items-center justify-end gap-1.5 font-sans text-micro text-fg-muted">
             {data && <span>{data.total_closed_trades} closed trades</span>}
-            {data && <span className="text-fg-faint">·</span>}
             {data && (
               <Pill intent="active" size="sm">
                 {counts.PRIORITIZE} prioritize
@@ -100,30 +101,25 @@ export function LessonsSection() {
               </Pill>
             )}
             {data && (
-              <Pill
-                tone="violet"
-                size="sm"
-                className="bg-accent-plum/10 text-accent-plum-strong border-accent-plum/30"
-              >
+              <Pill intent="meme" size="sm">
                 {counts.ACTIVE_LEARNING} learning
               </Pill>
             )}
           </div>
         </CardHeader>
 
-        <SegmentedToggle<LessonFilter>
+        <FilterChips
           ariaLabel="Filter lessons"
-          options={FILTER_OPTIONS}
-          value={filter}
-          onChange={setFilter}
-          full
+          options={FILTER_LABELS}
+          selected={FILTER_TO_LABEL[filter]}
+          onChange={(label) => setFilter(LABEL_TO_FILTER[label] ?? "all")}
         />
       </Card>
 
       {loading && (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-40 w-full" />
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
       )}
@@ -145,7 +141,7 @@ export function LessonsSection() {
       )}
 
       {!loading && filteredCards.length > 0 && (
-        <ul className="space-y-3">
+        <ul className="space-y-2">
           {filteredCards.map((card) => (
             <li key={card.id}>
               <LessonCard data={card} />
