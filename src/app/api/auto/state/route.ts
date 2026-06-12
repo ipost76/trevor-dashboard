@@ -33,6 +33,8 @@ interface RealizedWindows {
   week: number;
   month: number;
   all: number;
+  // WA-P2: present only when the request carries a valid ?start&end custom range.
+  custom?: number;
 }
 
 // WA-P1 (2026-06-12): per-window realized % / start-of-window base. A window
@@ -44,6 +46,7 @@ interface NullableWindows {
   week: number | null;
   month: number | null;
   all: number | null;
+  custom?: number | null; // WA-P2
 }
 
 interface AutoStateResponse {
@@ -53,7 +56,7 @@ interface AutoStateResponse {
   realized_pct: NullableWindows;
   // WA-P1: realized-basis account equity at each window's START (the % denominator).
   realized_base: NullableWindows;
-  realized_count: { today: number; yesterday: number; week: number; month: number; all: number };
+  realized_count: { today: number; yesterday: number; week: number; month: number; all: number; custom?: number };
   realized_unknown_count: number;
   open_exposure_usd: number;
   unrealized_usd: number;
@@ -259,13 +262,36 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
   }
 }
 
-export async function GET() {
+// WA-P2 (2026-06-12): a calendar date-range picker can request an arbitrary span
+// via ?start=YYYY-MM-DD&end=YYYY-MM-DD. It rides this SAME route + helper: the two
+// dates are passed as argv to query_auto_state.py, which adds a `custom` window via
+// the SAME compute_windows + get_equity_at path (no new P&L/denominator math). The
+// presets are still always computed — `custom` is purely additive.
+//
+// Cache-key discipline: a custom request is keyed `auto-state:<start>:<end>` so its
+// payload NEVER pollutes or is served from the preset "auto-state" entry (and two
+// distinct ranges don't collide). Presets stay on the constant key. Shape (here)
+// is validated only — the Python re-validates and emits NO `custom` key on a bad
+// span, so a malformed range degrades to a clean preset-only response.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const start = url.searchParams.get("start");
+  const end = url.searchParams.get("end");
+  const custom =
+    start && end && DATE_RE.test(start) && DATE_RE.test(end)
+      ? { start, end }
+      : null;
+
   try {
     const [state, equity] = await Promise.all([
-      cache.swr("auto-state", async () => {
+      cache.swr(custom ? `auto-state:${custom.start}:${custom.end}` : "auto-state", async () => {
         // Python still supplies realized windows / counts / exposure / unrealized
-        // / flags. Its own equity is DISCARDED below (see EQT-A3).
-        const raw = await runPython("query_auto_state.py", [], { timeout: 10_000 });
+        // / flags. Its own equity is DISCARDED below (see EQT-A3). When `custom` is
+        // set, the two dates ride through as argv and add a `custom` window.
+        const args = custom ? [custom.start, custom.end] : [];
+        const raw = await runPython("query_auto_state.py", args, { timeout: 10_000 });
         return safeJsonParse<AutoStateResponse>(raw, FALLBACK);
       }),
       resolveRealHlEquity(),

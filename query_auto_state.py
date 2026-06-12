@@ -49,6 +49,13 @@ Notes:
   produced impossible figures like ALL = −133%). HL-INDEPENDENT (the base is the
   snapshot series, not the live HL fetch). A missing/≤floor base → None → the UI
   renders "—". `realized_base[w]` exposes the base used, per window.
+
+WA-P2 (2026-06-12): optional CUSTOM date-range window. When the script is invoked
+with two argv dates (start, end 'YYYY-MM-DD'), it adds a `custom` key to
+`realized` / `realized_pct` / `realized_base` / `realized_count`, computed through
+the SAME compute path (ET-bucketed span + get_equity_at denominator). No args →
+no `custom` key (byte-identical to the preset-only response). Custom only DEFINES
+a (start, end); it adds NO new P&L or denominator math.
 """
 from __future__ import annotations
 
@@ -207,6 +214,66 @@ def compute_windows(rows, now_utc: datetime) -> dict:
     }
 
 
+def _parse_custom_args(argv) -> tuple[str, str] | None:
+    """Map two picked dates (argv: [start, end], 'YYYY-MM-DD') → an ET-bucketed
+    (start_ts, end_ts) UTC span (WA-P2). start = ET-midnight(start day); end =
+    ET-midnight(end day + 1), EXCLUSIVE — the SAME boundary convention the presets
+    use (see _et_window_starts). Single-day (start == end) → exactly that one ET
+    day. zoneinfo handles DST at the midnight boundary.
+
+    Returns (start_ts_utc, end_ts_utc) or None when absent / malformed / end<start
+    — the caller then emits NO `custom` window (never a garbage span). NO new P&L
+    math: this only defines a (start, end), exactly like the preset bucketing.
+    """
+    if len(argv) < 2:
+        return None
+    try:
+        sd = datetime.strptime(argv[0], "%Y-%m-%d").date()
+        ed = datetime.strptime(argv[1], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    if ed < sd:
+        return None
+    # WA-P2: no future dates (defense-in-depth — the UI also caps both inputs at
+    # ET-today via max=). end > ET-today rejects any range that touches the future;
+    # end == ET-today is allowed (a range ending today is valid).
+    if ed > datetime.now(UTC).astimezone(ET).date():
+        return None
+    start_et = datetime(sd.year, sd.month, sd.day, tzinfo=ET)
+    end_et = datetime(ed.year, ed.month, ed.day, tzinfo=ET) + timedelta(days=1)
+    return (
+        start_et.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        end_et.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def compute_custom(rows, start_ts: str, end_ts: str) -> dict:
+    """Realized P&L over an ARBITRARY [start_ts, end_ts) span (WA-P2).
+
+    SAME numerator rule as compute_windows — sums closed-LIVE `pnl_usd`, NULL-pnl
+    rows excluded and counted separately. `end_ts` is EXCLUSIVE (ET-midnight of
+    end-day+1), so the boundary convention matches the presets exactly (a custom
+    'last 7 days' is byte-identical to the 1W preset). NO new P&L math — just a
+    different (start, end) than the preset buckets.
+
+    Returns {realized: float, count: int, unknown: int}.
+    """
+    s = 0.0
+    cnt = 0
+    unknown = 0
+    for closed_at, pnl in rows:
+        if closed_at is None:
+            continue
+        if not (start_ts <= closed_at < end_ts):
+            continue
+        if pnl is None:
+            unknown += 1
+            continue
+        s += float(pnl)
+        cnt += 1
+    return {"realized": round(s, 4), "count": cnt, "unknown": unknown}
+
+
 def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
@@ -348,10 +415,34 @@ def main() -> int:
                 k: get_equity_at(conn, ts) for k, ts in base_starts.items()
             }
 
+            # WA-P2 (2026-06-12): optional custom date-range window. The two picked
+            # dates arrive as argv (start, end 'YYYY-MM-DD'); _parse_custom_args maps
+            # them to an ET-bucketed (start_ts, end_ts) span. Its start-of-window base
+            # is read by the SAME get_equity_at (A-P1's denominator) inside this SAME
+            # mode=ro connection — zero new denominator math.
+            custom_span = _parse_custom_args(sys.argv[1:])
+            custom_base = (
+                get_equity_at(conn, custom_span[0]) if custom_span else None
+            )
+
         win = compute_windows(
             ((r["closed_at"], r["pnl_usd"]) for r in closed_rows), now_utc
         )
         realized = win["realized"]
+
+        # WA-P2: fold the custom window into the SAME realized / realized_base /
+        # realized_count dicts BEFORE the realized_pct loop below, so its % is
+        # computed by the same code path as the presets (no separate calc).
+        if custom_span is not None:
+            cwin = compute_custom(
+                ((r["closed_at"], r["pnl_usd"]) for r in closed_rows),
+                custom_span[0],
+                custom_span[1],
+            )
+            realized["custom"] = cwin["realized"]
+            realized_base["custom"] = custom_base
+            win["realized_count"]["custom"] = cwin["count"]
+            out["realized_custom_unknown_count"] = cwin["unknown"]
 
         # RM-07 P01: live HL unified balance for equity + unrealized (greyed line).
         # On HL unreachable, equity falls back to DB realized.all (no cap anchor);

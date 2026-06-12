@@ -1,6 +1,15 @@
 "use client";
 import * as React from "react";
-import { Card, MetricTile, Pill, Skeleton, MoneyText, FilterChips } from "@/components/ui";
+import {
+  Card,
+  MetricTile,
+  Pill,
+  Skeleton,
+  MoneyText,
+  FilterChips,
+  BottomSheet,
+  HapticButton,
+} from "@/components/ui";
 import { TrendingUp } from "lucide-react";
 
 // RM-PNL P01 (2026-05-29): Auto Capital = REALIZED-only headline.
@@ -10,7 +19,9 @@ import { TrendingUp } from "lucide-react";
 // for the real number. Equity is the live HL account value, explicitly
 // labeled as floating with open positions.
 
-type WindowKey = "today" | "yesterday" | "week" | "month" | "all";
+// WA-P2: "custom" is an arbitrary calendar date range fed through the same
+// realized-P&L + start-of-window-equity path as the presets.
+type WindowKey = "today" | "yesterday" | "week" | "month" | "all" | "custom";
 
 interface RealizedWindows {
   today: number;
@@ -18,6 +29,7 @@ interface RealizedWindows {
   week: number;
   month: number;
   all: number;
+  custom?: number;
 }
 
 // WA-P1 (2026-06-12): each window's % is computed against the account equity at
@@ -29,6 +41,7 @@ interface NullableWindows {
   week: number | null;
   month: number | null;
   all: number | null;
+  custom?: number | null;
 }
 
 interface AutoState {
@@ -56,8 +69,28 @@ const WINDOWS: ReadonlyArray<{ key: WindowKey; label: string }> = [
   { key: "week", label: "1W" },
   { key: "month", label: "1M" },
   { key: "all", label: "All" },
+  // WA-P2: opens the date-range picker rather than selecting a precomputed window.
+  { key: "custom", label: "Custom" },
 ];
 const LABELS = WINDOWS.map((w) => w.label);
+const CUSTOM_LABEL = "Custom";
+
+// WA-P2: ET-calendar "today" as YYYY-MM-DD — the picker's max (no future dates).
+// en-CA renders ISO YYYY-MM-DD; America/New_York matches the server's ET buckets.
+function etTodayStr(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(
+    new Date(),
+  );
+}
+
+// WA-P2: short display of an applied range, e.g. "Jun 6 – Jun 12". Parse as local
+// midnight (append T00:00:00) so the date never rolls back a day via UTC parsing.
+function fmtDay(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
 const LABEL_TO_KEY: Record<string, WindowKey> = Object.fromEntries(
   WINDOWS.map((w) => [w.label, w.key]),
 ) as Record<string, WindowKey>;
@@ -70,11 +103,32 @@ export function CapitalHero() {
   // Default window = Today.
   const [windowLabel, setWindowLabel] = React.useState<string>("Today");
 
+  // WA-P2: custom date-range state. `customStart/customEnd` are the APPLIED range
+  // (drive the API fetch); `draftStart/draftEnd` are the in-sheet picker values
+  // (no API call until Apply). The picker's max is ET-today (no future dates).
+  const etToday = React.useMemo(() => etTodayStr(), []);
+  const [customStart, setCustomStart] = React.useState<string | null>(null);
+  const [customEnd, setCustomEnd] = React.useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [draftStart, setDraftStart] = React.useState<string>("");
+  const [draftEnd, setDraftEnd] = React.useState<string>("");
+
+  const isCustomActive =
+    windowLabel === CUSTOM_LABEL && customStart !== null && customEnd !== null;
+
+  // Only a valid applied range appends the params — otherwise the plain preset
+  // fetch (all windows precomputed) is used. The URL is the effect's sole dep, so
+  // preset↔preset switches reuse the last payload (no refetch); switching to a
+  // custom range or changing it triggers exactly one refetch.
+  const stateUrl = isCustomActive
+    ? `/api/auto/state?start=${customStart}&end=${customEnd}`
+    : "/api/auto/state";
+
   React.useEffect(() => {
     let cancelled = false;
     const fetchState = async () => {
       try {
-        const res = await fetch("/api/auto/state", { cache: "no-store" });
+        const res = await fetch(stateUrl, { cache: "no-store" });
         if (!res.ok || cancelled) return;
         const j = (await res.json()) as AutoState;
         if (!cancelled) setData(j);
@@ -90,7 +144,37 @@ export function CapitalHero() {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [stateUrl]);
+
+  // WA-P2 validation: both dates set, end ≥ start, neither in the future. String
+  // compare on YYYY-MM-DD is chronologically correct. Apply stays disabled until
+  // this holds; single-day (start === end) is allowed.
+  const draftValid =
+    draftStart !== "" &&
+    draftEnd !== "" &&
+    draftStart <= draftEnd &&
+    draftStart <= etToday &&
+    draftEnd <= etToday;
+
+  // WA-P2: tapping "Custom" opens the picker (pre-filled with the applied range or
+  // today) rather than selecting a precomputed window. Presets select directly.
+  const handleWindowChange = (label: string) => {
+    if (label === CUSTOM_LABEL) {
+      setDraftStart(customStart ?? etToday);
+      setDraftEnd(customEnd ?? etToday);
+      setPickerOpen(true);
+      return;
+    }
+    setWindowLabel(label);
+  };
+
+  const applyCustom = () => {
+    if (!draftValid) return;
+    setCustomStart(draftStart);
+    setCustomEnd(draftEnd);
+    setWindowLabel(CUSTOM_LABEL);
+    setPickerOpen(false);
+  };
 
   const win = LABEL_TO_KEY[windowLabel] ?? "today";
   const realized = data?.realized ?? ZERO;
@@ -102,9 +186,12 @@ export function CapitalHero() {
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
 
-  const headlinePnl = realized[win];
-  const headlinePct = realizedPct[win];
-  const headlineCount = realizedCount[win];
+  // WA-P2: `custom` is absent on a preset payload (and momentarily while a custom
+  // fetch is in flight) — guard so a hero number is never undefined. A missing
+  // custom % falls through to the existing "—" render (headlinePct == null).
+  const headlinePnl = realized[win] ?? 0;
+  const headlinePct = realizedPct[win] ?? null;
+  const headlineCount = realizedCount[win] ?? 0;
 
   // Flat greyed text for unrealized — deliberately NOT green/red, so it never
   // reads as part of the booked number. Plain muted mono with an explicit sign.
@@ -181,13 +268,19 @@ export function CapitalHero() {
               {headlineCount} closed {headlineCount === 1 ? "trade" : "trades"} · open
               positions count $0 until closed
             </span>
+            {/* WA-P2: the applied custom span, so the headline's scope is legible. */}
+            {isCustomActive && customStart && customEnd && (
+              <span className="block font-sans text-micro text-accent-cyan-soft-strong">
+                {fmtDay(customStart)} – {fmtDay(customEnd)}
+              </span>
+            )}
           </div>
 
-          {/* ── Window selector (segmented; default Today) ── */}
+          {/* ── Window selector (segmented; default Today; "Custom" opens picker) ── */}
           <FilterChips
             options={LABELS}
             selected={windowLabel}
-            onChange={setWindowLabel}
+            onChange={handleWindowChange}
             ariaLabel="Realized P&L time window"
           />
 
@@ -212,12 +305,74 @@ export function CapitalHero() {
             <MetricTile
               label="Trades"
               value={String(headlineCount)}
-              sub={`${windowLabel.toLowerCase()} · ${totalCount.toLocaleString()} total`}
+              sub={`${
+                isCustomActive && customStart && customEnd
+                  ? `${fmtDay(customStart)}–${fmtDay(customEnd)}`
+                  : windowLabel.toLowerCase()
+              } · ${totalCount.toLocaleString()} total`}
             />
             <MetricTile label="Open" value={String(openCount)} sub="positions" />
           </div>
         </>
       )}
+
+      {/* ── WA-P2: custom date-range picker (native inputs, phone-friendly) ── */}
+      <BottomSheet
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Custom range"
+      >
+        <div className="space-y-4">
+          <label className="block space-y-1.5">
+            <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              Start
+            </span>
+            <input
+              type="date"
+              value={draftStart}
+              max={etToday}
+              onChange={(e) => setDraftStart(e.target.value)}
+              className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              End
+            </span>
+            <input
+              type="date"
+              value={draftEnd}
+              min={draftStart || undefined}
+              max={etToday}
+              onChange={(e) => setDraftEnd(e.target.value)}
+              className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+            />
+          </label>
+          {draftStart !== "" && draftEnd !== "" && draftStart > draftEnd && (
+            <p className="font-sans text-micro text-accent-red">
+              End date must be on or after the start date.
+            </p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <HapticButton
+              variant="secondary"
+              fullWidth
+              onClick={() => setPickerOpen(false)}
+            >
+              Cancel
+            </HapticButton>
+            <HapticButton
+              variant="primary"
+              fullWidth
+              disabled={!draftValid}
+              onClick={applyCustom}
+              className="disabled:pointer-events-none disabled:opacity-40"
+            >
+              Apply
+            </HapticButton>
+          </div>
+        </div>
+      </BottomSheet>
     </Card>
   );
 }
