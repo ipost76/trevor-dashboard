@@ -41,6 +41,10 @@ export function ChromaSection() {
   const [items, setItems] = React.useState<ReadonlyArray<Item> | null>(null);
   const [loadingList, setLoadingList] = React.useState(true);
   const [loadingItems, setLoadingItems] = React.useState(false);
+  // RM-MEM-A3: distinguish "VM unreachable" (error set by the re-sourced helper) from
+  // a genuinely empty ChromaDB — never a silent fake 0.
+  const [listError, setListError] = React.useState<string | null>(null);
+  const [itemsError, setItemsError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchList = async () => {
@@ -49,6 +53,7 @@ export function ChromaSection() {
         if (res.ok) {
           const j = (await res.json()) as ListResp;
           setCollections(j.collections ?? []);
+          setListError(j.error ?? null);
         }
       } finally {
         setLoadingList(false);
@@ -59,6 +64,7 @@ export function ChromaSection() {
 
   const fetchItems = React.useCallback(async (coll: string, m: Mode, qval: string) => {
     setLoadingItems(true);
+    setItemsError(null);
     try {
       const url =
         m === "peek"
@@ -68,6 +74,7 @@ export function ChromaSection() {
       if (res.ok) {
         const j = (await res.json()) as ItemsResp;
         setItems(j.items ?? []);
+        setItemsError(j.error ?? null);
       }
     } finally {
       setLoadingItems(false);
@@ -115,8 +122,12 @@ export function ChromaSection() {
           </div>
         )}
 
-        {!loadingList && collections && collections.length === 0 && (
-          <EmptyState title="No collections" body="ChromaDB is empty or unreachable." />
+        {!loadingList && listError && (!collections || collections.length === 0) && (
+          <EmptyState title="VM unreachable" body={listError} />
+        )}
+
+        {!loadingList && !listError && collections && collections.length === 0 && (
+          <EmptyState title="No collections" body="ChromaDB is empty." />
         )}
 
         {!loadingList && collections && collections.length > 0 && (
@@ -153,16 +164,16 @@ export function ChromaSection() {
                   : "bg-accent-plum/10 text-accent-plum-strong border-accent-plum/30"
               }
             >
-              {mode}
+              {mode === "search" ? "keyword" : mode}
             </Pill>
           </CardHeader>
 
-          <div className="flex gap-2 mb-3">
+          <div className="flex gap-2 mb-1">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Semantic search…"
+              placeholder="Keyword search…"
               onKeyDown={(e) => {
                 if (e.key === "Enter") runSearch();
               }}
@@ -172,6 +183,9 @@ export function ChromaSection() {
               <Search size={14} /> Search
             </HapticButton>
           </div>
+          <div className="mb-3 font-sans text-micro text-fg-muted">
+            Keyword match over document text (read-only full-text index) — not semantic.
+          </div>
 
           {loadingItems && (
             <div className="space-y-2">
@@ -179,7 +193,11 @@ export function ChromaSection() {
             </div>
           )}
 
-          {!loadingItems && items && items.length === 0 && (
+          {!loadingItems && itemsError && (!items || items.length === 0) && (
+            <EmptyState title="VM unreachable" body={itemsError} />
+          )}
+
+          {!loadingItems && !itemsError && items && items.length === 0 && (
             <EmptyState
               title="No items"
               body={mode === "search" ? "No matches for query." : "Collection empty."}

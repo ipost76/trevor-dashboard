@@ -25,9 +25,55 @@ from datetime import datetime, timezone
 DB_PATH = "/home/trevor/trevor/trevor.db"
 DB_RO_URI = f"file:{DB_PATH}?mode=ro"
 TREVOR_LOG = "/home/trevor/trevor/logs/trevor.log"
-VECTORDB_PATH = "/home/trevor/trevor/vectordb"
+VECTORDB_PATH = "/home/trevor/trevor/vectordb"  # VM-only path (read over ssh, RM-MEM-A3)
 LOG_TAIL_BYTES = 64 * 1024
 PING_TARGET = "1.1.1.1"
+
+# RM-MEM-A3 (F-17): vectordb + litestream live on the VM, not this WSL box. Probe both
+# in ONE read-only `ssh vm` round-trip (memoized per process so the two collectors share
+# it — bounds added latency to a single ConnectTimeout). No VM write.
+SSH_BASE = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", "vm"]
+_VM_PROBE_CACHE: dict | None = None
+
+
+def _vm_probe() -> dict:
+    global _VM_PROBE_CACHE
+    if _VM_PROBE_CACHE is not None:
+        return _VM_PROBE_CACHE
+    result: dict = {"reachable": False, "vectordb_bytes": None, "litestream_state": None, "error": None}
+    cmd = (
+        "echo VDB:$(du -sb /home/trevor/trevor/vectordb 2>/dev/null | cut -f1); "
+        "echo LS:$(systemctl is-active litestream.service 2>/dev/null)"
+    )
+    try:
+        proc = subprocess.run(
+            SSH_BASE + [cmd],
+            capture_output=True, text=True, timeout=6,
+            env={**os.environ, "HOME": "/home/ghost"},  # runPython sets HOME=/home/trevor
+        )
+    except subprocess.TimeoutExpired:
+        result["error"] = "ssh timeout"
+        _VM_PROBE_CACHE = result
+        return result
+    except Exception as exc:  # pragma: no cover
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        _VM_PROBE_CACHE = result
+        return result
+    if proc.returncode != 0:
+        result["error"] = (proc.stderr or "ssh failed").strip()[:120]
+        _VM_PROBE_CACHE = result
+        return result
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("VDB:"):
+            v = line[4:].strip()
+            if v.isdigit():
+                result["vectordb_bytes"] = int(v)
+        elif line.startswith("LS:"):
+            result["litestream_state"] = line[3:].strip() or None
+    result["reachable"] = True
+    _VM_PROBE_CACHE = result
+    return result
 
 
 def _conn_ro() -> sqlite3.Connection:
@@ -188,37 +234,39 @@ def collect_db_writability() -> dict:
 
 
 def collect_vectordb_size() -> dict:
-    try:
-        if not os.path.isdir(VECTORDB_PATH):
-            return {"key": "vectordb_size", "label": "VectorDB",
-                    "status": "missing", "tone": "amber",
-                    "value": "--", "detail": "path not found"}
-        total = 0
-        for dirpath, _dirs, files in os.walk(VECTORDB_PATH):
-            for f in files:
-                try:
-                    total += os.path.getsize(os.path.join(dirpath, f))
-                except OSError:
-                    pass
-        return {
-            "key": "vectordb_size", "label": "VectorDB",
-            "status": "ok", "tone": "green",
-            "value": f"{total / (1024**2):.0f}MB",
-            "detail": "chroma persist",
-        }
-    except Exception as e:
+    # RM-MEM-A3 (F-17): vectordb lives on the VM; size read over the read-only ssh probe.
+    probe = _vm_probe()
+    if not probe["reachable"]:
         return {"key": "vectordb_size", "label": "VectorDB",
-                "status": "error", "tone": "red",
-                "value": "--", "detail": str(e)[:80]}
+                "status": "unknown", "tone": "amber",
+                "value": "--", "detail": f"VM unreachable: {probe.get('error') or 'ssh failed'}"[:80]}
+    nbytes = probe["vectordb_bytes"]
+    if nbytes is None:
+        return {"key": "vectordb_size", "label": "VectorDB",
+                "status": "missing", "tone": "amber",
+                "value": "--", "detail": "path not found on VM"}
+    return {
+        "key": "vectordb_size", "label": "VectorDB",
+        "status": "ok", "tone": "green",
+        "value": f"{nbytes / (1024**2):.0f}MB",
+        "detail": "chroma persist (VM)",
+    }
 
 
 def collect_litestream() -> dict:
-    state = _systemctl_state("litestream.service")
+    # RM-MEM-A3 (F-17): WAL→GCS replication runs on the VM (the WSL unit is masked);
+    # report the VM's litestream.service state over the read-only ssh probe.
+    probe = _vm_probe()
+    if not probe["reachable"]:
+        return {"key": "litestream", "label": "Litestream",
+                "status": "unknown", "tone": "amber",
+                "value": "--", "detail": f"VM unreachable: {probe.get('error') or 'ssh failed'}"[:80]}
+    state = probe["litestream_state"] or "unknown"
     return {
         "key": "litestream", "label": "Litestream",
         "status": state, "tone": _tone_service(state),
         "value": state,
-        "detail": "WAL replication",
+        "detail": "WAL→GCS replication (VM)",
     }
 
 
