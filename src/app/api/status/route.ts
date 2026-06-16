@@ -40,7 +40,7 @@ export async function GET() {
 // the Observatory heartbeat the Hub already proxies for account_value_usd (same VM
 // endpoint as src/app/api/auto/state/route.ts — no new VM dependency).
 const OBSERVATORY_HEARTBEAT_URL =
-  "https://trevor-prime.tail068f72.ts.net:8443/api/heartbeat";
+  "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat";
 
 // The heartbeat republishes on a 2h cadence (HEARTBEAT_CADENCE_SECONDS=7200), so a
 // fresh snapshot is anything younger than that window. 3h (1.5× cadence) gives a

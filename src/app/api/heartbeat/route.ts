@@ -4,8 +4,8 @@ import { createSwrCache } from "@/lib/single-flight";
 // HB-04: thin proxy to the Observatory aiohttp server on 127.0.0.1:3335.
 // Keeps the Hub's "all data flows through /api/*" convention while the actual
 // collector + classifier + cache live in trevor-observatory.service.
-const OBSERVATORY_URL = "https://trevor-prime.tail068f72.ts.net:8443/api/heartbeat";
-const OBSERVATORY_REFRESH_URL = "https://trevor-prime.tail068f72.ts.net:8443/api/heartbeat/refresh";
+const OBSERVATORY_URL = "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat";
+const OBSERVATORY_REFRESH_URL = "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat/refresh";
 
 export const dynamic = "force-dynamic";
 
