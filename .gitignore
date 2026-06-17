@@ -20,6 +20,9 @@ tsconfig.tsbuildinfo
 # WSL hub runtime (B-P1 read-path migration)
 venv/
 
+# Per-file lock + commit-serialization guard runtime (LOCK-WSL) — never commit live locks
+.locks/
+
 # W-C-P2-DELIVERY: downloads runtime tree — commit the scaffolding (.gitkeep),
 # ignore runtime data (delivered files + the manifest/categories the pipeline
 # mutates on every post). download_manager recreates empty ones on demand.
