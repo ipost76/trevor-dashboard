@@ -94,6 +94,14 @@ Every prompt that edits any file MUST claim a per-file lock before editing and r
 ### Rule — FILE-LOCK PARALLEL MODEL — WORKTREES RETIRED (2026-06-16)
 Parallel CC sessions run on `master` directly. No git worktrees, no feature branches, no merge step. Conflicts are prevented by the per-file lock (Lock-Guard Mandate, above), not by branch isolation: sessions serialize only on the exact files they share; everything else runs fully parallel (up to 6 at once). Shared mutable state (e.g. a DB schema change) still runs SOLO — the file-lock does not cover it; on this box the dashboard reads a read-only litestream replica and issues no DDL, so this clause is largely inert here. Only one prompt per wave edits `CLAUDE.md`. A wave finishes with a single push, not a merge.
 
+### Rule — REPORT DELIVERY CONTRACT (NON-NEGOTIABLE)
+Every report, audit, or document deliverable ALWAYS delivers to BOTH **Discord #downloads** (channel `1492922559019225261`) and **the Hub downloads backend/manifest**, via this box's dedicated sender. NO exceptions.
+- **WSL box sender:** `python3 scripts/deliver_report.py <absolute_file_path> [title] [description]` — posts via the Hub webhook `HUB_DOWNLOADS_WEBHOOK_URL` from `.env.local` (ghost-readable, no VM token, no `sudo`); auto-registers in the manifest via `download_manager.save_download` so it surfaces in the DOCS zone. The #downloads channel is encoded in the webhook URL — no channel ID needed WSL-side.
+- **NEVER** save a report to a desktop, a Downloads folder, or any local path as its FINAL destination. The destination is ALWAYS #downloads + Hub. (The source file staying at its own disk path is fine — that is not a delivery target.)
+- **NEVER** ask Ghost where to put a report. **NEVER** guess, assume, or offer a local-file alternative.
+- **NEVER** credential-scout. The webhook is already in `.env.local`. Just call the sender.
+- If delivery **FAILS**: report loudly and STOP. Do NOT fall back to a local download. (`scripts/deliver_report.py` already validates the file exists, fails loud + non-zero on every failure path — non-200, missing webhook, timeout, manifest-append fail, bad args — and has no silent local-only fallback. It is the proven, byte-stable entry point; do not reinvent it.)
+
 ### Investigation-First Discipline (Immutable)
 
 Every CC session that fixes / diagnoses / debugs / investigates must follow:
@@ -207,5 +215,5 @@ These govern the trading bot and its environment. They have **no equivalent on t
 - **Signal cooldown, native HL TP/SL, exit-engine internals, per-ticker exit profiles** (VM Rules 17, 31, exit-engine sections) — bot trading mechanics. Bot-only.
 - **DEPLOYED FEATURE REGISTRY (VM Section 2) + CHANGE LOG (Section 3)** — the bot's feature history (RM-xx waves, flag inventories). The Hub's own history is the `CLAUDE.md` Wave Changelog.
 - **RECURRING BUGS & REGRESSION CHECKS (VM Section 4)** — the 5 recurring bot bugs (signal dedup/cooldown, HOLD-card deletion, orphaned reminders, reply handler, results auto-delete). **None of these exist on this box.**
-- **CC defense / governance, Tests/coverage tooling, Operational logs, Report-Writing delivery** (VM Section 2/3B) — bot-specific hook suites, `pytest`/`check_coverage.sh`, the loguru sentinel filter, and the `discord_file_delivery.py` #downloads delivery path. The Hub's own delivery path is `scripts/deliver_report.py` (see `CLAUDE.md`); the universal kernels of the test/REPL/evidence rules are folded into Section 1's *General Engineering Principles*.
+- **CC defense / governance, Tests/coverage tooling, Operational logs, Report-Writing delivery** (VM Section 2/3B) — bot-specific hook suites, `pytest`/`check_coverage.sh`, the loguru sentinel filter, and the `discord_file_delivery.py` #downloads delivery path. The Hub's own delivery path is `scripts/deliver_report.py` — the authoritative non-negotiable contract is **Section 1 → Rule — REPORT DELIVERY CONTRACT**; the universal kernels of the test/REPL/evidence rules are folded into Section 1's *General Engineering Principles*.
 - **Security hardening — accepted-risks list** (VM Section 2) — the VM's UFW/GCP/port-specific risk surface. This box's surface is Tailscale-only and different; that list does not apply here.
