@@ -9,7 +9,9 @@ import {
   FilterChips,
   BottomSheet,
   HapticButton,
+  LiveValue,
 } from "@/components/ui";
+import { useLiveTerminal } from "@/lib/live-terminal";
 import { TrendingUp } from "lucide-react";
 
 // RM-PNL P01 (2026-05-29): Auto Capital = REALIZED-only headline.
@@ -102,6 +104,12 @@ export function CapitalHero() {
   const [loading, setLoading] = React.useState(true);
   // Default window = Today.
   const [windowLabel, setWindowLabel] = React.useState<string>("Today");
+
+  // B6 (RM-LIVE): flash-on-refresh flag, default OFF (NEXT_PUBLIC_LIVE_TERMINAL).
+  // OFF → render the existing JSX verbatim (byte-identical to B0). ON → route the
+  // equity figure through <LiveValue> so it flashes mint/red when the existing
+  // ~15s /api/auto/state refresh changes it. NO new data, NO WS, NO faster poll.
+  const live = useLiveTerminal();
 
   // WA-P2: custom date-range state. `customStart/customEnd` are the APPLIED range
   // (drive the API fetch); `draftStart/draftEnd` are the in-sheet picker values
@@ -287,9 +295,21 @@ export function CapitalHero() {
           {/* ── Greyed secondary block: honest cash + floating glance (2 lines) ── */}
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
             <div className="flex flex-wrap items-baseline gap-2">
-              <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
-                {equityAvailable ? `$${liveEquity.toFixed(2)}` : "—"}
-              </span>
+              {/* B6: equity flashes mint/red when the existing 15s refresh changes
+                  it (ON); the value/formatter are unchanged — same liveEquity,
+                  same `$x.xx`, `—` when unavailable. OFF renders the prior span
+                  verbatim. Resting <LiveValue> is text-fg-primary, matching. */}
+              {live ? (
+                <LiveValue
+                  value={equityAvailable ? liveEquity : null}
+                  format={(n) => `$${n.toFixed(2)}`}
+                  className="text-h3 font-bold"
+                />
+              ) : (
+                <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
+                  {equityAvailable ? `$${liveEquity.toFixed(2)}` : "—"}
+                </span>
+              )}
               <span className="font-sans text-micro text-fg-muted">live account</span>
               {equityStale && (
                 <span className="font-sans text-micro text-accent-gold">· stale</span>
