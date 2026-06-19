@@ -7,6 +7,7 @@ import {
   Pill,
   Skeleton,
   MoneyText,
+  LiveValue,
 } from "@/components/ui";
 import {
   TrendingUp,
@@ -17,6 +18,7 @@ import {
   Scissors,
   Lock,
 } from "lucide-react";
+import { useLiveTerminal } from "@/lib/live-terminal";
 
 // S1-P06 — Profit-Taking + Risk panel (READ-ONLY display).
 //
@@ -122,6 +124,9 @@ function fmtRiskPct(p: number | null): string {
 export function ProfitRiskPanel() {
   const [data, setData] = React.useState<ProfitRiskResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  // B7: flag OFF (default) renders the existing JSX verbatim (byte-identical);
+  // ON wraps each value in <LiveValue> so it flashes mint/red on its own refresh.
+  const live = useLiveTerminal();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -156,7 +161,12 @@ export function ProfitRiskPanel() {
           <CardTitle>
             <span className="flex items-center gap-2 uppercase tracking-wider">
               <TrendingUp size={14} aria-hidden />
-              Profit-Taking · {data?.open_count ?? 0}
+              Profit-Taking ·{" "}
+              {live ? (
+                <LiveValue value={data?.open_count ?? 0} format={(n) => String(n)} />
+              ) : (
+                data?.open_count ?? 0
+              )}
             </span>
           </CardTitle>
         </CardHeader>
@@ -207,13 +217,30 @@ export function ProfitRiskPanel() {
                       {t.ratchet_locked_r > 0 && (
                         <Pill tone="cyan" size="sm">
                           <Anchor size={10} aria-hidden />
-                          RATCHET {t.ratchet_locked_r.toFixed(2)}R
+                          RATCHET{" "}
+                          {live ? (
+                            <LiveValue
+                              value={t.ratchet_locked_r}
+                              format={(n) => n.toFixed(2)}
+                            />
+                          ) : (
+                            t.ratchet_locked_r.toFixed(2)
+                          )}
+                          R
                         </Pill>
                       )}
                       {t.partials_taken > 0 && (
                         <Pill tone="violet" size="sm">
                           <Scissors size={10} aria-hidden />
-                          {t.partials_taken} PARTIAL{t.partials_taken > 1 ? "S" : ""}
+                          {live ? (
+                            <LiveValue
+                              value={t.partials_taken}
+                              format={(n) => String(n)}
+                            />
+                          ) : (
+                            t.partials_taken
+                          )}{" "}
+                          PARTIAL{t.partials_taken > 1 ? "S" : ""}
                         </Pill>
                       )}
                     </div>
@@ -237,11 +264,24 @@ export function ProfitRiskPanel() {
                     <span className="tabular-nums">
                       risk{" "}
                       <span className="text-fg-default">
-                        {t.risk_dollars != null
-                          ? `$${Number(t.risk_dollars).toFixed(2)}`
-                          : "—"}
+                        {live ? (
+                          <LiveValue
+                            value={t.risk_dollars}
+                            format={(n) => `$${Number(n).toFixed(2)}`}
+                          />
+                        ) : t.risk_dollars != null ? (
+                          `$${Number(t.risk_dollars).toFixed(2)}`
+                        ) : (
+                          "—"
+                        )}
                       </span>{" "}
-                      ({fmtRiskPct(t.risk_pct)})
+                      (
+                      {live ? (
+                        <LiveValue value={t.risk_pct} format={(n) => fmtRiskPct(n)} />
+                      ) : (
+                        fmtRiskPct(t.risk_pct)
+                      )}
+                      )
                     </span>
                     {scaledOut && (
                       <span className="tabular-nums text-accent-cyan-soft">

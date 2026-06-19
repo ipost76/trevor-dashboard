@@ -7,6 +7,7 @@ import {
   Pill,
   Skeleton,
   MetricTile,
+  LiveValue,
 } from "@/components/ui";
 import {
   Gauge,
@@ -20,6 +21,7 @@ import {
   Minus,
   GitCompareArrows,
 } from "lucide-react";
+import { useLiveTerminal } from "@/lib/live-terminal";
 
 // S2-P05 — Leverage + Regime panel (READ-ONLY display).
 //
@@ -178,6 +180,11 @@ function utilTone(pct: number): { bar: string; text: string } {
 export function LeverageRegimePanel() {
   const [data, setData] = React.useState<LeverageRegimeResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  // B7: flag OFF (default) renders the existing JSX verbatim (byte-identical);
+  // ON wraps each stat value in <LiveValue> so it flashes mint/red on its own
+  // refresh. tabular-nums (baked into <LiveValue>) keeps the text-h1 margin
+  // headline from shifting when a digit-width changes.
+  const live = useLiveTerminal();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -214,7 +221,12 @@ export function LeverageRegimePanel() {
           <CardTitle>
             <span className="flex flex-wrap items-center gap-2 uppercase tracking-wider">
               <Gauge size={14} aria-hidden />
-              Leverage · {data?.open_count ?? 0}
+              Leverage ·{" "}
+              {live ? (
+                <LiveValue value={data?.open_count ?? 0} format={(n) => String(n)} />
+              ) : (
+                data?.open_count ?? 0
+              )}
               {data && (
                 <Pill
                   intent={data.leverage_dynamic_enabled ? "active" : "warn"}
@@ -266,9 +278,17 @@ export function LeverageRegimePanel() {
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
-                      <span className="text-h3 font-bold tabular-nums text-accent-cyan-soft">
-                        {lev != null ? `${Number(lev).toFixed(0)}×` : "—"}
-                      </span>
+                      {live ? (
+                        <LiveValue
+                          value={lev}
+                          format={(n) => `${Number(n).toFixed(0)}×`}
+                          className="text-h3 font-bold"
+                        />
+                      ) : (
+                        <span className="text-h3 font-bold tabular-nums text-accent-cyan-soft">
+                          {lev != null ? `${Number(lev).toFixed(0)}×` : "—"}
+                        </span>
+                      )}
                       {safe === true && (
                         <Pill intent="active" size="sm">
                           <ShieldCheck size={10} aria-hidden />
@@ -289,21 +309,45 @@ export function LeverageRegimePanel() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption">
                     <span className="text-fg-muted">
                       liq distance{" "}
-                      <span
-                        className={`tabular-nums font-semibold ${
-                          safe === false ? "text-accent-red" : "text-accent-mint"
-                        }`}
-                      >
-                        {fmtPct(t.liq_distance_at_entry)}
-                      </span>
+                      {live ? (
+                        <LiveValue
+                          value={t.liq_distance_at_entry}
+                          format={(n) => fmtPct(n)}
+                          className="font-semibold"
+                        />
+                      ) : (
+                        <span
+                          className={`tabular-nums font-semibold ${
+                            safe === false ? "text-accent-red" : "text-accent-mint"
+                          }`}
+                        >
+                          {fmtPct(t.liq_distance_at_entry)}
+                        </span>
+                      )}
                     </span>
                     <span className="text-fg-muted">
                       required{" "}
                       <span className="tabular-nums text-fg-default">
-                        {fmtPct(t.required_liq_distance)}
+                        {live ? (
+                          <LiveValue
+                            value={t.required_liq_distance}
+                            format={(n) => fmtPct(n)}
+                          />
+                        ) : (
+                          fmtPct(t.required_liq_distance)
+                        )}
                       </span>{" "}
                       <span className="text-fg-muted">
-                        ({data?.liq_buffer_k ?? 2.5}× stop {fmtPct(t.stop_fraction)})
+                        ({data?.liq_buffer_k ?? 2.5}× stop{" "}
+                        {live ? (
+                          <LiveValue
+                            value={t.stop_fraction}
+                            format={(n) => fmtPct(n)}
+                          />
+                        ) : (
+                          fmtPct(t.stop_fraction)
+                        )}
+                        )
                       </span>
                     </span>
                   </div>
@@ -313,30 +357,58 @@ export function LeverageRegimePanel() {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border-subtle bg-bg-elevated/40 px-2.5 py-1.5 text-micro tabular-nums text-fg-muted">
                       <span>
                         conf{" "}
-                        <span className="text-accent-cyan-soft">
-                          {fmtMult(t.breakdown.conf_mult)}
-                        </span>
+                        {live ? (
+                          <LiveValue
+                            value={t.breakdown.conf_mult ?? null}
+                            format={(n) => fmtMult(n)}
+                          />
+                        ) : (
+                          <span className="text-accent-cyan-soft">
+                            {fmtMult(t.breakdown.conf_mult)}
+                          </span>
+                        )}
                       </span>
                       <span>
                         regime{" "}
-                        <span className="text-accent-cyan-soft">
-                          {fmtMult(t.breakdown.regime_mult)}
-                        </span>
+                        {live ? (
+                          <LiveValue
+                            value={t.breakdown.regime_mult ?? null}
+                            format={(n) => fmtMult(n)}
+                          />
+                        ) : (
+                          <span className="text-accent-cyan-soft">
+                            {fmtMult(t.breakdown.regime_mult)}
+                          </span>
+                        )}
                       </span>
                       <span>
                         vol{" "}
-                        <span className="text-accent-cyan-soft">
-                          {fmtMult(t.breakdown.vol_mult)}
-                        </span>
+                        {live ? (
+                          <LiveValue
+                            value={t.breakdown.vol_mult ?? null}
+                            format={(n) => fmtMult(n)}
+                          />
+                        ) : (
+                          <span className="text-accent-cyan-soft">
+                            {fmtMult(t.breakdown.vol_mult)}
+                          </span>
+                        )}
                       </span>
                       <span className="text-fg-muted">→</span>
                       <span>
                         cap{" "}
-                        <span className="text-fg-default">
-                          {t.breakdown.liq_safe_cap != null
-                            ? `${Number(t.breakdown.liq_safe_cap).toFixed(0)}×`
-                            : "—"}
-                        </span>
+                        {live ? (
+                          <LiveValue
+                            value={t.breakdown.liq_safe_cap ?? null}
+                            format={(n) => `${Number(n).toFixed(0)}×`}
+                          />
+                        ) : (
+                          <span className="text-fg-default">
+                            {t.breakdown.liq_safe_cap != null
+                              ? `${Number(t.breakdown.liq_safe_cap).toFixed(0)}×`
+                              : "—"}
+                          </span>
+                        )}
                       </span>
                       {t.breakdown.regime && (
                         <span className="text-fg-muted">· {t.breakdown.regime}</span>
@@ -401,7 +473,15 @@ export function LeverageRegimePanel() {
                     />
                   </div>
                   <div className="flex items-center justify-between text-micro text-fg-muted">
-                    <span className="tabular-nums">{pct != null ? `${pct}%` : "—"}</span>
+                    <span className="tabular-nums">
+                      {live ? (
+                        <LiveValue value={pct} format={(n) => `${n}%`} />
+                      ) : pct != null ? (
+                        `${pct}%`
+                      ) : (
+                        "—"
+                      )}
+                    </span>
                     <span className="tabular-nums" title={r.ts ? String(r.ts) : undefined}>
                       {fmtAge(r.age_seconds)}
                     </span>
@@ -436,9 +516,17 @@ export function LeverageRegimePanel() {
                   return (
                     <>
                       <div className="flex items-end justify-between gap-3">
-                        <span className={`text-h1 font-bold tabular-nums ${tone.text}`}>
-                          {pct.toFixed(1)}%
-                        </span>
+                        {live ? (
+                          <LiveValue
+                            value={pct}
+                            format={(n) => `${n.toFixed(1)}%`}
+                            className="text-h1 font-bold"
+                          />
+                        ) : (
+                          <span className={`text-h1 font-bold tabular-nums ${tone.text}`}>
+                            {pct.toFixed(1)}%
+                          </span>
+                        )}
                         <span className="text-caption tabular-nums text-fg-muted">
                           ${margin.margin_used.toFixed(2)} used / $
                           {margin.account_value.toFixed(2)} acct
@@ -454,7 +542,14 @@ export function LeverageRegimePanel() {
                       <div className="flex items-center justify-between text-micro text-fg-muted">
                         <span>open notional</span>
                         <span className="tabular-nums">
-                          ${margin.total_ntl_pos.toFixed(2)}
+                          {live ? (
+                            <LiveValue
+                              value={margin.total_ntl_pos}
+                              format={(n) => `$${n.toFixed(2)}`}
+                            />
+                          ) : (
+                            `$${margin.total_ntl_pos.toFixed(2)}`
+                          )}
                         </span>
                       </div>
                     </>
