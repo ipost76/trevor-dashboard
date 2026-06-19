@@ -29,12 +29,13 @@ export async function middleware(request: NextRequest) {
   // B1 — legacy nav-redesign redirects.
   // Old route names map to new canonical paths; redirects fire whether the
   // session is authed or not (the new path is then auth-gated normally).
-  // Each entry is a single 308 hop — no chaining (Wave C2: /scalp and
-  // /manual both point DIRECTLY at /stocks, not /scalp → /manual → /stocks).
+  // Each entry is a single 308 hop — no chaining. The /stocks zone was removed
+  // (Stock+DCA removal, 2026-06-19); its three legacy paths now land on the new
+  // default zone /autotrader so old bookmarks don't 404.
   const legacyMap: Record<string, string> = {
-    "/trading": "/stocks",
-    "/scalp": "/stocks",
-    "/manual": "/stocks", // Wave C2 — /manual route renamed to /stocks
+    "/trading": "/autotrader",
+    "/scalp": "/autotrader",
+    "/manual": "/autotrader", // was /stocks — zone removed (Stock+DCA removal)
     "/command": "/memory",
     "/intelligence": "/intel",
     "/dashboard": "/autotrader", // Wave B1 — HOME/dashboard page retired

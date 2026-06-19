@@ -113,13 +113,8 @@ const OPS = {
       return "mode must be 'single' or 'bulk'";
     },
   },
-  "dca.set": {
-    flag: "HUB_TRADE_EDIT_ENABLED",
-    validate: (a) =>
-      ["add", "remove", "edit", "pause", "resume"].includes(String(a.action || "").toLowerCase())
-        ? null
-        : "action must be one of add|remove|edit|pause|resume",
-  },
+  // dca.set REMOVED 2026-06-19 (Stock+DCA removal). HUB_TRADE_EDIT_ENABLED is
+  // KEPT — still gating the 5 autotrader trade-edit ops above.
 
   // ---- 🟡 List writes — new HUB_LIST_WRITE_ENABLED ----
   "quality.set": {

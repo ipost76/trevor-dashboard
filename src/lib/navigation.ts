@@ -1,16 +1,18 @@
 /**
  * TREVOR // NAVIGATION CONTRACT v1
  *
- * Single source of truth for the 5-zone navigation + per-zone sub-tabs.
+ * Single source of truth for the 4-zone navigation + per-zone sub-tabs.
  * Every nav-rendering component (BottomNav, SidebarRail, TabBar instances,
  * mobile long-press BottomSheet) imports from here. No bespoke zone arrays.
  *
  * Mobile bottom-nav order is the priority order:
  *   1. AUTO       (Scalper — front and center per Ghost crunch posture; Hub landing)
- *   2. STOCKS     (Stock discovery + DCA reminders — was MANUAL/SCALP/TRADING)
- *   3. INTEL      (analysis surface — Notes / Shadow / Lessons / Journal)
- *   4. DOCS       (reference surface — Downloads file browser with category tabs; single-view zone)
- *   5. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
+ *   2. INTEL      (analysis surface — Notes / Shadow / Lessons / Journal)
+ *   3. DOCS       (reference surface — Downloads file browser with category tabs; single-view zone)
+ *   4. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
+ *
+ * STOCKS zone removed 2026-06-19 (Stock+DCA removal); its legacy paths
+ * (/trading, /scalp, /manual, /reminders) now redirect to /autotrader.
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
  * full-screen on mobile, side panel on desktop.
@@ -19,14 +21,13 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
-  Activity,
   Brain,
   BookOpen,
   Database,
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "stocks" | "intel" | "docs" | "memory";
+export type ZoneId = "auto" | "intel" | "docs" | "memory";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -63,19 +64,6 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "activity", label: "Activity" },
     ],
     defaultSubTab: "dashboard",
-  },
-  {
-    id: "stocks",
-    href: "/stocks",
-    label: "Stocks",
-    shortLabel: "Stocks",
-    icon: Activity,
-    accent: "violet",
-    subTabs: [
-      { key: "stock", label: "Stock" },
-      { key: "dca", label: "DCA" },
-    ],
-    defaultSubTab: "stock",
   },
   {
     id: "intel",
@@ -128,8 +116,8 @@ export const CHAT_FAB = {
 };
 
 export const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
-  ["/trading", "/stocks"],
-  ["/scalp", "/stocks"],
+  ["/trading", "/autotrader"], // was /stocks — zone removed (Stock+DCA removal 2026-06-19)
+  ["/scalp", "/autotrader"], // was /stocks — zone removed (Stock+DCA removal 2026-06-19)
   ["/command", "/memory"],
   ["/intelligence", "/intel"],
 ] as const;

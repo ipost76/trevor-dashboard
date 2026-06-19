@@ -16,7 +16,9 @@ const nextConfig: NextConfig = {
       // COMMAND zone
       { source: '/control', destination: '/command?tab=control', permanent: true },
       { source: '/ghost', destination: '/command?tab=ghosthq', permanent: true },
-      { source: '/reminders', destination: '/stocks?tab=dca', permanent: true },
+      // was /stocks?tab=dca — DCA zone removed (Stock+DCA removal 2026-06-19);
+      // land the old bookmark on the new default zone instead of 404ing.
+      { source: '/reminders', destination: '/autotrader', permanent: true },
       { source: '/dev-tasks', destination: '/command?tab=devtasks', permanent: true },
       // D3 (2026-04-30) — AUTO API consolidation: legacy /api/auto-trader/*
       // routes redirect to the 3 consolidated /api/auto/* endpoints. The
