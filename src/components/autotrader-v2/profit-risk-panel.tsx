@@ -119,11 +119,21 @@ function fmtRiskPct(p: number | null): string {
   return `${Number(p).toFixed(2)}%`;
 }
 
+// B4 — compact replica-age formatter for the freshness badge.
+function fmtReplicaAge(seconds: number): string {
+  if (seconds < 90) return `${seconds}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+
 // ── component ───────────────────────────────────────────────────────────────
 
 export function ProfitRiskPanel() {
   const [data, setData] = React.useState<ProfitRiskResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  // B4: replica file age for the freshness badge — the open trades here are read
+  // from the lagging litestream replica; the live count lives in the heartbeat.
+  const [replicaAge, setReplicaAge] = React.useState<number | null>(null);
   // B7: flag OFF (default) renders the existing JSX verbatim (byte-identical);
   // ON wraps each value in <LiveValue> so it flashes mint/red on its own refresh.
   const live = useLiveTerminal();
@@ -150,6 +160,29 @@ export function ProfitRiskPanel() {
     };
   }, []);
 
+  // B4 — freshness badge: surface how far the replica lags live (mirrors
+  // capital-hero's "· stale" precedent). Reuses /api/hub/drift-state.
+  React.useEffect(() => {
+    let cancelled = false;
+    const fetchAge = async () => {
+      try {
+        const res = await fetch("/api/hub/drift-state", { cache: "no-store" });
+        if (res.ok && !cancelled) {
+          const d = (await res.json()) as { replica_age_seconds?: number | null };
+          if (typeof d?.replica_age_seconds === "number") setReplicaAge(d.replica_age_seconds);
+        }
+      } catch {
+        /* badge stays hidden on failure */
+      }
+    };
+    void fetchAge();
+    const id = setInterval(() => void fetchAge(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
   const breakers = data?.breakers;
   const trades = data?.open_trades ?? [];
 
@@ -169,6 +202,14 @@ export function ProfitRiskPanel() {
               )}
             </span>
           </CardTitle>
+          {replicaAge !== null && (
+            <span
+              className="shrink-0 font-sans text-micro text-accent-gold"
+              title="Open positions are read from the lagging litestream replica — the live count lives in the heartbeat (Health → Data Freshness)."
+            >
+              REPLICA ~{fmtReplicaAge(replicaAge)}
+            </span>
+          )}
         </CardHeader>
 
         {loading && !data && <Skeleton className="h-20 w-full" />}

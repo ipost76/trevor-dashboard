@@ -10,9 +10,14 @@
  *   2. INTEL      (analysis surface — Notes / Shadow / Lessons / Journal)
  *   3. DOCS       (reference surface — Downloads file browser with category tabs; single-view zone)
  *   4. MEMORY     (was COMMAND — Brain / Memory / ChromaDB / System Health / Aggressive)
+ *   5. HEALTH     (Health home — freshness/drift + reconcile + heartbeat + sentinels; B4 promotion)
  *
  * STOCKS zone removed 2026-06-19 (Stock+DCA removal); its legacy paths
  * (/trading, /scalp, /manual, /reminders) now redirect to /autotrader.
+ *
+ * HEALTH zone added 2026-06-19 (B4) — promotes the <HealthSection> view
+ * (formerly only at /memory?tab=health, which still works as a deep link) to a
+ * top-level single-view zone at /health.
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
  * full-screen on mobile, side panel on desktop.
@@ -24,10 +29,11 @@ import {
   Brain,
   BookOpen,
   Database,
+  Activity,
   MessageSquare,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "intel" | "docs" | "memory";
+export type ZoneId = "auto" | "intel" | "docs" | "memory" | "health";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -103,6 +109,19 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "aggressive", label: "Aggressive" },
     ],
     defaultSubTab: "brain",
+  },
+  {
+    // B4: Health home — the promoted <HealthSection> view (single-view zone).
+    // The /memory?tab=health deep link is preserved (the memory zone keeps its
+    // `health` sub-tab); this is an additive top-level entry. Reuses the
+    // existing "green" accent (mint = healthy) so accentTextClass/
+    // accentGlowClass need no new case.
+    id: "health",
+    href: "/health",
+    label: "Health",
+    shortLabel: "Health",
+    icon: Activity,
+    accent: "green",
   },
 ] as const;
 
