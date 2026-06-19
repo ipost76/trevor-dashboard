@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
+import { LiveValue } from "@/components/ui/live-value";
+import { useLiveMark } from "@/lib/hl-ws-store";
+import { useLiveTerminal } from "@/lib/live-terminal";
 
 const TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 
@@ -10,7 +13,51 @@ function formatPrice(price: number): string {
   return price.toFixed(4);
 }
 
+/**
+ * One price cell. Hook called UNCONDITIONALLY, gated by `live` — flag-OFF opens
+ * no socket; the strip + watchlist share the ONE singleton WS when on. Flag OFF
+ * is byte-identical to the prior inline span (incl. the `price ? … : "—"`
+ * truthiness and the fg-primary/fg-faint color split); flag ON renders a
+ * flashing <LiveValue> off the live mark, falling back to the /api/prices value.
+ */
+const PriceStripCell = memo(function PriceStripCell({
+  ticker,
+  apiPrice,
+  hasPrices,
+  live,
+}: {
+  ticker: string;
+  apiPrice: number | undefined;
+  hasPrices: boolean;
+  live: boolean;
+}) {
+  const liveMark = useLiveMark(ticker, live);
+  const price = live && liveMark.price != null ? liveMark.price : apiPrice;
+
+  if (live) {
+    return (
+      <LiveValue
+        value={price ?? null}
+        format={(n) => `$${formatPrice(n)}`}
+        className="text-[10px]"
+      />
+    );
+  }
+
+  // OFF-path: byte-identical to today.
+  return (
+    <span
+      className={`text-[10px] tabular-nums ${
+        hasPrices ? "text-fg-primary" : "text-fg-faint"
+      }`}
+    >
+      {price ? `$${formatPrice(price)}` : "—"}
+    </span>
+  );
+});
+
 export default function PriceStrip() {
+  const live = useLiveTerminal();
   const [prices, setPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -56,29 +103,25 @@ export default function PriceStrip() {
       style={{ WebkitOverflowScrolling: "touch" }}
     >
       <div className="flex items-center gap-0 px-3 h-full font-mono">
-        {TICKERS.map((ticker, i) => {
-          const price = prices[ticker];
-          return (
-            <span
-              key={ticker}
-              className="flex items-center gap-1 shrink-0 whitespace-nowrap"
-            >
-              {i > 0 && (
-                <span className="text-[10px] mx-2 text-fg-faint">·</span>
-              )}
-              <span className="text-[10px] font-semibold text-fg-muted">
-                {ticker}
-              </span>
-              <span
-                className={`text-[10px] tabular-nums ${
-                  hasPrices ? "text-fg-primary" : "text-fg-faint"
-                }`}
-              >
-                {price ? `$${formatPrice(price)}` : "—"}
-              </span>
+        {TICKERS.map((ticker, i) => (
+          <span
+            key={ticker}
+            className="flex items-center gap-1 shrink-0 whitespace-nowrap"
+          >
+            {i > 0 && (
+              <span className="text-[10px] mx-2 text-fg-faint">·</span>
+            )}
+            <span className="text-[10px] font-semibold text-fg-muted">
+              {ticker}
             </span>
-          );
-        })}
+            <PriceStripCell
+              ticker={ticker}
+              apiPrice={prices[ticker]}
+              hasPrices={hasPrices}
+              live={live}
+            />
+          </span>
+        ))}
       </div>
     </div>
   );

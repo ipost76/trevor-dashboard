@@ -1,6 +1,9 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, Skeleton } from "@/components/ui";
+import { LiveValue } from "@/components/ui/live-value";
+import { useLiveMark } from "@/lib/hl-ws-store";
+import { useLiveTerminal } from "@/lib/live-terminal";
 import { Eye } from "lucide-react";
 
 type Tier = "BLUE_CHIP" | "MID_CAP" | "MEME";
@@ -41,7 +44,47 @@ function fmtPrice(p: number): string {
   return p.toFixed(6);
 }
 
+/**
+ * Price cell for one watchlist row. The hook is called UNCONDITIONALLY (one per
+ * cell) and gated by `live` — so flag-OFF subscribes to nothing and opens no
+ * socket, and the whole grid shares the ONE singleton WS when the flag is on.
+ * Flag OFF renders byte-identically to the inline JSX it replaced (hide until a
+ * price exists); flag ON renders a flashing <LiveValue> fed by the live mark and
+ * falling back to the /api/prices value until the first WS frame for that coin.
+ */
+const WatchlistPriceCell = React.memo(function WatchlistPriceCell({
+  ticker,
+  apiPrice,
+  live,
+}: {
+  ticker: string;
+  apiPrice: number | undefined;
+  live: boolean;
+}) {
+  const liveMark = useLiveMark(ticker, live);
+  const price = live && liveMark.price != null ? liveMark.price : apiPrice;
+
+  if (live) {
+    return (
+      <LiveValue
+        value={price ?? null}
+        format={(n) => `$${fmtPrice(n)}`}
+        className="text-h3 font-bold"
+      />
+    );
+  }
+
+  // OFF-path: byte-identical to today — hide until a price exists.
+  if (price === undefined) return null;
+  return (
+    <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
+      ${fmtPrice(price)}
+    </span>
+  );
+});
+
 export function WatchlistGrid() {
+  const live = useLiveTerminal();
   const [thresholds, setThresholds] = React.useState<Threshold[] | null>(null);
   const [prices, setPrices] = React.useState<PriceMap>({});
   const [loading, setLoading] = React.useState(true);
@@ -129,11 +172,11 @@ export function WatchlistGrid() {
                   {t.ticker}
                 </span>
 
-                {livePrice !== undefined && (
-                  <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
-                    ${fmtPrice(livePrice)}
-                  </span>
-                )}
+                <WatchlistPriceCell
+                  ticker={t.ticker}
+                  apiPrice={livePrice}
+                  live={live}
+                />
 
                 <div className="flex items-center gap-1.5 font-mono text-caption tabular-nums text-fg-muted">
                   <span>{t.quiet.toFixed(0)}</span>
