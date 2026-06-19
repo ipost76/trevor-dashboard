@@ -46,7 +46,7 @@ def ensure_table(conn):
 def cmd_list(conn):
     """List all portfolio positions ordered by opened_at descending."""
     rows = conn.execute(
-        "SELECT * FROM portfolio_positions ORDER BY opened_at DESC"
+        "SELECT * FROM portfolio_positions WHERE status IS NOT 'deleted' ORDER BY opened_at DESC"
     ).fetchall()
     positions = [dict(r) for r in rows]
     print(json.dumps({"positions": positions}))
@@ -155,7 +155,7 @@ def cmd_update(conn, args):
 
     # Verify position exists
     existing = conn.execute(
-        "SELECT id FROM portfolio_positions WHERE id = ?", (position_id,)
+        "SELECT id FROM portfolio_positions WHERE id = ? AND status IS NOT 'deleted'", (position_id,)
     ).fetchone()
     if not existing:
         print(json.dumps({"error": f"Position {position_id} not found"}))
@@ -177,7 +177,7 @@ def cmd_update(conn, args):
         conn.commit()
 
         row = conn.execute(
-            "SELECT * FROM portfolio_positions WHERE id = ?", (position_id,)
+            "SELECT * FROM portfolio_positions WHERE id = ? AND status IS NOT 'deleted'", (position_id,)
         ).fetchone()
         print(json.dumps({"ok": True, "position": dict(row) if row else None}))
     except Exception as e:
@@ -210,7 +210,7 @@ def cmd_close(conn, args):
         return
 
     row = conn.execute(
-        "SELECT * FROM portfolio_positions WHERE id = ?", (position_id,)
+        "SELECT * FROM portfolio_positions WHERE id = ? AND status IS NOT 'deleted'", (position_id,)
     ).fetchone()
 
     if not row:
@@ -247,7 +247,7 @@ def cmd_close(conn, args):
         conn.commit()
 
         updated = conn.execute(
-            "SELECT * FROM portfolio_positions WHERE id = ?", (position_id,)
+            "SELECT * FROM portfolio_positions WHERE id = ? AND status IS NOT 'deleted'", (position_id,)
         ).fetchone()
         print(json.dumps({"ok": True, "position": dict(updated) if updated else None}))
     except Exception as e:
@@ -255,7 +255,7 @@ def cmd_close(conn, args):
 
 
 def cmd_remove(conn, args):
-    """Delete a position by id.
+    """Soft-delete a position by id (sets status='deleted').
 
     args: id
     """
@@ -270,14 +270,23 @@ def cmd_remove(conn, args):
         return
 
     existing = conn.execute(
-        "SELECT id FROM portfolio_positions WHERE id = ?", (position_id,)
+        "SELECT id FROM portfolio_positions WHERE id = ? AND status IS NOT 'deleted'", (position_id,)
     ).fetchone()
     if not existing:
         print(json.dumps({"error": f"Position {position_id} not found"}))
         return
 
     try:
-        conn.execute("DELETE FROM portfolio_positions WHERE id = ?", (position_id,))
+        # Soft-delete (matches the bot-side DBA-01 C-P3 convention: status='deleted'),
+        # NEVER a hard DELETE — additive-only law, the row stays recoverable.
+        # MOOT on the live 0444 read-only litestream replica: this write fails
+        # harmlessly with SQLITE_READONLY today (no route wires to this CLI, and the
+        # existence check above already filters soft-deleted rows). Correct-by-
+        # construction if this CLI is ever pointed at a writable DB.
+        conn.execute(
+            "UPDATE portfolio_positions SET status = 'deleted' WHERE id = ?",
+            (position_id,),
+        )
         conn.commit()
         print(json.dumps({"ok": True, "removed": position_id}))
     except Exception as e:
@@ -296,6 +305,7 @@ def cmd_analytics(conn):
                SUM(CASE WHEN pnl_usd IS NOT NULL THEN pnl_usd ELSE 0 END) as total_pnl_usd,
                AVG(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct END) as avg_pnl_pct
         FROM portfolio_positions
+        WHERE status IS NOT 'deleted'
         GROUP BY asset_type
     """).fetchall()
 
@@ -329,6 +339,7 @@ def cmd_analytics(conn):
                SUM(CASE WHEN pnl_pct IS NOT NULL AND pnl_pct < 0 THEN 1 ELSE 0 END) as losers,
                SUM(CASE WHEN pnl_pct IS NOT NULL AND pnl_pct = 0 THEN 1 ELSE 0 END) as breakeven
         FROM portfolio_positions
+        WHERE status IS NOT 'deleted'
     """).fetchone()
 
     totals = dict(totals_row)
