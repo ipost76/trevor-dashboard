@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -27,6 +28,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 DB = "/home/trevor/trevor/trevor.db"
 SHADOW_ROWS_REQUIRED = 200    # FUTURE_01 threshold
 STALE_DAYS = 7                # latest_write < 7d ago → ACTIVE, else DORMANT
+
+# ── Stale-when-expected alarm (B2) — mirrors query_shadow_registry.py ─────────
+# An expected_active table that still has rows but has gone silent beyond its OWN
+# historical write cadence is STALE — a distinct alarm, NOT silently demoted to
+# DORMANT. Cadence is data-driven per table (median inter-write gap), no hardcode.
+STALE_ALARM_ENABLED = True       # default-OFF→ON after the gate proved before/after on a real table
+STALE_GAP_SAMPLE = 500           # last N inter-write gaps sampled (wide enough to see inter-burst gaps)
+STALE_FACTOR = 12                # alarm once silent for FACTOR × the MEDIAN gap (steady-cadence tables)
+STALE_MAXGAP_FACTOR = 2          # ...OR FACTOR × the table's longest-ever gap (activity-driven/bursty tables)
+STALE_MIN_FLOOR_SEC = 6 * 3600   # floor — absorbs WSL replica lag (~15-30m)
+STALE_MAX_THRESHOLD_SEC = 21 * 86400  # cap — a freak historical outage can't mask a real death past 21d
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +269,8 @@ def _ks_whale_source(conn: sqlite3.Connection) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Connection], Dict[str, Any]]]]] = [
-    # --- ACTIVE (15 — shadow_scoring excluded; leverage_v2 RETIRED P06) -------
+    # --- ACTIVE (14 — shadow_scoring excluded; leverage_v2 RETIRED P06;
+    #     regime_gate_shadow + whale_source_shadow_log DEREGISTERED B1 2026-06-20) --
     ("alo_entry_shadow",              "ALO Entries",                "created_at",      "iso",  True,  _ks_alo),
     ("calibration_v2_audit",          "Calibrator V2 Audit",        "timestamp",       "iso",  True,  _ks_calibration_v2),
     ("calibrator_audit",              "Calibrator V1 Audit",        "timestamp",       "iso",  True,  _ks_calibrator),
@@ -267,16 +280,14 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("meme_onchain_shadow_log",       "Meme On-Chain Log",          "ts",              "unix", True,  _ks_meme_onchain),
     ("momentum_exit_shadow",          "Momentum Exit V2",           "cycle_timestamp", "iso",  True,  _ks_momentum_exit),
     ("per_ticker_cap_shadow",         "Per-Ticker Cap",             "ts",              "iso",  True,  _ks_per_ticker_cap),
-    ("regime_gate_shadow",            "Regime Gate",                "ts",              "iso",  True,  _ks_regime_gate),
     ("shadow_scorer_v2",              "Shadow Scorer V2 (A-F)",     "timestamp",       "iso",  True,  _ks_shadow_scorer_v2),
     ("sizing_v2_shadow",              "Sizing V2",                  "created_at",      "iso",  True,  _ks_sizing_v2),
     ("slippage_audit",                "Slippage Audit",             "created_at",      "iso",  True,  _ks_slippage),
     ("threshold_recalibration_shadow","Threshold Recalibration",    "timestamp",       "iso",  True,  _ks_threshold_recal),
     ("time_gate_shadow",              "Time Gate (P06)",            "ts",              "iso",  True,  _ks_time_gate),
-    ("whale_source_shadow_log",       "Whale Source Log",           "ts",              "unix", True,  _ks_whale_source),
-    # --- DORMANT (6 — expected to be 0 / stale; not BROKEN; exit_engine RETIRED P06) --
+    # --- DORMANT (6 — expected 0/stale; not BROKEN; exit_engine RETIRED P06;
+    #     group_weight_shadow DEREGISTERED B1 2026-06-20) --
     ("regime_exit_shadow",            "Regime-Aware Exits (S2-P04)", "created_at",      "iso",  False, None),
-    ("group_weight_shadow",           "Group Weight",               "timestamp",       "iso",  False, None),
     ("live_partial_shadow",           "Live Partials",              "created_at",      "iso",  False, None),
     ("partial_trigger_shadow",        "Partial Triggers",           "created_at",      "iso",  False, None),
     ("regime_gate_v2_shadow",         "Regime Gate V2",             "created_at",      "iso",  False, None),
@@ -284,17 +295,26 @@ TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Conn
     ("funding_signal_shadow",         "Funding Signal (S3-P01)",    "created_at",      "iso",  False, None),
 ]
 
-# ── RETIRED shadows (2026-06-01, P06 CUT-leverage-exitengine) ────────────────
-# Deregistered from the Intel-tab inventory grid (removed from TABLE_DEFS above)
-# because their bot-side writers are now suppressed flag-OFF
+# ── RETIRED / deregistered shadows (2026-06-01 P06; +B1 2026-06-20) ──────────
+# Deregistered from the Intel-tab inventory grid (removed from TABLE_DEFS above).
+# 2026-06-01 P06: leverage_v2/exit_engine writers suppressed flag-OFF
 # (LEVERAGE_V2_SHADOW_ENABLED / EXIT_ENGINE_SHADOW_ENABLED, default false).
+# 2026-06-20 B1: the remaining 3 dead shadows. whale_source_shadow_log writer is
+# flag-OFF (WHALE_SOURCE_SHADOW_ENABLED=false); regime_gate_shadow (v1) +
+# group_weight_shadow have NO private flag (shared with the LIVE v2 scorers
+# regime_gate_v2_shadow / GROUP_WEIGHTS_V2) → deregister-ONLY, NEVER flip.
+# The LIVE regime_gate_v2_shadow stays in TABLE_DEFS above — do NOT confuse it
+# with the v1 regime_gate_shadow cut here.
 # Tables + historical rows RETAINED (additive-DB law); Ghost may archive later.
-# Kept in-source (NOT iterated into the grid) so the history stays explicit.
-# _ks_leverage_v2 is preserved above for the same reason (referenced here).
-# To un-retire: move the tuple back into TABLE_DEFS + re-enable the bot flag.
+# Kept in-source (NOT iterated into the grid) so the history stays explicit;
+# _ks_leverage_v2 / _ks_regime_gate / _ks_whale_source preserved above, referenced here.
+# To un-retire: move the tuple back into TABLE_DEFS (+ re-enable the bot flag where one exists).
 RETIRED_TABLE_DEFS: List[Tuple[str, str, str, str, bool, Optional[Callable[[sqlite3.Connection], Dict[str, Any]]]]] = [
     ("leverage_v2_shadow",            "Leverage V2 (retired)",      "created_at",      "iso",  False, _ks_leverage_v2),
     ("exit_engine_shadow",            "Exit Engine (retired)",      "created_at",      "iso",  False, None),
+    ("regime_gate_shadow",            "Regime Gate (deregistered)", "ts",              "iso",  False, _ks_regime_gate),
+    ("whale_source_shadow_log",       "Whale Source Log (deregistered)", "ts",         "unix", False, _ks_whale_source),
+    ("group_weight_shadow",           "Group Weight (deregistered)", "timestamp",      "iso",  False, None),
 ]
 
 
@@ -321,7 +341,59 @@ def _parse_ts(s: str) -> datetime:
     return dt
 
 
-def _classify(rows: int, latest_write: Optional[str], expected_active: bool) -> str:
+def _cadence(
+    conn: sqlite3.Connection, table: str, ts_col: str, ts_kind: str
+) -> Optional[Tuple[float, float]]:
+    """(median_gap, max_gap) in seconds from the last STALE_GAP_SAMPLE+1 rows.
+
+    Generic, data-driven cadence — never hardcoded per-table. max_gap = the
+    longest the table has EVER been quiet in the sample (so an activity-driven /
+    bursty writer isn't false-flagged during a normal lull). None when too few rows.
+    """
+    try:
+        rows = conn.execute(
+            f"SELECT {ts_col} FROM {table} ORDER BY {ts_col} DESC LIMIT {STALE_GAP_SAMPLE + 1}"
+        ).fetchall()
+    except Exception:
+        return None
+    ts: List[datetime] = []
+    for r in rows:
+        v = r[0]
+        if v is None:
+            continue
+        try:
+            if ts_kind == "unix":
+                ts.append(datetime.fromtimestamp(int(v), tz=timezone.utc).replace(tzinfo=None))
+            else:
+                ts.append(_parse_ts(str(v)))
+        except Exception:
+            continue
+    if len(ts) < 3:  # need ≥2 gaps for a meaningful cadence
+        return None
+    ts.sort()
+    gaps = [(ts[i + 1] - ts[i]).total_seconds() for i in range(len(ts) - 1)]
+    return statistics.median(gaps), max(gaps)
+
+
+def _stale_threshold_sec(median_gap: float, max_gap: float) -> float:
+    """Silence threshold from a table's own cadence: alarm once it has been quiet
+    longer than it normally ever is. max(FACTOR×median, MAXGAP_FACTOR×longest-gap,
+    floor), capped so a freak historical outage can't mask a real death forever.
+    """
+    thr = max(
+        STALE_FACTOR * median_gap,
+        STALE_MAXGAP_FACTOR * max_gap,
+        STALE_MIN_FLOOR_SEC,
+    )
+    return min(thr, STALE_MAX_THRESHOLD_SEC)
+
+
+def _classify(
+    rows: int,
+    latest_write: Optional[str],
+    expected_active: bool,
+    stale_threshold_sec: Optional[float] = None,
+) -> str:
     if rows == 0:
         return "BROKEN" if expected_active else "DORMANT"
     if not latest_write:
@@ -329,9 +401,18 @@ def _classify(rows: int, latest_write: Optional[str], expected_active: bool) -> 
     try:
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         age = now_utc - _parse_ts(latest_write)
-        return "ACTIVE" if age < timedelta(days=STALE_DAYS) else "DORMANT"
     except Exception:
         return "DORMANT"
+    # B2 stale-when-expected: an expected_active table silent beyond its own
+    # historical cadence is STALE (an alarm), NOT silently demoted to DORMANT.
+    if (
+        STALE_ALARM_ENABLED
+        and expected_active
+        and stale_threshold_sec is not None
+        and age.total_seconds() > stale_threshold_sec
+    ):
+        return "STALE"
+    return "ACTIVE" if age < timedelta(days=STALE_DAYS) else "DORMANT"
 
 
 def _inspect_table(
@@ -350,6 +431,11 @@ def _inspect_table(
         "rows_48h": 0,
         "latest_write": None,
         "status": "DORMANT",
+        # B2 stale-when-expected telemetry (null unless expected_active + rows + ts).
+        "median_gap_sec": None,
+        "max_gap_sec": None,
+        "stale_threshold_sec": None,
+        "silence_sec": None,
         "key_stat": {},
         "error": None,
     }
@@ -385,7 +471,27 @@ def _inspect_table(
                 f"SELECT COUNT(*) FROM {name} WHERE {ts_col} > datetime('now', '-2 days')"
             ).fetchone()[0]
 
-        info["status"] = _classify(info["rows"], info["latest_write"], expected_active)
+        # B2 stale-when-expected: derive the data-driven cadence threshold + the
+        # current silence for expected_active tables with rows + a timestamp.
+        stale_threshold_sec: Optional[float] = None
+        if STALE_ALARM_ENABLED and expected_active and info["rows"] and ts_col:
+            cad = _cadence(conn, name, ts_col, ts_kind)
+            if cad is not None:
+                med, mx = cad
+                stale_threshold_sec = _stale_threshold_sec(med, mx)
+                info["median_gap_sec"] = round(med, 1)
+                info["max_gap_sec"] = round(mx, 1)
+            else:
+                stale_threshold_sec = float(STALE_DAYS * 86400)
+            info["stale_threshold_sec"] = round(stale_threshold_sec, 1)
+        if info["latest_write"]:
+            try:
+                _now = datetime.now(timezone.utc).replace(tzinfo=None)
+                info["silence_sec"] = round((_now - _parse_ts(info["latest_write"])).total_seconds(), 1)
+            except Exception:
+                pass
+
+        info["status"] = _classify(info["rows"], info["latest_write"], expected_active, stale_threshold_sec)
 
         if key_stat_fn is not None and info["rows"] > 0:
             try:

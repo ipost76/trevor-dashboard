@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { Pill } from "./pill";
 import { fmtUsd, fmtPct, fmtCount } from "@/lib/shadow-aggregate";
 
-export type CompactShadowStatus = "active" | "dormant";
+export type CompactShadowStatus = "active" | "dormant" | "stale";
 export type CompactPromotion = "ready" | "accruing" | "na";
 
 export interface CompactShadowCardProps {
@@ -63,6 +63,10 @@ export function ReadinessBadge({
   promotion: CompactPromotion;
   promotionN?: number | null;
 }) {
+  // STALE wins over everything — it's an alarm (registered active but gone silent).
+  if (status === "stale") {
+    return <Pill intent="error" size="sm">STALE</Pill>;
+  }
   if (status === "dormant") {
     return (
       <Pill tone="neutral" size="sm" className="text-fg-faint">
@@ -168,7 +172,12 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
   } = props;
   const [expanded, setExpanded] = React.useState(false);
   const isActive = status === "active";
-  const dot = isActive ? "bg-accent-mint-strong" : "bg-fg-faint";
+  const isStale = status === "stale";
+  const dot = isActive
+    ? "bg-accent-mint-strong"
+    : isStale
+      ? "bg-accent-red"
+      : "bg-fg-faint";
   const hasDiv = divergencePct !== null && divergencePct !== undefined;
   // Outcome shadow ⇔ a realized P&L column exists AND at least one row is linked.
   const hasOutcome =
@@ -183,7 +192,9 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
         "rounded-md border transition-colors duration-fast",
         isActive
           ? "border-border-subtle bg-bg-card hover:border-accent-cyan-soft/40"
-          : "border-border-subtle bg-bg-card opacity-75",
+          : isStale
+            ? "border-accent-red/40 bg-bg-card"
+            : "border-border-subtle bg-bg-card opacity-75",
       )}
     >
       <button
@@ -243,7 +254,11 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
             <dt className="font-sans text-fg-muted">status</dt>
             <dd
               className={
-                isActive ? "text-accent-mint-strong" : "text-accent-gold-strong"
+                isActive
+                  ? "text-accent-mint-strong"
+                  : isStale
+                    ? "text-accent-red"
+                    : "text-accent-gold-strong"
               }
             >
               {status}

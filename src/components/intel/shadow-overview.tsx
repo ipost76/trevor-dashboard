@@ -7,7 +7,7 @@ import { ShadowScoringHero, type IntelShadowState } from "./shadow-scoring-hero"
 import { PartialShadowCard } from "@/components/autotrader-v2/partial-shadow-card";
 import { PromotionLeaderboard } from "./promotion-leaderboard";
 
-type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN";
+type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN" | "STALE";
 type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data" | "Other";
 type Promotion = "ready" | "accruing" | "na";
 
@@ -21,6 +21,11 @@ export interface ShadowRegistryTable {
   status: RegistryStatus;
   expected_active: boolean;
   retired: boolean;
+  // B2 stale-when-expected telemetry (null unless expected_active + rows + ts).
+  median_gap_sec?: number | null;
+  max_gap_sec?: number | null;
+  stale_threshold_sec?: number | null;
+  silence_sec?: number | null;
   auto_derived: boolean;
   divergence_col: string | null;
   divergent_n: number | null;
@@ -44,6 +49,7 @@ interface ShadowRegistryResponse {
   by_status: Record<string, number>;
   total: number;
   promotion_ready: number;
+  stale_count?: number;
   stale_days: number;
   promotion_min_n: number;
   replica_age_seconds: number | null;
@@ -84,14 +90,23 @@ function fmtAge(iso: string | null | undefined): string {
   return `${Math.floor(ageSec / 86400)}d ago`;
 }
 
+function fmtDur(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined || !Number.isFinite(sec)) return "—";
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  if (sec < 86400) return `${(sec / 3600).toFixed(1)}h`;
+  return `${(sec / 86400).toFixed(1)}d`;
+}
+
 function adaptCard(t: ShadowRegistryTable) {
+  const cardStatus: "active" | "dormant" | "stale" =
+    t.status === "ACTIVE" ? "active" : t.status === "STALE" ? "stale" : "dormant";
   return {
     name: t.display,
     tableName: t.table_name,
     totalRows: t.rows,
     rows48h: t.rows_48h,
     latestAge: fmtAge(t.latest_write),
-    status: (t.status === "ACTIVE" ? "active" : "dormant") as "active" | "dormant",
+    status: cardStatus,
     function: t.function,
     divergentN: t.divergent_n,
     divergencePct: t.divergence_pct,
@@ -106,7 +121,17 @@ function adaptCard(t: ShadowRegistryTable) {
     outcomeMinPnl: t.outcome_min_pnl,
     outcomeMaxPnl: t.outcome_max_pnl,
     outcomeWinRate: t.outcome_win_rate,
-    extraMetrics: t.error ? { error: t.error } : undefined,
+    extraMetrics:
+      t.status === "STALE"
+        ? {
+            "silent for": fmtDur(t.silence_sec),
+            "expected cadence": `~${fmtDur(t.median_gap_sec)}`,
+            "stale after": `~${fmtDur(t.stale_threshold_sec)}`,
+            ...(t.error ? { error: t.error } : {}),
+          }
+        : t.error
+          ? { error: t.error }
+          : undefined,
   };
 }
 
@@ -169,6 +194,13 @@ export function ShadowOverview() {
   // Hero owns shadow_scoring — strip it from every list (its surface is the hero).
   const tablesExHero = tables.filter((t) => t.table_name !== HERO_TABLE);
 
+  // STALE alarm (B2): registered expected_active but silent beyond its own write
+  // cadence. Pulled to the TOP — never buried in the hidden toggle below.
+  const staleTables = tablesExHero
+    .filter((t) => t.status === "STALE")
+    .sort((a, b) => (b.silence_sec ?? 0) - (a.silence_sec ?? 0));
+  const staleCount = registry?.stale_count ?? staleTables.length;
+
   // Signal-carriers = ACTIVE shadows with a real divergence/readiness signal,
   // ranked. The top N become the leaderboard; the rest are the dense default list.
   const ranked = tablesExHero
@@ -179,8 +211,9 @@ export function ShadowOverview() {
   const readyCount = ranked.filter((t) => t.promotion === "ready").length;
 
   // Hidden behind the toggle: active-no-signal (na) + dormant + 0-row, together.
+  // STALE is excluded — it has its own prominent alarm section above.
   const hidden = tablesExHero
-    .filter((t) => t.status !== "ACTIVE" || t.promotion === "na")
+    .filter((t) => t.status !== "STALE" && (t.status !== "ACTIVE" || t.promotion === "na"))
     .sort(byHidden);
 
   const replicaAge = registry?.replica_age_seconds ?? null;
@@ -209,6 +242,9 @@ export function ShadowOverview() {
         <span className="text-fg-faint">·</span>
         <span>
           {registry?.total ?? tables.length} shadows · {readyCount} gate-ready
+          {staleCount > 0 ? (
+            <span className="text-accent-red"> · {staleCount} STALE</span>
+          ) : null}
         </span>
       </div>
 
@@ -216,6 +252,22 @@ export function ShadowOverview() {
         <Skeleton className="h-48 w-full" />
       ) : (
         <div className="space-y-4">
+          {/* ── STALE alarm (B2): registered active but gone silent ──────── */}
+          {staleTables.length > 0 && (
+            <section className="space-y-1.5 rounded-md border border-accent-red/40 bg-accent-red/5 p-3">
+              <h3 className="flex items-center gap-2 font-sans text-caption font-semibold text-accent-red">
+                <span aria-hidden>⚠</span>
+                {staleTables.length} STALE — registered active but silent beyond cadence
+              </h3>
+              <p className="font-sans text-micro leading-relaxed text-fg-muted">
+                These shadows are expected to be writing but have gone quiet well
+                beyond their own historical write cadence — they still have rows,
+                just old ones. Check each writer (tap a row for silence vs cadence).
+              </p>
+              <div className="space-y-1.5">{staleTables.map(renderRow)}</div>
+            </section>
+          )}
+
           {/* ── Zone 1: leaderboard (the headline) ───────────────────────── */}
           <PromotionLeaderboard candidates={leaderboardTables} readyCount={readyCount} />
 

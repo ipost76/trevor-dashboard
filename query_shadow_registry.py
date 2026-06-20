@@ -29,6 +29,7 @@ import json
 import math
 import os
 import sqlite3
+import statistics
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -36,6 +37,20 @@ from typing import Optional
 DB = "/home/trevor/trevor/trevor.db"  # symlink → /home/ghost/trevor-replica/trevor.db on WSL
 STALE_DAYS = 7
 PROMOTION_MIN_N = 30  # divergent samples needed before a Wilson test is meaningful
+
+# ── Stale-when-expected alarm (B2) ───────────────────────────────────────────
+# A shadow registered expected_active=True that still has rows but has gone
+# silent beyond its OWN historical write cadence is STALE — a distinct alarm,
+# NOT silently demoted to DORMANT (the by-design state of expected_active=False
+# tables). Under the old rows==0-only alarm, regime_gate_shadow read DORMANT for
+# ~20 days with rows>0 and nobody noticed. The cadence is data-driven per table
+# (median inter-write gap), never hardcoded per-table.
+STALE_ALARM_ENABLED = True       # default-OFF→ON after the gate proved before/after on regime_gate_shadow
+STALE_GAP_SAMPLE = 500           # last N inter-write gaps sampled (wide enough to see inter-burst gaps)
+STALE_FACTOR = 12                # alarm once silent for FACTOR × the MEDIAN gap (steady-cadence tables)
+STALE_MAXGAP_FACTOR = 2          # ...OR FACTOR × the table's longest-ever gap (activity-driven/bursty tables)
+STALE_MIN_FLOOR_SEC = 6 * 3600   # floor — absorbs WSL replica lag (~15-30m)
+STALE_MAX_THRESHOLD_SEC = 21 * 86400  # cap — a freak historical outage can't mask a real death past 21d
 
 # Curated metadata for known tables. Anything NOT here is auto-derived.
 # fields: display, function, ts_col, ts_kind, expected_active, retired
@@ -72,6 +87,7 @@ OVERRIDE: dict[str, dict] = {
     "calibrator_audit":               dict(display="Calibrator V1 Audit",        function="Scoring", ts_col="timestamp",       ts_kind="iso",  expected_active=True),
     "calibration_v2_audit":           dict(display="Calibrator V2 Audit",        function="Scoring", ts_col="timestamp",       ts_kind="iso",  expected_active=True),
     "group_weight_shadow":            dict(display="Group Weight",               function="Scoring", ts_col="timestamp",       ts_kind="iso",  expected_active=False),
+    "signal_ab_results":              dict(display="Signal A/B Results",         function="Scoring", ts_col="created_at",      ts_kind="iso",  expected_active=True),
     # ── Risk ─────────────────────────────────────────────────────────────────
     "sizing_v2_shadow":               dict(display="Sizing V2",                  function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=True),
     "stop_floor_v2_shadow":           dict(display="Stop Floor V2",              function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=False),
@@ -83,13 +99,35 @@ OVERRIDE: dict[str, dict] = {
 }
 
 # Non-"shadow"-named adjuncts to fold into the enumeration (LIKE '%shadow%' misses them).
-EXTRA_TABLES = ["slippage_audit", "calibrator_audit", "calibration_v2_audit"]
+# signal_ab_results (B2): 2k+ rows, writing live every signal, but invisible — no
+# "shadow" in the name and not previously enumerated. Surfaced in the curated extras.
+EXTRA_TABLES = ["slippage_audit", "calibrator_audit", "calibration_v2_audit", "signal_ab_results"]
+
+# Deregistered dead shadows (B1, 2026-06-20) — excluded from the Hub roll-up.
+# The enumerator matches LIKE '%shadow%', so OVERRIDE retired=True only RELABELS;
+# this exclude-set is what actually HIDES a dead observer. Tables + historical
+# rows stay on disk (additive-DB law — no DROP); reverse by removing a name here.
+# NB: orderflow/exit_engine/leverage_v2/whale writers are flag-OFF; regime_gate_shadow
+# (v1) + group_weight_shadow have NO private flag (shared with the LIVE v2 scorers)
+# → deregister-ONLY, flip nothing. The LIVE regime_gate_v2_shadow is NOT listed here.
+DEREGISTERED: frozenset[str] = frozenset({
+    "orderflow_entry_shadow",
+    "exit_engine_shadow",
+    "leverage_v2_shadow",
+    "whale_source_shadow_log",
+    "regime_gate_shadow",
+    "group_weight_shadow",
+})
 
 # Timestamp column preference for auto-derived (non-override) tables.
 TS_PRIORITY = ["created_at", "ts", "timestamp", "cycle_timestamp", "time"]
 
 # Boolean divergence / would-fire column preference (first present wins).
-DIV_PRIORITY = ["divergent", "would_block", "would_fire", "would_fire_v1", "is_divergent"]
+# would_fire_v1 deliberately EXCLUDED (B2): live_partial_shadow's would_fire_v1 is
+# a hardcoded-True stub (never wired to a real v1 partial-fire decision), so it
+# falsely reads 100% would-fire → promotion-ready. The real fix sets it NULL
+# VM-side; here we de-rank it so a stub column never feeds the promotion signal.
+DIV_PRIORITY = ["divergent", "would_block", "would_fire", "is_divergent"]
 # Realized per-trade outcome columns, in preference order. When a table carries
 # one of these AND it is linked (NOT NULL), HUB-C2 surfaces read-only aggregate
 # stats (mean / min / max / win-rate over linked rows). A would-fire/divergence
@@ -159,7 +197,60 @@ def _parse_ts(s: str) -> datetime:
     return dt
 
 
-def _classify(rows: int, latest_iso: Optional[str], expected_active: bool) -> str:
+def _cadence(
+    conn: sqlite3.Connection, table: str, ts_col: str, ts_kind: str
+) -> Optional[tuple[float, float]]:
+    """(median_gap, max_gap) in seconds from the last STALE_GAP_SAMPLE+1 rows.
+
+    Generic, data-driven cadence — never hardcoded per-table. max_gap = the
+    longest the table has EVER been quiet in the sample (so an activity-driven /
+    bursty writer isn't false-flagged during a normal lull). None when there are
+    too few parseable timestamps.
+    """
+    try:
+        rows = conn.execute(
+            f"SELECT {ts_col} FROM {table} ORDER BY {ts_col} DESC LIMIT {STALE_GAP_SAMPLE + 1}"
+        ).fetchall()
+    except Exception:
+        return None
+    ts: list[datetime] = []
+    for r in rows:
+        v = r[0]
+        if v is None:
+            continue
+        try:
+            if ts_kind == "unix":
+                ts.append(datetime.fromtimestamp(int(v), tz=timezone.utc).replace(tzinfo=None))
+            else:
+                ts.append(_parse_ts(str(v)))
+        except Exception:
+            continue
+    if len(ts) < 3:  # need ≥2 gaps for a meaningful cadence
+        return None
+    ts.sort()
+    gaps = [(ts[i + 1] - ts[i]).total_seconds() for i in range(len(ts) - 1)]
+    return statistics.median(gaps), max(gaps)
+
+
+def _stale_threshold_sec(median_gap: float, max_gap: float) -> float:
+    """Silence threshold from a table's own cadence: alarm once it has been quiet
+    longer than it normally ever is. max(FACTOR×median, MAXGAP_FACTOR×longest-gap,
+    floor), capped so a freak historical outage can't mask a real death forever.
+    """
+    thr = max(
+        STALE_FACTOR * median_gap,
+        STALE_MAXGAP_FACTOR * max_gap,
+        STALE_MIN_FLOOR_SEC,
+    )
+    return min(thr, STALE_MAX_THRESHOLD_SEC)
+
+
+def _classify(
+    rows: int,
+    latest_iso: Optional[str],
+    expected_active: bool,
+    stale_threshold_sec: Optional[float] = None,
+) -> str:
     if rows == 0:
         return "BROKEN" if expected_active else "DORMANT"
     if not latest_iso:
@@ -167,9 +258,18 @@ def _classify(rows: int, latest_iso: Optional[str], expected_active: bool) -> st
     try:
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         age = now_utc - _parse_ts(latest_iso)
-        return "ACTIVE" if age < timedelta(days=STALE_DAYS) else "DORMANT"
     except Exception:
         return "DORMANT"
+    # B2 stale-when-expected: an expected_active table silent beyond its own
+    # historical cadence is STALE (an alarm), NOT silently demoted to DORMANT.
+    if (
+        STALE_ALARM_ENABLED
+        and expected_active
+        and stale_threshold_sec is not None
+        and age.total_seconds() > stale_threshold_sec
+    ):
+        return "STALE"
+    return "ACTIVE" if age < timedelta(days=STALE_DAYS) else "DORMANT"
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> dict[str, str]:
@@ -228,6 +328,11 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
         "expected_active": bool(expected_active) if expected_active is not None else False,
         "retired": retired,
         "auto_derived": table not in OVERRIDE,
+        # B2 stale-when-expected telemetry (null unless expected_active + rows + ts).
+        "median_gap_sec": None,
+        "max_gap_sec": None,
+        "stale_threshold_sec": None,
+        "silence_sec": None,
         "divergence_col": None,
         "divergent_n": None,
         "divergence_pct": None,
@@ -278,7 +383,28 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
         except Exception as exc:
             info["error"] = f"ts read: {type(exc).__name__}: {exc}"
 
-    info["status"] = _classify(info["rows"], latest_iso, info["expected_active"])
+    # B2 stale-when-expected: derive the per-table cadence threshold (data-driven)
+    # and the current silence, for expected_active tables with rows + a ts column.
+    stale_threshold_sec: Optional[float] = None
+    if STALE_ALARM_ENABLED and info["expected_active"] and total and ts_col:
+        cad = _cadence(conn, table, ts_col, ts_kind)
+        if cad is not None:
+            med, mx = cad
+            stale_threshold_sec = _stale_threshold_sec(med, mx)
+            info["median_gap_sec"] = round(med, 1)
+            info["max_gap_sec"] = round(mx, 1)
+        else:
+            # too few rows to derive a cadence → fall back to the 7-day ceiling
+            stale_threshold_sec = float(STALE_DAYS * 86400)
+        info["stale_threshold_sec"] = round(stale_threshold_sec, 1)
+    if latest_iso:
+        try:
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            info["silence_sec"] = round((now_utc - _parse_ts(latest_iso)).total_seconds(), 1)
+        except Exception:
+            pass
+
+    info["status"] = _classify(info["rows"], latest_iso, info["expected_active"], stale_threshold_sec)
 
     # Divergence + promotion-readiness (only when a boolean divergence column exists)
     div_col = _pick_div(cols)
@@ -336,9 +462,12 @@ def _enumerate(conn: sqlite3.Connection) -> list[str]:
             "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%shadow%' "
             "ORDER BY name"
         )
+        if r["name"] not in DEREGISTERED
     ]
     have = set(names)
     for extra in EXTRA_TABLES:
+        if extra in DEREGISTERED:
+            continue
         if extra not in have:
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (extra,)
@@ -378,7 +507,7 @@ def main() -> int:
     conn.close()
 
     by_function: dict[str, list[str]] = {}
-    by_status: dict[str, int] = {"ACTIVE": 0, "DORMANT": 0, "BROKEN": 0}
+    by_status: dict[str, int] = {"ACTIVE": 0, "DORMANT": 0, "BROKEN": 0, "STALE": 0}
     promotion_ready = 0
     for t in tables:
         by_function.setdefault(t["function"], []).append(t["table_name"])
@@ -392,6 +521,7 @@ def main() -> int:
         "by_status": by_status,
         "total": len(tables),
         "promotion_ready": promotion_ready,
+        "stale_count": by_status.get("STALE", 0),
         "stale_days": STALE_DAYS,
         "promotion_min_n": PROMOTION_MIN_N,
         "replica_age_seconds": age,

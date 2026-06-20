@@ -25,8 +25,14 @@ interface ShadowTable {
   rows: number;
   rows_48h: number;
   latest_write: string | null;
-  status: "ACTIVE" | "DORMANT" | "BROKEN";
+  // STALE (B2): registered expected_active but silent beyond its own write cadence.
+  status: "ACTIVE" | "DORMANT" | "BROKEN" | "STALE";
   expected_active: boolean;
+  // B2 stale-when-expected telemetry (null unless expected_active + rows + ts).
+  median_gap_sec?: number | null;
+  max_gap_sec?: number | null;
+  stale_threshold_sec?: number | null;
+  silence_sec?: number | null;
   retired: boolean;
   auto_derived: boolean;
   divergence_col: string | null;
@@ -52,6 +58,7 @@ interface ShadowRegistryResponse {
   by_status: Record<string, number>;
   total: number;
   promotion_ready: number;
+  stale_count?: number;
   stale_days: number;
   promotion_min_n: number;
   replica_age_seconds: number | null;
@@ -62,9 +69,10 @@ interface ShadowRegistryResponse {
 const FALLBACK: ShadowRegistryResponse = {
   tables: [],
   by_function: {},
-  by_status: { ACTIVE: 0, DORMANT: 0, BROKEN: 0 },
+  by_status: { ACTIVE: 0, DORMANT: 0, BROKEN: 0, STALE: 0 },
   total: 0,
   promotion_ready: 0,
+  stale_count: 0,
   stale_days: 7,
   promotion_min_n: 30,
   replica_age_seconds: null,
