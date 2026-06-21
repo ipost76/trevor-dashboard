@@ -85,6 +85,7 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "lessons", label: "Lessons" },
       { key: "journal", label: "Journal" },
       { key: "promote", label: "Promote" },
+      { key: "daily-edge", label: "Daily Edge" },
     ],
     defaultSubTab: "shadow",
   },

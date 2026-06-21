@@ -5,6 +5,7 @@ import { ShadowRankSection } from "./shadow-rank-section";
 import { ShadowCompareSection } from "./shadow-compare-section";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
+import { DailyEdgeSection } from "./daily-edge-section";
 
 /**
  * /intel zone view — Shadow / Lessons / Journal / Promote.
@@ -50,6 +51,10 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
       return <LessonsSection />;
     case "journal":
       return <JournalSection />;
+    case "daily-edge":
+      // DAILY EDGE (B2) — LAST Intel sub-tab; reads /api/daily-edge (engine JSON
+      // in data/) and displays today's one-tweak recommendation. Read-only.
+      return <DailyEdgeSection />;
     default:
       return <ShadowOverview />;
   }
