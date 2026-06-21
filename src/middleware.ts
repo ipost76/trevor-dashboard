@@ -64,11 +64,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
 
-  // Always allow: login page, auth API, static assets
+  // Always allow: login page, auth API, the liveness probe, static assets.
+  // NB: the liveness allowlist is an EXACT match on "/api/health" (the REL-06
+  // watchdog probe), NOT a prefix — so data sub-routes like
+  // /api/health/ai-findings* are auth-gated like every other /api/* route
+  // (they carry recon/cost data that must not be public on trevor-prime.com).
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/health") ||
+    pathname === "/api/health" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
   ) {
