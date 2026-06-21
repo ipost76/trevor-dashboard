@@ -81,6 +81,7 @@ export const ZONES: ReadonlyArray<Zone> = [
     accent: "magenta",
     subTabs: [
       { key: "shadow", label: "Shadow" },
+      { key: "impact", label: "Impact" },
       { key: "lessons", label: "Lessons" },
       { key: "journal", label: "Journal" },
       { key: "promote", label: "Promote" },
