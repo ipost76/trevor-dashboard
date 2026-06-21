@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 // match on "/api/health" only, so these data sub-routes require the session
 // cookie like every other /api/* route).
 //
-// NO download_manager / query_downloads — the recon docs live inline in the
-// ai_findings.recon_md column, a storage entirely separate from the bottom-nav
-// DOCS downloads system.
+// The recon docs live inline in the ai_findings.recon_md column — a storage
+// entirely separate from the bottom-nav DOCS file system (no shared module,
+// route, or storage with the downloads surface).
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface AiFinding {
