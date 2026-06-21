@@ -22,7 +22,7 @@ import { TrendingUp } from "lucide-react";
 // labeled as floating with open positions.
 
 // WA-P2: "custom" is an arbitrary calendar date range fed through the same
-// realized-P&L + start-of-window-equity path as the presets.
+// realized-P&L path as the presets (BASE-B2: % base = lifetime net deposits).
 type WindowKey = "today" | "yesterday" | "week" | "month" | "all" | "custom";
 
 interface RealizedWindows {
@@ -34,9 +34,9 @@ interface RealizedWindows {
   custom?: number;
 }
 
-// WA-P1 (2026-06-12): each window's % is computed against the account equity at
-// that window's START. A window whose start-of-window base is missing/≤floor is
-// `null` → rendered "—", never a garbage number.
+// BASE-B2 (2026-06-20): each window's % is computed against ONE fixed base =
+// lifetime HL net deposits (was WA-P1's per-window start-of-window equity). A
+// window with no usable base (HL unreachable) is `null` → rendered "—".
 interface NullableWindows {
   today: number | null;
   yesterday: number | null;
@@ -251,10 +251,10 @@ export function CapitalHero() {
                 decimals={2}
                 showSign
               />
-              {/* WA-P1: % of the account's equity at THIS window's start (a true
-                  return over the window). Snapshot-based, so it shows even when
-                  live equity is momentarily unreachable; a window with no usable
-                  start-of-window base renders "—", never a garbage number. */}
+              {/* BASE-B2: % of lifetime net deposits (one fixed base for every
+                  window — equal dollar P&L reads as equal %, and it can't exceed
+                  −100% of real capital). A window with no usable base (HL ledger
+                  unreachable) renders "—", never a garbage number. */}
               {headlinePct != null ? (
                 <MoneyText
                   value={headlinePct}
@@ -266,7 +266,7 @@ export function CapitalHero() {
               ) : (
                 <span
                   className="font-mono text-body tabular-nums text-fg-muted"
-                  title="no start-of-window equity snapshot for this window"
+                  title="lifetime net-deposits base unavailable"
                 >
                   —
                 </span>
