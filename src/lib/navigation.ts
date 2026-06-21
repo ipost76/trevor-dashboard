@@ -16,8 +16,9 @@
  * (/trading, /scalp, /manual, /reminders) now redirect to /autotrader.
  *
  * HEALTH zone added 2026-06-19 (B4) — promotes the <HealthSection> view
- * (formerly only at /memory?tab=health, which still works as a deep link) to a
- * top-level single-view zone at /health.
+ * (formerly at /memory?tab=health) to a top-level single-view zone at /health.
+ * B1 (2026-06-20) removed the duplicate MEMORY "System Health" sub-tab; the old
+ * /memory?tab=health deep link now 308-redirects to /health via middleware.ts.
  *
  * CHAT is a floating action button, NOT a tab. Always available, modal-style
  * full-screen on mobile, side panel on desktop.
@@ -105,17 +106,16 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "brain", label: "Brain" },
       { key: "memory", label: "Memory" },
       { key: "chromadb", label: "ChromaDB" },
-      { key: "health", label: "System Health" },
       { key: "aggressive", label: "Aggressive" },
     ],
     defaultSubTab: "brain",
   },
   {
     // B4: Health home — the promoted <HealthSection> view (single-view zone).
-    // The /memory?tab=health deep link is preserved (the memory zone keeps its
-    // `health` sub-tab); this is an additive top-level entry. Reuses the
-    // existing "green" accent (mint = healthy) so accentTextClass/
-    // accentGlowClass need no new case.
+    // B1 (2026-06-20): the duplicate MEMORY "System Health" sub-tab was removed;
+    // this is now the single health home. The old /memory?tab=health deep link
+    // 308-redirects here via middleware.ts. Reuses the existing "green" accent
+    // (mint = healthy) so accentTextClass/accentGlowClass need no new case.
     id: "health",
     href: "/health",
     label: "Health",

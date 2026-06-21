@@ -26,6 +26,23 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // B1 (HEALTH consolidation, 2026-06-20) — the duplicate MEMORY "System Health"
+  // sub-tab was removed; the bottom-nav HEALTH tab (/health) is the single home.
+  // Query-aware redirect so old `/memory?tab=health` bookmarks land on /health
+  // instead of silently falling through to the MEMORY default (BrainSection).
+  // next.config.ts / the legacyMap below match on path only, never query — so the
+  // tab check has to live here. Fires whether authed or not; /health then
+  // auth-gates normally. The query string is dropped on the hop.
+  if (
+    pathname === "/memory" &&
+    request.nextUrl.searchParams.get("tab") === "health"
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/health";
+    url.search = "";
+    return NextResponse.redirect(url, 308);
+  }
+
   // B1 — legacy nav-redesign redirects.
   // Old route names map to new canonical paths; redirects fire whether the
   // session is authed or not (the new path is then auth-gated normally).

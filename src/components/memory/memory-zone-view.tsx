@@ -3,7 +3,6 @@ import * as React from "react";
 import { BrainSection } from "./brain-section";
 import { MemorySection } from "./memory-section";
 import { ChromaSection } from "./chroma-section";
-import { HealthSection } from "./health-section";
 import { AggressiveModeSection } from "./aggressive-section";
 
 interface MemoryZoneViewProps {
@@ -17,8 +16,6 @@ export function MemoryZoneView({ subtab }: MemoryZoneViewProps) {
         return <MemorySection />;
       case "chromadb":
         return <ChromaSection />;
-      case "health":
-        return <HealthSection />;
       case "aggressive":
         return <AggressiveModeSection />;
       case "brain":
