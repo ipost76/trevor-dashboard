@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 import { EmptyState, Skeleton, Pill } from "@/components/ui";
 import { fmtUsd } from "@/lib/shadow-aggregate";
 import { cn } from "@/lib/utils";
@@ -29,23 +29,39 @@ type Verdict =
   | "unknown";
 type Dimension = "entry" | "exit" | "sizing" | "regime" | "direction" | "fees" | string;
 
+// The engine writes evidence as a per-dimension object whose ONLY common key is
+// `source` (the shadow/table + dedup key the edge derives from); the dimension
+// cells (worst_cell/all_cells, by_level, leverage figures, fees) vary per
+// candidate and are summarised by the engine inside `tweak`. The legacy
+// string/counterfactual/shadows/trade_ids keys are kept for back-compat only.
 interface Evidence {
+  source?: string;
   shadows?: string[];
   trade_ids?: Array<string | number>;
   counterfactual?: string;
 }
 
 interface Candidate {
+  id?: string;
   dimension: Dimension;
+  tweak?: string; // engine's human one-liner — already carries n/WR/net
   edge_usd: number;
   n: number;
   safety_tag: string; // reasonable | caution | unsafe (unsafe filtered engine-side)
   reversibility: string; // flag-off | config | structural
+  caveat?: string;
   evidence?: Evidence | string | null;
   forward_unpriced?: boolean;
+  directional?: boolean;
 }
 
 interface WindowBounds {
+  // The engine writes *_utc/*_et (e.g. start_utc "2026-06-20 16:00:00"); the
+  // bare start/end are legacy fallbacks only.
+  start_utc?: string;
+  end_utc?: string;
+  start_et?: string;
+  end_et?: string;
   start?: string;
   end?: string;
 }
@@ -132,23 +148,123 @@ function reversibilityLabel(rev: string): string {
   return rev || "—";
 }
 
-// One-line evidence summary — prefer the counterfactual, else a shadow/trade count.
-function evidenceLine(ev: Candidate["evidence"]): string {
-  if (!ev) return "no evidence summary";
-  if (typeof ev === "string") return ev;
-  if (ev.counterfactual) return ev.counterfactual;
-  const parts: string[] = [];
-  if (Array.isArray(ev.shadows) && ev.shadows.length)
-    parts.push(`${ev.shadows.length} shadow${ev.shadows.length === 1 ? "" : "s"}`);
-  if (Array.isArray(ev.trade_ids) && ev.trade_ids.length)
-    parts.push(`${ev.trade_ids.length} trade${ev.trade_ids.length === 1 ? "" : "s"}`);
-  return parts.length ? parts.join(" · ") : "no evidence summary";
+// Evidence lead line — the engine's own `tweak` sentence (already carries
+// n/WR/net), then legacy string/counterfactual shapes, else an honest "—".
+function evidenceLine(c: Candidate): string {
+  if (c.tweak && c.tweak.trim()) return c.tweak;
+  const ev = c.evidence;
+  if (typeof ev === "string" && ev.trim()) return ev;
+  if (ev && typeof ev === "object" && ev.counterfactual) return ev.counterfactual;
+  return "—";
+}
+
+// Provenance — the engine writes evidence.source (which shadow/table + dedup
+// key). null when absent (string/legacy evidence) so callers can omit the line.
+function evidenceSource(c: Candidate): string | null {
+  const ev = c.evidence;
+  if (ev && typeof ev === "object" && typeof ev.source === "string" && ev.source.trim())
+    return ev.source;
+  return null;
+}
+
+// ─── meta-prompt generator (C1) ──────────────────────────────────────────────
+// Templates the already-fetched JSON into a short Markdown meta-prompt for a
+// Claude.ai chat (which then writes the next Daily Recon CC prompt). Pure
+// read-and-display: reads `data`, returns a string — never writes/recomputes.
+
+// Filename day comes from the engine's generated_at (UTC), NOT the browser
+// clock, so the filename matches the data's day. null → "latest".
+function metaPromptFilename(generatedAt: string | null): string {
+  const d = parseTs(generatedAt);
+  const day = d ? d.toISOString().slice(0, 10) : "latest";
+  return `daily_recon_metaprompt_${day}.md`;
+}
+
+function buildMetaPrompt(data: DailyEdgeResponse): string {
+  const d = parseTs(data.generated_at);
+  const day = d ? d.toISOString().slice(0, 10) : "today";
+  const ws = data.window?.start_utc ?? data.window?.start;
+  const we = data.window?.end_utc ?? data.window?.end;
+  const windowLine = ws && we ? `${ws} → ${we} UTC` : "window unavailable";
+  const cands = data.candidates ?? [];
+  const top = data.today_candidate ?? cands[0] ?? null;
+  const noTweak =
+    data.verdict === "no_tweak_today" ||
+    data.verdict === "not_generated_yet" ||
+    data.verdict === "error" ||
+    cands.length === 0;
+
+  const lines: string[] = [`# TREVOR Daily Recon — Meta-Prompt (${day})`, ""];
+
+  if (noTweak) {
+    lines.push(
+      "You are a Claude.ai chat. TREVOR's daily-edge engine reported " +
+        `**${data.verdict}** for the window below — **no one-tweak candidate today**. ` +
+        "Using this, write the **next Daily Recon CC prompt**: a read-only, WSL-pipe " +
+        "forensic recon that posts a report to #downloads and writes " +
+        "`data/daily_edge_candidates.json`. With no edge to sharpen on, write a " +
+        "**standard** recon prompt that re-scans every dimension (entry, exit, sizing, " +
+        "regime, direction, fees) at full A1 depth.",
+      "",
+      "## Today",
+      `- verdict: **${data.verdict}**`,
+      `- window: ${windowLine}`,
+      `- generated: ${data.generated_at ?? "—"}`,
+    );
+    if (data.freshness_note) lines.push(`- note: ${data.freshness_note}`);
+    lines.push("");
+  } else {
+    const topDim = top?.dimension ?? "the top dimension";
+    lines.push(
+      "You are a Claude.ai chat. Using today's TREVOR daily-edge data below, write the " +
+        "**next Daily Recon CC prompt**: a read-only, WSL-pipe forensic recon that posts a " +
+        "report to #downloads and writes `data/daily_edge_candidates.json`. Sharpen it on " +
+        `what today's recon surfaced — especially the top candidate's dimension (**${topDim}**).`,
+      "",
+      "## Today",
+      `- verdict: **${data.verdict}**`,
+      `- window: ${windowLine}`,
+      `- generated: ${data.generated_at ?? "—"}`,
+      "",
+      "## Ranked candidates (edge-first)",
+    );
+    cands.forEach((c, i) => {
+      const flags: string[] = [];
+      if (c.forward_unpriced) flags.push("⚠ forward-unpriced");
+      if ((c.n ?? 0) < LOW_N) flags.push("low-n");
+      const flagStr = flags.length ? ` · ${flags.join(" · ")}` : "";
+      lines.push(
+        `### #${i + 1} — ${c.dimension} · ${fmtUsd(c.edge_usd)} edge · n=${c.n ?? 0} · ` +
+          `${c.safety_tag} · ${c.reversibility}${flagStr}`,
+        evidenceLine(c),
+      );
+      const src = evidenceSource(c);
+      const meta: string[] = [];
+      if (src) meta.push(`source: ${src}`);
+      if (c.caveat) meta.push(`caveat: ${c.caveat}`);
+      if (meta.length) lines.push(meta.join(" | "));
+      lines.push("");
+    });
+  }
+
+  lines.push(
+    "## Rules for the next prompt",
+    "- Read-only — no writes, no shadow flips, no VM bot edits.",
+    "- Dedup per trade (one realized outcome per trade key).",
+    "- Honor edge-first ranking + per-tweak-n + recommendation-only.",
+    "- Flag low-n (n<10) and forward_unpriced candidates as weaker signals.",
+    "- Mirror the proven A1 recon depth.",
+    "- Output: forensic report to #downloads + write data/daily_edge_candidates.json.",
+    "",
+  );
+  return lines.join("\n");
 }
 
 // ─── hero: today's #1 ───────────────────────────────────────────────────────
 
 function HeroCard({ c }: { c: Candidate }) {
   const weak = !!c.forward_unpriced || (c.n ?? 0) < LOW_N;
+  const src = evidenceSource(c);
   return (
     <section
       className={cn(
@@ -189,8 +305,11 @@ function HeroCard({ c }: { c: Candidate }) {
         )}
       </div>
       <p className="mt-2 font-sans text-caption leading-relaxed text-fg-primary">
-        {evidenceLine(c.evidence)}
+        {evidenceLine(c)}
       </p>
+      {src && (
+        <p className="mt-1 font-mono text-micro text-fg-muted">src: {src}</p>
+      )}
       <p className="mt-1 font-mono text-micro text-fg-muted">
         reversibility: {reversibilityLabel(c.reversibility)}
       </p>
@@ -203,6 +322,7 @@ function HeroCard({ c }: { c: Candidate }) {
 function RunnerUpCard({ c, rank }: { c: Candidate; rank: number }) {
   const [expanded, setExpanded] = React.useState(false);
   const weak = !!c.forward_unpriced || (c.n ?? 0) < LOW_N;
+  const src = evidenceSource(c);
   return (
     <section
       className={cn(
@@ -254,7 +374,19 @@ function RunnerUpCard({ c, rank }: { c: Candidate; rank: number }) {
         <div className="border-t border-border-subtle px-3 py-2 font-mono text-micro">
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt className="font-sans text-fg-muted">evidence</dt>
-            <dd className="text-fg-primary">{evidenceLine(c.evidence)}</dd>
+            <dd className="text-fg-primary">{evidenceLine(c)}</dd>
+            {src && (
+              <>
+                <dt className="font-sans text-fg-muted">source</dt>
+                <dd className="text-fg-primary">{src}</dd>
+              </>
+            )}
+            {c.caveat && (
+              <>
+                <dt className="font-sans text-fg-muted">caveat</dt>
+                <dd className="text-accent-gold-strong">{c.caveat}</dd>
+              </>
+            )}
             <dt className="font-sans text-fg-muted">reversibility</dt>
             <dd className="text-fg-primary">{reversibilityLabel(c.reversibility)}</dd>
             <dt className="font-sans text-fg-muted">forward-priced</dt>
@@ -326,6 +458,23 @@ export function DailyEdgeSection() {
     };
   }, []);
 
+  // Download today's meta-prompt — templates the already-fetched JSON into a
+  // Markdown handoff for a Claude.ai chat (client-side Blob, no server file).
+  // Declared before the early return so the hook order never changes (HUB-C3).
+  const handleDownloadMetaPrompt = React.useCallback(() => {
+    if (!data) return;
+    const md = buildMetaPrompt(data);
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = metaPromptFilename(data.generated_at);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [data]);
+
   if (loading && !data) {
     return (
       <div className="p-4 md:p-6 lg:px-8">
@@ -340,6 +489,9 @@ export function DailyEdgeSection() {
   // Runner-ups = the ranked list minus the #1 (edge-first; #1 is the hero).
   const runnerUps = candidates.slice(1);
   const history = data?.history ?? [];
+  // Engine writes start_utc/end_utc; fall back to the legacy bare start/end.
+  const windowStart = data?.window?.start_utc ?? data?.window?.start;
+  const windowEnd = data?.window?.end_utc ?? data?.window?.end;
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
@@ -349,14 +501,29 @@ export function DailyEdgeSection() {
           GENERATED {data?.generated_at ? fmtGeneratedShort(data.generated_at) : "—"}
         </Pill>
         <span>{fmtGeneratedLong(data?.generated_at ?? null)} · settled, not live</span>
-        {data?.window?.start && data?.window?.end && (
+        {windowStart && windowEnd && (
           <>
             <span className="text-fg-faint">·</span>
             <span className="font-mono tabular-nums">
-              window {fmtDateShort(data.window.start)}–{fmtDateShort(data.window.end)}
+              window {fmtDateShort(windowStart)}–{fmtDateShort(windowEnd)}
             </span>
           </>
         )}
+        <button
+          type="button"
+          onClick={handleDownloadMetaPrompt}
+          disabled={!data}
+          title="Download a Markdown meta-prompt of today's candidates for a Claude.ai chat to write the next recon prompt"
+          className={cn(
+            "tap-target ml-auto inline-flex items-center gap-1.5 rounded-md border border-border-subtle",
+            "bg-bg-card px-3 py-1.5 font-sans text-micro uppercase tracking-wider text-fg-muted",
+            "transition-colors duration-fast hover:border-accent-cyan-soft/40 hover:text-accent-cyan-soft-strong",
+            "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-subtle disabled:hover:text-fg-muted",
+          )}
+        >
+          <Download size={13} aria-hidden />
+          Download recon prompt
+        </button>
       </div>
 
       {/* Honest framing of the surface. */}
