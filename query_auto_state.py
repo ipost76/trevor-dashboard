@@ -5,11 +5,13 @@ Consolidated AUTO state for /api/auto/state.
 RM-PNL P01 (2026-05-29): REALIZED-ONLY headline P&L model.
 
   THE MODEL (intentional, non-standard — see Hub CLAUDE.md preference):
-  - Headline P&L = REALIZED only. A closed trade's `pnl_usd` is the only thing
-    that moves a realized total. An OPEN position contributes $0 to every
-    realized window regardless of its floating gain/loss; its committed
-    notional is deployed capital, NOT P&L. Unrealized NEVER enters any
-    realized number.
+  - Headline P&L = REALIZED only. A closed trade's realized total =
+    `pnl_usd` (final-leg net) + `partial_pnl_realized` (banked scale-out
+    profits) — NON-overlapping fractions, so summing both never
+    double-counts (NUM-B1, 2026-06-21; the final close excludes already-banked
+    partials). An OPEN position contributes $0 to every realized window
+    regardless of its floating gain/loss; its committed notional is deployed
+    capital, NOT P&L. Unrealized NEVER enters any realized number.
   - `realized` is bucketed across 5 windows — today / yesterday / week / month
     / all — on EASTERN-CALENDAR boundaries (closed_at is stored UTC; we compute
     ET-midnight boundaries via zoneinfo and convert to UTC for comparison).
@@ -169,13 +171,19 @@ def _et_window_starts(now_utc: datetime) -> dict:
 def compute_windows(rows, now_utc: datetime) -> dict:
     """Bucket closed-LIVE trades into realized windows on ET-calendar boundaries.
 
-    `rows`: iterable of (closed_at_str_UTC, pnl_usd_or_None). REALIZED ONLY —
-    callers pass closed live rows; this function never sees open positions or
-    unrealized PnL, so no realized total can ever include floating P&L.
+    `rows`: iterable of (closed_at_str_UTC, pnl_usd_or_None,
+    partial_pnl_realized_or_None). REALIZED ONLY — callers pass closed live
+    rows; this function never sees open positions or unrealized PnL, so no
+    realized total can ever include floating P&L.
+
+    NUM-B1/B3 (2026-06-21): each row's realized contribution =
+    `pnl_usd` (final-leg net) + `partial_pnl_realized` (banked scale-out
+    profits, COALESCE NULL→0). A row is counted toward
+    `realized_unknown_count` and excluded from every sum ONLY when it booked
+    no number at all (pnl_usd NULL *and* partial null/zero); a row with a
+    banked partial but a NULL final leg still contributes its partial.
 
     Returns {realized:{...}, realized_count:{...}, realized_unknown_count:int}.
-    NULL-pnl rows are counted toward `realized_unknown_count` and excluded from
-    every sum (we never fabricate a number for a close that didn't book one).
     String comparison on the zero-padded 'YYYY-MM-DD HH:MM:SS' UTC format is
     chronologically correct.
     """
@@ -184,27 +192,32 @@ def compute_windows(rows, now_utc: datetime) -> dict:
     counts = {"today": 0, "yesterday": 0, "week": 0, "month": 0, "all": 0}
     unknown = 0
 
-    for closed_at, pnl in rows:
+    for closed_at, pnl, partial in rows:
         if closed_at is None:
             continue
-        if pnl is None:
+        # NUM-B1/B3: realized = final-leg pnl_usd + banked scale-out partials.
+        # COALESCE the partial to 0; a row is "unknown" (no booked number)
+        # ONLY when pnl_usd is NULL *and* the partial is null/zero. A row with
+        # a banked partial but a NULL final leg still contributes its partial.
+        partial = float(partial) if partial is not None else 0.0
+        if pnl is None and partial == 0.0:
             unknown += 1
             continue
-        pnl = float(pnl)
+        realized = (float(pnl) if pnl is not None else 0.0) + partial
         # All windows
-        sums["all"] += pnl
+        sums["all"] += realized
         counts["all"] += 1
         if closed_at >= b["month"]:
-            sums["month"] += pnl
+            sums["month"] += realized
             counts["month"] += 1
         if closed_at >= b["week"]:
-            sums["week"] += pnl
+            sums["week"] += realized
             counts["week"] += 1
         if closed_at >= b["today"]:
-            sums["today"] += pnl
+            sums["today"] += realized
             counts["today"] += 1
         elif closed_at >= b["yesterday"]:  # [yesterday, today)
-            sums["yesterday"] += pnl
+            sums["yesterday"] += realized
             counts["yesterday"] += 1
 
     return {
@@ -250,26 +263,32 @@ def _parse_custom_args(argv) -> tuple[str, str] | None:
 def compute_custom(rows, start_ts: str, end_ts: str) -> dict:
     """Realized P&L over an ARBITRARY [start_ts, end_ts) span (WA-P2).
 
-    SAME numerator rule as compute_windows — sums closed-LIVE `pnl_usd`, NULL-pnl
-    rows excluded and counted separately. `end_ts` is EXCLUSIVE (ET-midnight of
-    end-day+1), so the boundary convention matches the presets exactly (a custom
-    'last 7 days' is byte-identical to the 1W preset). NO new P&L math — just a
-    different (start, end) than the preset buckets.
+    SAME numerator rule as compute_windows (NUM-B2/B3) — each row's realized =
+    `pnl_usd` (final-leg net) + `partial_pnl_realized` (banked scale-out
+    profits, COALESCE NULL→0); a row is "unknown" and excluded ONLY when it
+    booked no number at all (pnl_usd NULL *and* partial null/zero). `end_ts` is
+    EXCLUSIVE (ET-midnight of end-day+1), so the boundary convention matches the
+    presets exactly (a custom 'last 7 days' is byte-identical to the 1W preset).
+    NO new P&L math — just a different (start, end) than the preset buckets.
 
     Returns {realized: float, count: int, unknown: int}.
     """
     s = 0.0
     cnt = 0
     unknown = 0
-    for closed_at, pnl in rows:
+    for closed_at, pnl, partial in rows:
         if closed_at is None:
             continue
         if not (start_ts <= closed_at < end_ts):
             continue
-        if pnl is None:
+        # NUM-B2/B3: same numerator rule as compute_windows — sum
+        # pnl_usd + banked partials; "unknown" ONLY when pnl_usd is NULL
+        # *and* the partial is null/zero.
+        partial = float(partial) if partial is not None else 0.0
+        if pnl is None and partial == 0.0:
             unknown += 1
             continue
-        s += float(pnl)
+        s += (float(pnl) if pnl is not None else 0.0) + partial
         cnt += 1
     return {"realized": round(s, 4), "count": cnt, "unknown": unknown}
 
@@ -378,7 +397,7 @@ def main() -> int:
             # REALIZED source: every closed LIVE trade (closed_at UTC + pnl_usd).
             # Bucketed in Python on ET-calendar boundaries. Paper trades excluded.
             closed_rows = conn.execute(
-                "SELECT closed_at, pnl_usd FROM auto_trades "
+                "SELECT closed_at, pnl_usd, partial_pnl_realized FROM auto_trades "
                 "WHERE trade_mode='live' AND status='closed'"
             ).fetchall()
 
@@ -426,7 +445,11 @@ def main() -> int:
             )
 
         win = compute_windows(
-            ((r["closed_at"], r["pnl_usd"]) for r in closed_rows), now_utc
+            (
+                (r["closed_at"], r["pnl_usd"], r["partial_pnl_realized"])
+                for r in closed_rows
+            ),
+            now_utc,
         )
         realized = win["realized"]
 
@@ -435,7 +458,10 @@ def main() -> int:
         # computed by the same code path as the presets (no separate calc).
         if custom_span is not None:
             cwin = compute_custom(
-                ((r["closed_at"], r["pnl_usd"]) for r in closed_rows),
+                (
+                    (r["closed_at"], r["pnl_usd"], r["partial_pnl_realized"])
+                    for r in closed_rows
+                ),
                 custom_span[0],
                 custom_span[1],
             )
