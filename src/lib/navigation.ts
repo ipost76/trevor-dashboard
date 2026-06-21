@@ -123,6 +123,16 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Health",
     icon: Activity,
     accent: "green",
+    // B4 AI engine (Hub read-side): the Health home gains two sub-tabs —
+    // "health" (default: AI findings panel + the existing health cards incl. the
+    // B6 ShadowLabCard) and "docs" (the AI recon-doc feed). The "docs" sub-tab is
+    // distinct from the bottom-nav DOCS zone (id:"docs", /docs): different zone,
+    // route, and storage (ai_findings.recon_md, not the downloads file system).
+    subTabs: [
+      { key: "health", label: "Health" },
+      { key: "docs", label: "Docs" },
+    ],
+    defaultSubTab: "health",
   },
 ] as const;
 

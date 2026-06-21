@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import { runPython, runPythonResult, safeJsonParse } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,5 +64,54 @@ export async function GET() {
   } catch (e) {
     // Fail-soft: never 500 the panel — return the empty shape with the error noted.
     return NextResponse.json({ ...FALLBACK, error: String(e) });
+  }
+}
+
+/**
+ * POST /api/health/ai-findings — "Analyze now": enqueue an AI-engine command.
+ *
+ * Mirrors set_killswitch.py's write surface — passes the JSON body to
+ * set_ai_command.py on stdin, which INSERTs a 'pending' row into the VM LIVE
+ * ai_engine_commands queue over `ssh vm` (NOT the read-only replica). Exit codes
+ * map to HTTP: 0→200, 1→400 (bad command/body), 2→502 (VM/DB error). The engine
+ * is capped until 2026-07-01, so the command queues until then.
+ */
+export async function POST(request: Request) {
+  let body: { command?: unknown; params?: unknown; author?: unknown } = {};
+  try {
+    body = await request.json();
+  } catch {
+    // Empty/invalid body → default to a bare analyze_now.
+    body = {};
+  }
+
+  const command = String(body.command ?? "analyze_now").trim().toLowerCase() || "analyze_now";
+  const author = String(body.author ?? "ghost").trim() || "ghost";
+  const params =
+    body.params && typeof body.params === "object" && !Array.isArray(body.params)
+      ? (body.params as Record<string, unknown>)
+      : {};
+  const payload = JSON.stringify({ command, params, author });
+
+  try {
+    const res = await runPythonResult("set_ai_command.py", [], {
+      input: payload,
+      timeout: 15_000,
+    });
+    const out = safeJsonParse<{ ok?: boolean; error?: string }>(res.stdout, {
+      ok: false,
+      error: (res.stderr || "").slice(0, 300) || "no output",
+    });
+    if (res.status === 0 && out.ok) {
+      return NextResponse.json(out);
+    }
+    // 1 = bad input (route already validates, but keep the mapping honest); else VM/DB error.
+    const httpStatus = res.status === 1 ? 400 : 502;
+    return NextResponse.json(
+      { ok: false, error: out.error ?? `set_ai_command exit=${res.status}` },
+      { status: httpStatus },
+    );
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 502 });
   }
 }

@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { AiFindingsPanel } from "./ai-findings-panel";
 import { KillswitchControlCard } from "./killswitch-control-card";
 import { DataFreshnessCard } from "./data-freshness-card";
 import { ReconcileHealthCard } from "./reconcile-health-card";
@@ -34,6 +35,12 @@ import { SentinelsCard } from "./sentinels-card";
 // shadow registry (registered_shadows[] off /api/shadow/registry) — read-only,
 // no promote button. EmptyState until B7 registers ssl.py.
 //
+// B4 AI engine P4 (2026-06-21): <AiFindingsPanel> mounted at the TOP (above
+// Killswitch) — the AI Analysis findings list + "Analyze now" button. This is
+// the default "health" sub-tab; the sibling "docs" sub-tab (/health?tab=docs)
+// renders <AiDocsFeed> from the page dispatcher. The ShadowLabCard + every other
+// card below stay exactly as-is.
+//
 // Page-padding wrapper (`space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8`) +
 // `animate-fade-in` retained from the G2 version. MemoryZoneView's
 // `mx-auto w-full max-w-screen-2xl` outer wrap (G2 centering fix) still
@@ -42,6 +49,7 @@ import { SentinelsCard } from "./sentinels-card";
 export function HealthSection() {
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      <AiFindingsPanel />
       <KillswitchControlCard />
       <DataFreshnessCard />
       <ReconcileHealthCard />
