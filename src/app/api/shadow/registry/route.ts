@@ -49,6 +49,17 @@ interface ShadowTable {
   outcome_min_pnl: number | null;
   outcome_max_pnl: number | null;
   outcome_win_rate: number | null;
+  // E1 $-impact ranking. outcome_sum_pnl = Σ realized $ over DISTINCT trades
+  // (dedup per trade — NEVER the raw per-cycle Σ, which is a counting artifact).
+  // footprint_n = distinct-trade count. confidence_tag = n-based band.
+  // metric_type classifies the table: "flip_delta" (logs a true would-vs-actual
+  // counterfactual — stronger evidence class) vs "footprint" (ranked by realized
+  // footprint, NOT proven "$ if flipped"); null when no realized-outcome column.
+  // outcome_sum_pnl / footprint_n / confidence_tag are null until a footprint exists.
+  outcome_sum_pnl: number | null;
+  footprint_n: number | null;
+  confidence_tag: "HIGH" | "MED" | "LOW" | "WEAK" | null;
+  metric_type: "flip_delta" | "footprint" | null;
   error?: string;
 }
 

@@ -96,6 +96,19 @@ OVERRIDE: dict[str, dict] = {
     "meme_onchain_shadow_log":        dict(display="Meme On-Chain Log",          function="Data",    ts_col="ts",              ts_kind="unix", expected_active=True),
     "whale_source_shadow_log":        dict(display="Whale Source Log (RETIRED)",  function="Data",    ts_col="ts",              ts_kind="unix", expected_active=False, retired=True),
     "funding_signal_shadow":          dict(display="Funding Signal (S3-P01)",    function="Data",    ts_col="created_at",      ts_kind="iso",  expected_active=False),
+    # ── Wave D (2026-06-21, E1 curated grouping) ───────────────────────────────
+    # The registry already SURFACES these via dynamic LIKE '%shadow%' enumeration;
+    # these OVERRIDE rows only give them a curated display name + function group.
+    # The 2 zero-row tables (winner_cell / sizing_v2) are expected_active=False so
+    # a not-yet-writing shadow reads DORMANT (pending), NOT a false BROKEN alarm.
+    # D2's 5 tables (layer6_*/momentum_fee_gate/external_close_outcome/entry_stop_
+    # distance) are NOT here — they never landed in the live DB (committed on disk,
+    # awaiting the deferred trevor.service restart) and auto-surface once present.
+    "correlation_cluster_shadow":     dict(display="Correlation Cluster Cap",    function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=True),
+    "aggressive_mode_entry_shadow":   dict(display="Aggressive Mode Entry",      function="Entry",   ts_col="created_at",      ts_kind="iso",  expected_active=True),
+    "winner_cell_upweight_shadow":    dict(display="Winner-Cell Upweight",       function="Scoring", ts_col="created_at",      ts_kind="iso",  expected_active=False),
+    "sizing_v2_multi_strategy_shadow":dict(display="Sizing V2 Multi-Strategy",   function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=False),
+    "perfect_setup_trade_summary_shadow": dict(display="Perfect-Setup Trade Summary", function="Scoring", ts_col="ts",        ts_kind="iso",  expected_active=True),
 }
 
 # Non-"shadow"-named adjuncts to fold into the enumeration (LIKE '%shadow%' misses them).
@@ -133,6 +146,45 @@ DIV_PRIORITY = ["divergent", "would_block", "would_fire", "is_divergent"]
 # stats (mean / min / max / win-rate over linked rows). A would-fire/divergence
 # boolean is NOT an outcome — divergence_pct must never be relabelled a win-rate.
 OUTCOME_PRIORITY = ["realized_pnl_usd", "actual_pnl_usd"]
+
+# ── E1 $-impact ranking ──────────────────────────────────────────────────────
+# Per-trade key, in preference order. The $-impact footprint is computed over
+# DISTINCT trades (one realized value per trade), NEVER the raw per-row Σ —
+# most shadows log one row PER MONITOR CYCLE PER TRADE, each carrying that
+# trade's realized P&L, so a raw SUM(realized_pnl_usd) multiplies the real
+# number by rows-per-trade (e.g. trail_be_stale_altparam_shadow: raw −$57k vs
+# distinct-trade −$48.51, ~1001× overcount). A per-cycle sum is a counting
+# artifact, NEVER realizable money — see the Hub "shadow aggregate-only" rule.
+TRADE_KEY_PRIORITY = ["auto_trade_id", "trade_id", "signal_id"]
+
+# Confidence tag from the distinct-trade footprint size (n = distinct trades).
+CONF_HIGH_N = 50
+CONF_MED_N = 15
+CONF_LOW_N = 5
+
+# Tables that log a genuine would-vs-actual counterfactual P&L — a true
+# Σ(would) − Σ(actual) is derivable from their columns, a STRONGER evidence
+# class than a divergence-conditioned footprint. NB: `outcome_sum_pnl` is
+# ALWAYS the distinct-trade realized footprint Σ for EVERY table; `metric_type`
+# only CLASSIFIES the table (flip_delta-capable vs footprint-only) so the UI can
+# mark the stronger class — it NEVER relabels the footprint $ as a flip-delta.
+FLIP_DELTA_TABLES: frozenset[str] = frozenset({
+    "winner_cell_upweight_shadow",
+    "sizing_v2_multi_strategy_shadow",
+})
+
+
+def _confidence_tag(n: int) -> Optional[str]:
+    """n-based confidence over the distinct-trade footprint; None when n == 0."""
+    if n <= 0:
+        return None
+    if n >= CONF_HIGH_N:
+        return "HIGH"
+    if n >= CONF_MED_N:
+        return "MED"
+    if n >= CONF_LOW_N:
+        return "LOW"
+    return "WEAK"
 
 # Ordered (substring, function) heuristic for auto-derived tables. First match wins,
 # so Exit/Risk/Scoring/Data specifics are checked before the generic Entry terms.
@@ -346,6 +398,14 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
         "outcome_min_pnl": None,
         "outcome_max_pnl": None,
         "outcome_win_rate": None,
+        # E1 $-impact ranking. outcome_sum_pnl = Σ realized $ over DISTINCT trades
+        # (never the raw per-cycle sum). footprint_n = distinct-trade count.
+        # confidence_tag = n-based (HIGH/MED/LOW/WEAK). metric_type classifies the
+        # table (flip_delta-capable vs footprint). All null until a footprint exists.
+        "outcome_sum_pnl": None,
+        "footprint_n": None,
+        "confidence_tag": None,
+        "metric_type": None,
     }
 
     try:
@@ -432,6 +492,11 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
     # linked table reports an honest sample size rather than a silent full-count
     # win-rate. WR = share of linked rows with realized P&L > 0.
     out_col = _pick_outcome(cols)
+    # E1: classify the table (flip_delta-capable vs footprint-only) the moment it
+    # carries a realized-outcome column — independent of row count, so a not-yet-
+    # writing flip_delta shadow still surfaces its class (renders "no footprint yet").
+    if out_col:
+        info["metric_type"] = "flip_delta" if table in FLIP_DELTA_TABLES else "footprint"
     if out_col and total:
         try:
             r = conn.execute(
@@ -451,6 +516,36 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
                 info["outcome_win_rate"] = round(100.0 * int(r["wins"] or 0) / linked, 1)
         except Exception as exc:
             info["error"] = (info.get("error") or "") + f" | outcome: {exc}"
+
+        # E1 $-impact footprint — Σ realized $ over DISTINCT trades (dedup by the
+        # first available trade key). A per-cycle shadow logs the SAME realized
+        # value on every row for a trade, so MAX() per trade-group recovers that
+        # one value; SUM over the groups is the honest realized $ the shadow's
+        # observed trades made/lost — NOT the raw per-row Σ (a counting artifact).
+        # No trade key (rare) → fall back to the linked-row Σ (footprint_n = linked
+        # rows) since there is nothing to dedup on; flagged via metric_type.
+        try:
+            trade_key = next((c for c in TRADE_KEY_PRIORITY if c in cols), None)
+            if trade_key:
+                r2 = conn.execute(
+                    f"SELECT COUNT(*) AS fn, SUM(p) AS s FROM "
+                    f"(SELECT MAX({out_col}) AS p FROM {table} "
+                    f"WHERE {out_col} IS NOT NULL AND {trade_key} IS NOT NULL "
+                    f"GROUP BY {trade_key})"
+                ).fetchone()
+            else:
+                r2 = conn.execute(
+                    f"SELECT COUNT({out_col}) AS fn, SUM({out_col}) AS s "
+                    f"FROM {table} WHERE {out_col} IS NOT NULL"
+                ).fetchone()
+            fn = int(r2["fn"] or 0)
+            s = r2["s"]
+            info["footprint_n"] = fn
+            if fn > 0 and s is not None:
+                info["outcome_sum_pnl"] = round(float(s), 2)
+                info["confidence_tag"] = _confidence_tag(fn)
+        except Exception as exc:
+            info["error"] = (info.get("error") or "") + f" | sumpnl: {exc}"
 
     return info
 
