@@ -3,6 +3,7 @@ import * as React from "react";
 import { KillswitchControlCard } from "./killswitch-control-card";
 import { DataFreshnessCard } from "./data-freshness-card";
 import { ReconcileHealthCard } from "./reconcile-health-card";
+import { ShadowLabCard } from "./shadow-lab-card";
 import { HeartbeatView } from "./heartbeat-view";
 import { SentinelsCard } from "./sentinels-card";
 
@@ -29,6 +30,10 @@ import { SentinelsCard } from "./sentinels-card";
 // bot's DB↔HL reconcile status, sourced from the heartbeat `reconcile`
 // category which Phase 2/VM adds; renders EmptyState gracefully until then).
 //
+// B6 P4 (2026-06-21): <ShadowLabCard> (after Reconcile) surfaces the B6 unified
+// shadow registry (registered_shadows[] off /api/shadow/registry) — read-only,
+// no promote button. EmptyState until B7 registers ssl.py.
+//
 // Page-padding wrapper (`space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8`) +
 // `animate-fade-in` retained from the G2 version. MemoryZoneView's
 // `mx-auto w-full max-w-screen-2xl` outer wrap (G2 centering fix) still
@@ -40,6 +45,7 @@ export function HealthSection() {
       <KillswitchControlCard />
       <DataFreshnessCard />
       <ReconcileHealthCard />
+      <ShadowLabCard />
       <HeartbeatView />
       <SentinelsCard />
     </div>

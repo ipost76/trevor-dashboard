@@ -52,6 +52,41 @@ interface ShadowTable {
   error?: string;
 }
 
+// B6 unified shadow registry (additive). One object per row in `shadow_registry`,
+// folded with observation aggregates from the single `shadow_observations` table.
+// Consumed by the Health <ShadowLabCard>; the Intel shadow-overview ignores it.
+// Empty ([]) until B7 registers the first shadow (ssl.py).
+interface RegisteredShadow {
+  shadow_key: string;
+  display: string;
+  category: string;
+  candidate_desc: string | null;
+  obs_table: string;
+  shadow_flag: string | null;
+  promote_flag: string | null;
+  min_n: number;
+  registry_status: string | null;
+  expected_active: boolean;
+  created_at: string | null;
+  promoted_at: string | null;
+  notes: string | null;
+  verdict: Record<string, unknown> | null;
+  obs_total: number;
+  obs_48h: number;
+  latest_obs: string | null;
+  divergent_n: number;
+  divergence_pct: number | null;
+  promotion: "ready" | "accruing" | "na";
+  promotion_n: number;
+  outcome_linked_n: number;
+  outcome_mean_pnl: number | null;
+  outcome_min_pnl: number | null;
+  outcome_max_pnl: number | null;
+  outcome_win_rate: number | null;
+  status: "ACTIVE" | "DORMANT";
+  error?: string;
+}
+
 interface ShadowRegistryResponse {
   tables: ShadowTable[];
   by_function: Record<string, string[]>;
@@ -61,6 +96,7 @@ interface ShadowRegistryResponse {
   stale_count?: number;
   stale_days: number;
   promotion_min_n: number;
+  registered_shadows: RegisteredShadow[];
   replica_age_seconds: number | null;
   replica_mtime: string | null;
   error?: string;
@@ -75,6 +111,7 @@ const FALLBACK: ShadowRegistryResponse = {
   stale_count: 0,
   stale_days: 7,
   promotion_min_n: 30,
+  registered_shadows: [],
   replica_age_seconds: null,
   replica_mtime: null,
 };

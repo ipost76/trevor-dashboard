@@ -455,6 +455,169 @@ def _inspect(conn: sqlite3.Connection, table: str) -> dict:
     return info
 
 
+# ── B6 unified shadow registry (registered_shadows) ──────────────────────────
+# The B6 wave introduces a UNIFIED registry: one row per registered shadow in
+# `shadow_registry`, with every observation logged to the single
+# `shadow_observations` table (keyed by shadow_key). This is ADDITIVE to the
+# legacy per-table inventory above — the Intel shadow-overview ignores the new
+# top-level `registered_shadows` key; the Health <ShadowLabCard> consumes it.
+#
+# READ-ONLY. Both tables exist (B6) but are EMPTY until B7 registers the first
+# shadow (ssl.py) — so today this returns [] and the card shows its empty-state.
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _classify_registered(obs_total: int, latest_iso: Optional[str]) -> str:
+    """Activity status for a REGISTERED shadow, derived from its observations.
+
+    Deliberately NEVER returns BROKEN even for an expected_active shadow: a
+    freshly-registered shadow has 0 observations, but that's PENDING-first-write
+    — NOT an alarm — so 0 obs reads DORMANT (pending), never a false red on a
+    brand-new registration (e.g. B7's ssl.py the moment it lands). (The STALE
+    cadence alarm is a legacy per-table concept; the unified path stays simple.)
+    """
+    if obs_total == 0 or not latest_iso:
+        return "DORMANT"
+    try:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        age = now_utc - _parse_ts(latest_iso)
+    except Exception:
+        return "DORMANT"
+    return "ACTIVE" if age < timedelta(days=STALE_DAYS) else "DORMANT"
+
+
+def _registered_shadows(conn: sqlite3.Connection) -> list[dict]:
+    """Fold `shadow_registry` rows with per-shadow observation aggregates from
+    `shadow_observations`. One object per registered shadow: registry metadata
+    (display/category/candidate/flags/min_n/parsed verdict) + obs counts +
+    divergence + Wilson promotion-readiness + realized-outcome aggregate.
+
+    READ-ONLY; pure SELECT. Returns [] when the registry table is absent (old
+    replica) or empty (pre-B7).
+    """
+    if not _table_exists(conn, "shadow_registry"):
+        return []
+    have_obs = _table_exists(conn, "shadow_observations")
+    try:
+        reg_rows = conn.execute(
+            "SELECT shadow_key, display_name, category, candidate_desc, obs_table, "
+            "shadow_flag, promote_flag, min_n, status, expected_active, "
+            "verdict_json, created_at, promoted_at, notes "
+            "FROM shadow_registry ORDER BY category, shadow_key"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    out: list[dict] = []
+    for r in reg_rows:
+        key = r["shadow_key"]
+        expected_active = (
+            bool(r["expected_active"]) if r["expected_active"] is not None else False
+        )
+        min_n = int(r["min_n"]) if r["min_n"] is not None else PROMOTION_MIN_N
+        verdict = None
+        if r["verdict_json"]:
+            try:
+                verdict = json.loads(r["verdict_json"])
+            except (ValueError, TypeError):
+                verdict = None
+
+        info: dict = {
+            "shadow_key": key,
+            "display": r["display_name"] or _prettify(key),
+            "category": r["category"] or "Other",
+            "candidate_desc": r["candidate_desc"],
+            "obs_table": r["obs_table"] or "shadow_observations",
+            "shadow_flag": r["shadow_flag"],
+            "promote_flag": r["promote_flag"],
+            "min_n": min_n,
+            "registry_status": r["status"],
+            "expected_active": expected_active,
+            "created_at": r["created_at"],
+            "promoted_at": r["promoted_at"],
+            "notes": r["notes"],
+            "verdict": verdict,
+            "obs_total": 0,
+            "obs_48h": 0,
+            "latest_obs": None,
+            "divergent_n": 0,
+            "divergence_pct": None,
+            "promotion": "na",
+            "promotion_n": 0,
+            "outcome_linked_n": 0,
+            "outcome_mean_pnl": None,
+            "outcome_min_pnl": None,
+            "outcome_max_pnl": None,
+            "outcome_win_rate": None,
+            "status": "DORMANT",
+        }
+
+        if have_obs:
+            try:
+                agg = conn.execute(
+                    "SELECT COUNT(*) AS total, "
+                    "SUM(CASE WHEN divergent = 1 THEN 1 ELSE 0 END) AS div_n, "
+                    "MAX(created_at) AS latest "
+                    "FROM shadow_observations WHERE shadow_key = ?",
+                    (key,),
+                ).fetchone()
+                total = int(agg["total"] or 0)
+                n_div = int(agg["div_n"] or 0)
+                info["obs_total"] = total
+                info["divergent_n"] = n_div
+                info["latest_obs"] = agg["latest"]
+                if total:
+                    info["divergence_pct"] = round(100.0 * n_div / total, 1)
+                    info["obs_48h"] = conn.execute(
+                        "SELECT COUNT(*) FROM shadow_observations "
+                        "WHERE shadow_key = ? AND created_at > datetime('now','-2 days')",
+                        (key,),
+                    ).fetchone()[0] or 0
+                    # Promotion-readiness: same Wilson rule as the legacy path,
+                    # gated on the registry's own min_n (fallback PROMOTION_MIN_N).
+                    info["promotion_n"] = n_div
+                    if n_div < min_n:
+                        info["promotion"] = "accruing"
+                    else:
+                        info["promotion"] = (
+                            "ready" if _wilson_lb(n_div, total) > 0.0 else "accruing"
+                        )
+                    # Realized-outcome aggregate over LINKED observations only
+                    # (realized_pnl_usd NOT NULL) — honest linked-n, never a
+                    # full-count win-rate.
+                    o = conn.execute(
+                        "SELECT COUNT(realized_pnl_usd) AS linked, "
+                        "SUM(CASE WHEN realized_pnl_usd > 0 THEN 1 ELSE 0 END) AS wins, "
+                        "AVG(realized_pnl_usd) AS mean_pnl, "
+                        "MIN(realized_pnl_usd) AS lo, MAX(realized_pnl_usd) AS hi "
+                        "FROM shadow_observations "
+                        "WHERE shadow_key = ? AND realized_pnl_usd IS NOT NULL",
+                        (key,),
+                    ).fetchone()
+                    linked = int(o["linked"] or 0)
+                    info["outcome_linked_n"] = linked
+                    if linked > 0:
+                        info["outcome_mean_pnl"] = round(float(o["mean_pnl"]), 2)
+                        info["outcome_min_pnl"] = round(float(o["lo"]), 2)
+                        info["outcome_max_pnl"] = round(float(o["hi"]), 2)
+                        info["outcome_win_rate"] = round(
+                            100.0 * int(o["wins"] or 0) / linked, 1
+                        )
+            except sqlite3.OperationalError as exc:
+                info["error"] = f"obs read: {exc}"
+
+        info["status"] = _classify_registered(info["obs_total"], info["latest_obs"])
+        out.append(info)
+    return out
+
+
 def _enumerate(conn: sqlite3.Connection) -> list[str]:
     names = [
         r["name"]
@@ -498,12 +661,17 @@ def main() -> int:
         print(json.dumps({
             "tables": [], "by_function": {}, "by_status": {},
             "total": 0, "stale_days": STALE_DAYS,
+            "registered_shadows": [],
             "replica_age_seconds": age, "replica_mtime": mtime,
             "error": f"{type(exc).__name__}: {exc}",
         }))
         return 0
 
     tables = [_inspect(conn, t) for t in _enumerate(conn)]
+    try:
+        registered = _registered_shadows(conn)  # B6 unified registry (additive)
+    except Exception:
+        registered = []
     conn.close()
 
     by_function: dict[str, list[str]] = {}
@@ -524,6 +692,7 @@ def main() -> int:
         "stale_count": by_status.get("STALE", 0),
         "stale_days": STALE_DAYS,
         "promotion_min_n": PROMOTION_MIN_N,
+        "registered_shadows": registered,  # B6 unified registry (additive)
         "replica_age_seconds": age,
         "replica_mtime": mtime,
     }, default=str))
