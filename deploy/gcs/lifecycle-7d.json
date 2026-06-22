@@ -1,0 +1,12 @@
+{
+  "rule": [
+    {
+      "action": { "type": "Delete" },
+      "condition": { "age": 7, "matchesPrefix": ["daily/", "nightly/"] }
+    },
+    {
+      "action": { "type": "Delete" },
+      "condition": { "daysSinceNoncurrentTime": 3, "matchesPrefix": ["daily/", "nightly/"] }
+    }
+  ]
+}
