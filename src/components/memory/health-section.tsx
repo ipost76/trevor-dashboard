@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { HealthRollup } from "./health-rollup";
 import { AiFindingsPanel } from "./ai-findings-panel";
 import { KillswitchControlCard } from "./killswitch-control-card";
 import { DataFreshnessCard } from "./data-freshness-card";
@@ -41,6 +42,14 @@ import { SentinelsCard } from "./sentinels-card";
 // renders <AiDocsFeed> from the page dispatcher. The ShadowLabCard + every other
 // card below stay exactly as-is.
 //
+// B7 (2026-06-22): HEALTH page redesign — glanceable hierarchy. <HealthRollup>
+// is the new TOP-OF-PAGE green/amber/red glance pill (worst-of heartbeat
+// overall_status + max AI-finding severity; reuses /api/heartbeat +
+// /api/health/ai-findings, no new route). <AiFindingsPanel> is the AI hero,
+// kept directly under the rollup (first/dominant card by position + its existing
+// cyan border-l-4 accent). The 6 system/infra cards below are unchanged here —
+// their dedupe/grouping is B8's scope (incl. heartbeat-view.tsx internals).
+//
 // Page-padding wrapper (`space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8`) +
 // `animate-fade-in` retained from the G2 version. MemoryZoneView's
 // `mx-auto w-full max-w-screen-2xl` outer wrap (G2 centering fix) still
@@ -49,6 +58,7 @@ import { SentinelsCard } from "./sentinels-card";
 export function HealthSection() {
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      <HealthRollup />
       <AiFindingsPanel />
       <KillswitchControlCard />
       <DataFreshnessCard />
