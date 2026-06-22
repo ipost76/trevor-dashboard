@@ -1,0 +1,19 @@
+[Unit]
+# Periodic driver for trevor-tailsync.service (B1, 2026-06-22).
+# Replaces trevor-restore.timer (the WSL->GCS egress path).
+Description=Periodic TREVOR Hub read-replica refresh via tailnet VM->WSL sync
+
+[Timer]
+Unit=trevor-tailsync.service
+# First refresh shortly after boot...
+OnBootSec=2min
+# ...then 20 min AFTER each sync finishes (OnUnitInactiveSec measures the post-run gap).
+# A delta sync is near-instant, so effective freshness ~20 min — matches the old GCS loop's
+# ~20-30 min, at near-$0 egress. Open/live Hub numbers come from the Observatory heartbeat;
+# closed history tolerates this lag (W-H-P4 doctrine), so 20 min is comfortable.
+OnUnitInactiveSec=20min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

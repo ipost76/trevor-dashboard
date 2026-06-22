@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# ⚠️ SUPERSEDED 2026-06-22 (B1) — DISABLED, kept on disk as a ROLLBACK PATH.
+# Replaced by deploy/scripts/trevor-tailsync.sh (direct tailnet VM->WSL VACUUM-INTO
+# snapshot + rsync-delta sync). This GCS litestream-restore loop was ~75-80% of the
+# $158/mo Cloud Storage bill (~0.9 TB/mo egress); trevor-restore.timer/.service are now
+# `systemctl disable`d. To roll back: `sudo systemctl disable --now trevor-tailsync.timer
+# && sudo systemctl enable --now trevor-restore.timer`. NEVER run both loops at once.
 # ─────────────────────────────────────────────────────────────────────────────
 # TREVOR Hub — continuous read-replica refresh  (W-H-P2-HUB, 2026-06-09, Ghost-approved)
 #

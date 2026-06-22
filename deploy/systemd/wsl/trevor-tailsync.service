@@ -1,0 +1,27 @@
+[Unit]
+# TREVOR Hub read-replica refresh via DIRECT TAILNET VM->WSL sync (B1, 2026-06-22).
+# Replaces trevor-restore.service (litestream restore from GCS). One-shot, pull-only:
+# snapshots the VM's live trevor.db (.backup, as user trevor), rsync-delta-pulls it over
+# the tailnet, integrity-checks + sanity-gates it, then atomically swaps it into the
+# local read-replica. NEVER writes the VM DB or GCS; near-$0 egress (delta-transfer).
+Description=TREVOR Hub read-replica refresh via tailnet VM->WSL sync (one-shot, pull-only)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+User=ghost
+# HOME so ssh finds ~/.ssh/config (the `vm` alias), the passphraseless key, and known_hosts.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/ghost/projects/trevor-dashboard/deploy/scripts/trevor-tailsync.sh
+# A delta sync is seconds; the first (full) sync or a slow link is minutes. Give it room.
+TimeoutStartSec=15min
+# Be a good neighbour to the Hub during the local copy/checkpoint.
+Nice=10
+IOSchedulingClass=idle
+# Do NOT set RemainAfterExit=yes — the timer must be able to re-trigger this unit.
+
+[Install]
+# Not enabled directly; the timer drives it. (Present for manual `systemctl start` too.)
+WantedBy=multi-user.target
