@@ -7,7 +7,7 @@ import {
   BottomSheet,
   Skeleton,
 } from "@/components/ui";
-import { ShieldOff, ShieldCheck, AlertTriangle, Clock } from "lucide-react";
+import { ShieldOff, ShieldCheck, AlertTriangle, Clock, Info } from "lucide-react";
 
 interface KillswitchState {
   enabled: boolean;
@@ -52,6 +52,7 @@ export function KillswitchControlCard() {
   const [loading, setLoading] = React.useState(true);
   const [confirmTarget, setConfirmTarget] = React.useState<"on" | "off" | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
   const [result, setResult] = React.useState<{ tone: "ok" | "err"; message: string } | null>(null);
 
   const fetchState = React.useCallback(async () => {
@@ -187,11 +188,29 @@ export function KillswitchControlCard() {
         </HapticButton>
       </div>
 
-      <p className="mt-3 font-sans text-micro text-fg-muted">
-        Killswitch ON blocks ALL new signal cards + AutoTrader entries.
-        Open positions stay monitored — exits run on their own merits. Does
-        NOT close, cancel, or restart anything.
-      </p>
+      {/* Collapsed help — one line + info-tap reveal (B8) */}
+      <div className="mt-3">
+        <p className="flex items-start gap-1.5 font-sans text-micro text-fg-muted">
+          <span className="min-w-0">
+            Killswitch ON blocks ALL new signal cards + AutoTrader entries.
+          </span>
+          <button
+            type="button"
+            onClick={() => setHelpOpen((o) => !o)}
+            aria-expanded={helpOpen}
+            aria-label={helpOpen ? "Hide killswitch details" : "Show killswitch details"}
+            className="tap-target -m-2 shrink-0 p-2 text-fg-muted transition-colors duration-fast hover:text-fg-primary"
+          >
+            <Info size={13} aria-hidden />
+          </button>
+        </p>
+        {helpOpen && (
+          <p className="mt-1 font-sans text-micro text-fg-muted">
+            Open positions stay monitored — exits run on their own merits. Does
+            NOT close, cancel, or restart anything.
+          </p>
+        )}
+      </div>
 
       {result && (
         <div

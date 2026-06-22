@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { CollapsibleSection, Pill } from "@/components/ui";
 import { HealthRollup } from "./health-rollup";
 import { AiFindingsPanel } from "./ai-findings-panel";
 import { KillswitchControlCard } from "./killswitch-control-card";
@@ -50,6 +51,13 @@ import { SentinelsCard } from "./sentinels-card";
 // cyan border-l-4 accent). The 6 system/infra cards below are unchanged here —
 // their dedupe/grouping is B8's scope (incl. heartbeat-view.tsx internals).
 //
+// B8 (2026-06-22): lower-card cleanup — the 3 data cards (DataFreshness +
+// Reconcile + ShadowLab) are folded into a collapsed "Data Integrity"
+// <CollapsibleSection> so the page is short by default; HeartbeatView's
+// internals (Budget dedupe, System regroup, collapsible groups) + the
+// killswitch help collapse live in their own files. B7's HealthRollup +
+// AiFindingsPanel (top) are untouched here.
+//
 // Page-padding wrapper (`space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8`) +
 // `animate-fade-in` retained from the G2 version. MemoryZoneView's
 // `mx-auto w-full max-w-screen-2xl` outer wrap (G2 centering fix) still
@@ -61,9 +69,22 @@ export function HealthSection() {
       <HealthRollup />
       <AiFindingsPanel />
       <KillswitchControlCard />
-      <DataFreshnessCard />
-      <ReconcileHealthCard />
-      <ShadowLabCard />
+      {/* B8: lower-card region — Data Integrity group (collapsed by default) */}
+      <CollapsibleSection
+        title="Data Integrity"
+        defaultOpen={false}
+        rightSlot={
+          <Pill tone="neutral" size="sm">
+            freshness · reconcile · shadows
+          </Pill>
+        }
+      >
+        <div className="space-y-4 p-4">
+          <DataFreshnessCard />
+          <ReconcileHealthCard />
+          <ShadowLabCard />
+        </div>
+      </CollapsibleSection>
       <HeartbeatView />
       <SentinelsCard />
     </div>

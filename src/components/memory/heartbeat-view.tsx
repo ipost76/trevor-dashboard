@@ -8,6 +8,8 @@ import {
   Skeleton,
   EmptyState,
   HapticButton,
+  CollapsibleSection,
+  MetricTile,
 } from "@/components/ui";
 import {
   Activity,
@@ -15,10 +17,7 @@ import {
   Bot,
   Database,
   ShieldCheck,
-  DollarSign,
   Wifi,
-  Cpu,
-  Gauge,
   RefreshCw,
   AlertCircle,
   AlertTriangle,
@@ -221,6 +220,15 @@ function severityCardClass(s: Severity): string {
   return "";
 }
 
+// Group-header status pill (B8 collapsible groups).
+function severityIntent(s: Severity): "live" | "warn" | "error" {
+  return s === "critical" ? "error" : s === "warning" ? "warn" : "live";
+}
+
+function severityLabel(s: Severity): string {
+  return s === "critical" ? "CRIT" : s === "warning" ? "WARN" : "OK";
+}
+
 function formatUptime(seconds: number): string {
   if (seconds <= 0) return "just started";
   const days = Math.floor(seconds / 86400);
@@ -352,6 +360,24 @@ export function HeartbeatView() {
       ? "critical"
       : "ok";
 
+  // Collapsible group-header summaries (B8).
+  const svcUp = cats.services.items.filter((s) => s.active).length;
+  const svcTotal = cats.services.items.length;
+  const tradingWorst: Severity =
+    cats.services.items.some((s) => s.status === "critical") ||
+    cats.autotrader.status === "critical" ||
+    cats.pipeline.status === "critical"
+      ? "critical"
+      : cats.services.items.some((s) => s.status === "warning") ||
+          cats.autotrader.status === "warning" ||
+          cats.pipeline.status === "warning"
+        ? "warning"
+        : "ok";
+  const stuckCount = cats.stuck_trades.trades.length;
+  const staleCount = cats.stale_loops.length;
+  const diagWorst: Severity =
+    stuckCount > 0 ? "critical" : staleCount > 0 ? "warning" : "ok";
+
   const categoryCards: Array<{
     key: keyof typeof cats;
     label: string;
@@ -401,13 +427,6 @@ export function HeartbeatView() {
         cats.backup.last_success_ago_hours < 999
           ? `${cats.backup.last_success_ago_hours.toFixed(1)}h ago`
           : "No backup found",
-    },
-    {
-      key: "budget",
-      label: "Budget",
-      icon: <DollarSign size={16} />,
-      status: cats.budget.status,
-      summary: `$${cats.budget.used_usd.toFixed(2)} / $${cats.budget.budget_usd.toFixed(2)}`,
     },
   ];
 
@@ -550,17 +569,18 @@ export function HeartbeatView() {
         </Card>
       )}
 
-      {/* BOTTOM ROW: System Resources + Quick Stats */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {/* System Resources */}
-        <Card padding="md">
-          <CardHeader>
-            <CardTitle>
-              <span className="flex items-center gap-2">
-                <Cpu size={16} /> System Resources
-              </span>
-            </CardTitle>
-          </CardHeader>
+      {/* GROUP: System — merged System Resources + Quick Stats (B8 regroup) */}
+      <CollapsibleSection
+        title="System"
+        defaultOpen
+        rightSlot={
+          <Pill intent={severityIntent(cats.system.status)} size="sm">
+            {severityLabel(cats.system.status)}
+          </Pill>
+        }
+      >
+        <div className="space-y-4 p-4">
+          {/* Resource utilization bars */}
           <div className="space-y-3">
             <ResourceBar
               label="Memory"
@@ -592,112 +612,64 @@ export function HeartbeatView() {
                   </div>
                 )}
             </div>
-            <div className="flex items-center justify-between text-caption text-fg-muted">
-              <span>CPU load (1m)</span>
-              <span className="font-mono text-fg-primary">
-                {cats.system.cpu_load_1m.toFixed(2)} ({cats.system.cpu_cores} cores)
-              </span>
-            </div>
           </div>
-        </Card>
-
-        {/* Quick Stats */}
-        <Card padding="md">
-          <CardHeader>
-            <CardTitle>
-              <span className="flex items-center gap-2">
-                <Gauge size={16} /> Quick Stats
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <dl className="grid grid-cols-2 gap-3 text-caption">
-            <Stat
+          {/* Discrete stat tiles (former Quick Stats) */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <MetricTile
+              label="CPU load (1m)"
+              value={cats.system.cpu_load_1m.toFixed(2)}
+              sub={`${cats.system.cpu_cores} cores`}
+              size="sm"
+            />
+            <MetricTile
               label="Sacred files"
               value={`${cats.database.sacred_verified}/${cats.database.sacred_total}`}
-              tone={cats.database.sacred_files_ok ? "ok" : "critical"}
+              tone={cats.database.sacred_files_ok ? "positive" : "negative"}
+              size="sm"
             />
-            <Stat
+            <MetricTile
               label="Killswitch"
               value={cats.autotrader.killswitch ? "ON" : "OFF"}
-              tone={cats.autotrader.killswitch ? "critical" : "ok"}
+              tone={cats.autotrader.killswitch ? "negative" : "positive"}
+              size="sm"
             />
-            <Stat
+            <MetricTile
               label="AT enabled"
               value={cats.autotrader.enabled ? "YES" : "NO"}
-              tone={cats.autotrader.enabled ? "ok" : "warning"}
+              tone={cats.autotrader.enabled ? "positive" : "warn"}
+              size="sm"
             />
-            <Stat
-              label="Closed today · all modes (UTC)"
+            <MetricTile
+              label="Closed today"
               value={String(cats.autotrader.trades_today)}
-              tone="ok"
+              sub="all modes · UTC"
+              size="sm"
             />
-            <Stat
+            <MetricTile
               label="Last heartbeat"
               value={formatAgo(heartbeatAgoMs)}
-              tone="ok"
+              size="sm"
             />
-            <Stat
+            <MetricTile
               label="Next heartbeat"
               value={formatCountdown(nextHeartbeatSeconds)}
-              tone="ok"
+              size="sm"
             />
-          </dl>
-        </Card>
-      </div>
-
-      {/* Connectivity */}
-      <Card padding="md" className={severityCardClass(cats.connectivity.status)}>
-        <CardHeader>
-          <CardTitle>
-            <span className="flex items-center gap-2">
-              {cats.connectivity.hl_api_reachable ? <Wifi size={16} /> : <WifiOff size={16} />}
-              Connectivity
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <div className="space-y-2">
-          <StatusRow
-            icon={cats.connectivity.hl_api_reachable ? "🟢" : "🔴"}
-            label="Hyperliquid API"
-            value={
-              cats.connectivity.hl_api_reachable
-                ? `OK (${cats.connectivity.hl_api_latency_ms}ms)`
-                : (cats.connectivity.hl_api_error ?? "Unreachable")
-            }
-            tone={cats.connectivity.hl_api_reachable ? "ok" : "critical"}
-          />
-          <StatusRow
-            icon={cats.connectivity.discord_ws_connected ? "🟢" : "🔴"}
-            label="Discord WebSocket"
-            value={
-              cats.connectivity.discord_ws_connected
-                ? `Connected (${cats.connectivity.discord_ws_latency_ms}ms)`
-                : "Disconnected"
-            }
-            tone={cats.connectivity.discord_ws_connected ? "ok" : "critical"}
-          />
-          {cats.connectivity.discord_ws_reconnections_2h > 0 && (
-            <StatusRow
-              icon={cats.connectivity.discord_ws_reconnections_2h > 2 ? "🟡" : "🟢"}
-              label="WS Reconnections"
-              value={`${cats.connectivity.discord_ws_reconnections_2h}× in 2h`}
-              tone={cats.connectivity.discord_ws_reconnections_2h > 2 ? "warning" : "ok"}
-            />
-          )}
-          {cats.connectivity.gateway &&
-            cats.connectivity.gateway.blocks_in_last_2h > 0 && (
-              <StatusRow
-                icon={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "🟡" : "🟢"}
-                label="Gateway blocks"
-                value={`${cats.connectivity.gateway.blocks_in_last_2h}× in 2h · max ${cats.connectivity.gateway.max_block_seconds}s`}
-                tone={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "warning" : "ok"}
-              />
-            )}
+          </div>
         </div>
-      </Card>
+      </CollapsibleSection>
 
-      {/* DETAIL CARDS — AutoTrader · Pipeline · Services · Docker · Component Rates · Stuck Trades · Stale Loops · Self-Health */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      {/* GROUP: Trading Infra — AutoTrader · Pipeline · Services (B8) */}
+      <CollapsibleSection
+        title="Trading Infra"
+        defaultOpen={false}
+        rightSlot={
+          <Pill intent={severityIntent(tradingWorst)} size="sm">
+            {svcUp}/{svcTotal} svc
+          </Pill>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
         {/* AutoTrader */}
         <Card padding="md" className={severityCardClass(cats.autotrader.status)}>
           <CardHeader>
@@ -853,6 +825,71 @@ export function HeartbeatView() {
           )}
         </Card>
 
+        </div>
+      </CollapsibleSection>
+
+      {/* GROUP: Connectivity & Containers — Connectivity + Docker (B8) */}
+      <CollapsibleSection
+        title="Connectivity & Containers"
+        defaultOpen={false}
+        rightSlot={
+          <Pill intent={severityIntent(cats.connectivity.status)} size="sm">
+            {cats.connectivity.hl_api_reachable ? "ONLINE" : "OFFLINE"}
+          </Pill>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
+        {/* Connectivity */}
+        <Card padding="md" className={severityCardClass(cats.connectivity.status)}>
+          <CardHeader>
+            <CardTitle>
+              <span className="flex items-center gap-2">
+                {cats.connectivity.hl_api_reachable ? <Wifi size={16} /> : <WifiOff size={16} />}
+                Connectivity
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <div className="space-y-2">
+            <StatusRow
+              icon={cats.connectivity.hl_api_reachable ? "🟢" : "🔴"}
+              label="Hyperliquid API"
+              value={
+                cats.connectivity.hl_api_reachable
+                  ? `OK (${cats.connectivity.hl_api_latency_ms}ms)`
+                  : (cats.connectivity.hl_api_error ?? "Unreachable")
+              }
+              tone={cats.connectivity.hl_api_reachable ? "ok" : "critical"}
+            />
+            <StatusRow
+              icon={cats.connectivity.discord_ws_connected ? "🟢" : "🔴"}
+              label="Discord WebSocket"
+              value={
+                cats.connectivity.discord_ws_connected
+                  ? `Connected (${cats.connectivity.discord_ws_latency_ms}ms)`
+                  : "Disconnected"
+              }
+              tone={cats.connectivity.discord_ws_connected ? "ok" : "critical"}
+            />
+            {cats.connectivity.discord_ws_reconnections_2h > 0 && (
+              <StatusRow
+                icon={cats.connectivity.discord_ws_reconnections_2h > 2 ? "🟡" : "🟢"}
+                label="WS Reconnections"
+                value={`${cats.connectivity.discord_ws_reconnections_2h}× in 2h`}
+                tone={cats.connectivity.discord_ws_reconnections_2h > 2 ? "warning" : "ok"}
+              />
+            )}
+            {cats.connectivity.gateway &&
+              cats.connectivity.gateway.blocks_in_last_2h > 0 && (
+                <StatusRow
+                  icon={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "🟡" : "🟢"}
+                  label="Gateway blocks"
+                  value={`${cats.connectivity.gateway.blocks_in_last_2h}× in 2h · max ${cats.connectivity.gateway.max_block_seconds}s`}
+                  tone={cats.connectivity.gateway.blocks_in_last_2h > 2 ? "warning" : "ok"}
+                />
+              )}
+          </div>
+        </Card>
+
         {/* Docker */}
         <Card padding="md" className={severityCardClass(cats.docker?.status ?? "ok")}>
           <CardHeader>
@@ -889,6 +926,20 @@ export function HeartbeatView() {
           )}
         </Card>
 
+        </div>
+      </CollapsibleSection>
+
+      {/* GROUP: Diagnostics — Component Rates · Stuck Trades · Stale Loops · Self-Health (B8) */}
+      <CollapsibleSection
+        title="Diagnostics"
+        defaultOpen={false}
+        rightSlot={
+          <Pill intent={severityIntent(diagWorst)} size="sm">
+            {stuckCount} stuck · {staleCount} stale
+          </Pill>
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
         {/* Component Rates */}
         <Card
           padding="md"
@@ -1022,7 +1073,8 @@ export function HeartbeatView() {
             <CardNote>Data unavailable</CardNote>
           )}
         </Card>
-      </div>
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1052,23 +1104,6 @@ function ResourceBar(props: {
           style={{ width: `${clamped}%` }}
         />
       </div>
-    </div>
-  );
-}
-
-function Stat(props: { label: string; value: string; tone: "ok" | "warning" | "critical" }) {
-  const valueClass =
-    props.tone === "critical"
-      ? "text-accent-red"
-      : props.tone === "warning"
-        ? "text-accent-gold"
-        : "text-fg-primary";
-  return (
-    <div className="flex items-baseline justify-between rounded-md bg-bg-elevated px-3 py-2">
-      <dt className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-        {props.label}
-      </dt>
-      <dd className={`font-mono ${valueClass}`}>{props.value}</dd>
     </div>
   );
 }
