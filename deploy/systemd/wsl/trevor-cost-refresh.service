@@ -1,0 +1,22 @@
+[Unit]
+# Daily GCP cost-cache refresh (B4). Curls the internal /api/cost/refresh worker
+# (Bearer GATEWAY_TOKEN) so the data/hub.db cost_snapshots cache stays current —
+# a runaway cloud bill surfaces in the Hub Cost card instead of going unnoticed.
+# Read-only over cost data; no money path, no trevor.db write. Driven by the timer.
+Description=TREVOR Hub GCP cost-cache refresh (one-shot — curls /api/cost/refresh)
+Wants=network-online.target
+After=network-online.target trevor-dashboard.service
+
+[Service]
+Type=oneshot
+User=ghost
+# The driver reads GATEWAY_TOKEN from /home/ghost/projects/trevor-dashboard/.env.local.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/ghost/projects/trevor-dashboard/deploy/scripts/trevor-cost-refresh.sh
+TimeoutStartSec=2min
+Nice=10
+
+[Install]
+# Not enabled directly; the timer drives it. (Present for manual `systemctl start` too.)
+WantedBy=multi-user.target

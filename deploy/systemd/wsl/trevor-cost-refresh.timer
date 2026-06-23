@@ -1,0 +1,14 @@
+[Unit]
+# Daily driver for trevor-cost-refresh.service (GCP cost-cache refresh, B4).
+Description=Daily GCP cost-cache refresh for the TREVOR Hub Cost card
+
+[Timer]
+Unit=trevor-cost-refresh.service
+# Once daily at 06:00 local — after GCP's daily billing export has landed.
+OnCalendar=*-*-* 06:00:00
+# Catch up a missed run if the box was asleep / WSL was down at 06:00.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
