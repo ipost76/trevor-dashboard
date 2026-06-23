@@ -69,10 +69,16 @@ export async function middleware(request: NextRequest) {
   // watchdog probe), NOT a prefix — so data sub-routes like
   // /api/health/ai-findings* are auth-gated like every other /api/* route
   // (they carry recon/cost data that must not be public on trevor-prime.com).
+  // B4: the cost-refresh WORKER is hit by trevor-cost-refresh.timer's curl, which
+  // carries no session cookie. It is exempt from session auth HERE but guards
+  // ITSELF with a Bearer GATEWAY_TOKEN check inside the route (fails closed).
+  // EXACT match — only the refresh POST is exempt; the cost READ route
+  // (/api/cost) stays session-gated like every other data route.
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
     pathname === "/api/health" ||
+    pathname === "/api/cost/refresh" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
   ) {
