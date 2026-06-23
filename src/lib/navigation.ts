@@ -145,9 +145,12 @@ export const ZONES: ReadonlyArray<Zone> = [
     // B6 ShadowLabCard) and "docs" (the AI recon-doc feed). The "docs" sub-tab is
     // distinct from the bottom-nav DOCS zone (id:"docs", /docs): different zone,
     // route, and storage (ai_findings.recon_md, not the downloads file system).
+    // B4 (2026-06-22): + "cost" sub-tab → the GCP cost tracker card
+    // (/health?tab=cost), reading the data/hub.db cost_snapshots cache.
     subTabs: [
       { key: "health", label: "Health" },
       { key: "docs", label: "Docs" },
+      { key: "cost", label: "Cost" },
     ],
     defaultSubTab: "health",
   },
