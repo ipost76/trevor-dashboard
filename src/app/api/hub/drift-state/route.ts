@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 // Both reads are independent + error-handled: a failure in either half degrades
 // THAT half to null, never a 500.
 const OBSERVATORY_URL =
-  "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat";
+  "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
 
 // Replica half: open-position count + the file age. mode=ro, read-only.
 const REPLICA_PY = `

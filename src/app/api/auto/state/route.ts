@@ -141,7 +141,7 @@ const cache = createSwrCache<AutoStateResponse>({ defaultTtl: 10_000, concurrenc
 // is not finalized, so we accept the field at top level OR under
 // categories.autotrader — whichever A1 ships, A3 consumes without a re-coordination.
 const OBSERVATORY_HEARTBEAT_URL =
-  "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat";
+  "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
 
 // Own cache so a heartbeat hiccup serves the last-known equity (stale) WITHOUT
 // poisoning — independent of the auto-state (Python) cache above.

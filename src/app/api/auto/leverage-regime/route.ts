@@ -157,7 +157,7 @@ const cache = createSwrCache<LeverageRegimeResponse>({ defaultTtl: 10_000, concu
 // basis drifts negligibly from live mark as price moves (isolated margin is locked
 // at entry) — a faithful gauge, and infinitely better than "unavailable".
 const OBSERVATORY_HEARTBEAT_URL =
-  "https://trevor-prime.tail2bf7a3.ts.net:8443/api/heartbeat";
+  "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
 
 // Own cache so a heartbeat hiccup serves the last-known margin (stale) WITHOUT
 // poisoning — independent of the auto-state (Python) cache above.
