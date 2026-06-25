@@ -46,7 +46,8 @@
 #
 # NOTE: WSL has NO sqlite3 CLI — every WSL-side DB op uses python3's stdlib sqlite3
 # module (the sqlite3 CLI lives only on the VM, for VACUUM INTO). The ssh target is the
-# MagicDNS alias `vm` (-> ghost@trevor-prime), never a hardcoded tailnet IP.
+# `vm` alias (-> ghost@trevor-prime-2, the live box @ 100.95.174.30; see ~/.ssh/config).
+# Repointed off the dead pre-migration trevor-prime IP on 2026-06-25 (B1).
 #
 # Supersedes deploy/scripts/trevor-restore.sh (GCS restore) as of B1, 2026-06-22.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ STAGE="${STAGE_DIR}/trevor.db"                 # PERSISTENT rsync delta basis �
 PUB="${STAGE_DIR}/trevor.db.publish"           # throwaway DELETE-mode publish copy (derived from STAGE)
 LOCK="${REPLICA_DIR}/.tailsync.lock"
 
-SSH_HOST="vm"                                  # MagicDNS alias -> ghost@trevor-prime (NOT a hardcoded IP)
+SSH_HOST="vm"                                  # ssh alias -> ghost@trevor-prime-2 (live box; resolved via ~/.ssh/config)
 VM_DB="/home/trevor/trevor/trevor.db"
 VM_SNAP="/tmp/trevor-tailsync-snap.db"
 
