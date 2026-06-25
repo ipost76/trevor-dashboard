@@ -7,6 +7,7 @@ __pycache__/
 *.backup*
 # Secrets — never commit. Held on disk at 600 perms; loaded by server.js + /api/auth.
 .env
+.env.*
 .env.local
 .env.*.bak*
 .env.bak*
