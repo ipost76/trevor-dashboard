@@ -7,7 +7,9 @@ const SESSION_COOKIE = "trevor_session";
 // Override via the HUB_VM_IP env var; defaults to the current VM IP so the
 // redirect keeps working unchanged if the var is unset. A VM IP change is now a
 // config flip, not a code edit.
-const HUB_VM_IP = process.env.HUB_VM_IP || "34.28.231.36";
+// B7 (2026-06-26): default repointed old box 34.28.231.36 (terminated) → new box
+// trevor-prime-2 34.122.2.61; .env.local HUB_VM_IP now also set to match.
+const HUB_VM_IP = process.env.HUB_VM_IP || "34.122.2.61";
 
 function isApiRoute(pathname: string): boolean {
   return pathname.startsWith("/api/");

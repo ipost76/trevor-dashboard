@@ -35,6 +35,11 @@ function isNonNegNum(v) {
 }
 const TICKER_RE = /^[A-Z0-9]{1,20}$/;
 const BOOLISH = new Set(["true", "false"]);
+// B7: strict boolean check — mirrors vm_gateway.js isBool() for the four toggle
+// ops whose VM contract requires a boolean `enabled` (NOT a string `value`).
+function isBool(v) {
+  return typeof v === "boolean";
+}
 // W-C-P2b: a positive integer or an all-digit string (rowid / trade id / reminder id).
 function isIntId(v) {
   if (Number.isInteger(v)) return v > 0;
@@ -211,19 +216,19 @@ const OPS = {
   },
   "autotrader.toggle": {
     flag: "HUB_AUTOTRADER_TOGGLE_ENABLED",
-    validate: (a) => (BOOLISH.has(String(a.value || "").toLowerCase()) ? null : "value must be 'true' or 'false'"),
+    validate: (a) => (isBool(a.enabled) ? null : "enabled (bool) required"),
   },
   "aggressive.set": {
     flag: "HUB_AGGRESSIVE_TOGGLE_ENABLED",
-    validate: (a) => (BOOLISH.has(String(a.value || "").toLowerCase()) ? null : "value must be 'true' or 'false'"),
+    validate: (a) => (isBool(a.enabled) ? null : "enabled (bool) required"),
   },
   "exit_controls.set": {
     flag: "HUB_CONFIRM_CYCLES_TOGGLE_ENABLED",
-    validate: (a) => (BOOLISH.has(String(a.value || "").toLowerCase()) ? null : "value must be 'true' or 'false'"),
+    validate: (a) => (isBool(a.enabled) ? null : "enabled (bool) required"),
   },
   "partials.toggle": {
     flag: "HUB_LIVE_PARTIALS_TOGGLE_ENABLED",
-    validate: (a) => (BOOLISH.has(String(a.value || "").toLowerCase()) ? null : "value must be 'true' or 'false'"),
+    validate: (a) => (isBool(a.enabled) ? null : "enabled (bool) required"),
   },
   "control.set": {
     flag: "LIVE_EDIT_ENABLED",

@@ -56,9 +56,11 @@ export async function POST(request: Request) {
   // W-C-P2a: routed through the gateway → VM. HUB_AGGRESSIVE_TOGGLE_ENABLED is
   // re-checked authoritatively VM-side (helper exits 3 → 423 when locked); stays
   // queue-style (the bot consumes the state change). UX contract unchanged.
+  // B7: the VM gateway op contract wants a boolean `enabled` (not the string
+  // `value`) — remap here so the call clears VM-side validation instead of 400ing.
   return gatewayWrite(
     "aggressive.set",
-    { value, author },
+    { enabled: value === "true", author },
     { actor: `hub:${author}`, reason: `aggressive.set=${value}` },
   );
 }

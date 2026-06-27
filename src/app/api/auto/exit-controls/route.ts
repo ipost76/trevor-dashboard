@@ -62,9 +62,11 @@ export async function POST(request: Request) {
   // W-C-P2a: routed through the gateway → VM. HUB_CONFIRM_CYCLES_TOGGLE_ENABLED
   // is re-checked authoritatively VM-side (helper exits 3 → 423 when locked);
   // audit row lands in autotrader_state_audit there. UX contract unchanged.
+  // B7: the VM gateway op contract wants a boolean `enabled` (not the string
+  // `value`) — remap here so the call clears VM-side validation instead of 400ing.
   return gatewayWrite(
     "exit_controls.set",
-    { value, author },
+    { enabled: value === "true", author },
     { actor: `hub:${author}`, reason: `exit_controls.set=${value}` },
   );
 }

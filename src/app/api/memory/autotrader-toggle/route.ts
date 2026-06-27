@@ -58,9 +58,11 @@ export async function POST(request: Request) {
   // W-C-P2a: routed through the gateway → VM. HUB_AUTOTRADER_TOGGLE_ENABLED is
   // re-checked authoritatively VM-side (helper exits 3 → 423 when locked); the
   // audit row lands in autotrader_state_audit there. UX contract unchanged.
+  // B7: the VM gateway op contract wants a boolean `enabled` (not the string
+  // `value`) — remap here so the call clears VM-side validation instead of 400ing.
   return gatewayWrite(
     "autotrader.toggle",
-    { value, author },
+    { enabled: value === "true", author },
     { actor: `hub:${author}`, reason: `autotrader.toggle=${value}` },
   );
 }
