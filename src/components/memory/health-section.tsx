@@ -17,7 +17,8 @@ import { SentinelsCard } from "./sentinels-card";
 //      single write surface for EMERGENCY_KILLSWITCH (Rule 32, codified
 //      2026-05-02). Moving or deleting this would re-orphan the killswitch.
 //   2. <HeartbeatView /> — NEW. Polls /api/heartbeat → Observatory aiohttp
-//      on :3335 every 30s; 6-card status grid + active-issues strip +
+//      (tailnet :8443 on the new box, per OBS-REPOINT — not the dead :3335);
+//      6-card status grid + active-issues strip +
 //      system bars + quick stats + connectivity placeholder. Replaces the
 //      former Services + System Probes grids (overlap with heartbeat data;
 //      heartbeat is the richer surface).

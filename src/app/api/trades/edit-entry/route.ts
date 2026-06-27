@@ -6,9 +6,13 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { trade_id, entry_price } = body;
+    const { trade_id } = body;
+    // RR2 C-8: coerce entry_price to a number — a string body value would make the
+    // fmt()/arithmetic below NaN or throw (e.g. n.toFixed on a string). Matches the
+    // Number(...) wrapping already used for leverage/stop_price below.
+    const entry_price = Number(body.entry_price);
 
-    if (!trade_id || !entry_price || entry_price <= 0) {
+    if (!trade_id || !Number.isFinite(entry_price) || entry_price <= 0) {
       return NextResponse.json({ error: "trade_id and positive entry_price required" }, { status: 400 });
     }
 

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { createSwrCache } from "@/lib/single-flight";
 
-// HB-04: thin proxy to the Observatory aiohttp server on 127.0.0.1:3335.
-// Keeps the Hub's "all data flows through /api/*" convention while the actual
-// collector + classifier + cache live in trevor-observatory.service.
+// HB-04: thin proxy to the Observatory aiohttp server. Keeps the Hub's "all data
+// flows through /api/*" convention while the actual collector + classifier + cache
+// live in trevor-observatory.service.
+// RR2 C-8 (2026-06-27): corrected the stale "127.0.0.1:3335" reference — the
+// Observatory was moved off :3335 to the tailnet :8443 endpoint (W-E-P2b) and then
+// onto the new box trevor-prime-2 (OBS-REPOINT). The live target is OBSERVATORY_URL.
 const OBSERVATORY_URL = "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
 const OBSERVATORY_REFRESH_URL = "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat/refresh";
 

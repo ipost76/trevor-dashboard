@@ -319,7 +319,7 @@ export function HeartbeatView() {
         <EmptyState
           icon={<AlertCircle size={32} />}
           title="Observatory unreachable"
-          body={error ?? "Could not fetch heartbeat data from :3335."}
+          body={error ?? "Could not fetch heartbeat data from the Observatory."}
           action={
             <HapticButton
               variant="primary"
