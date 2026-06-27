@@ -42,6 +42,11 @@ SSH_BASE = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "vm"]
 # Pure-stdlib program run ON THE VM as `trevor`. Additive: flips handled=0 → 1 for
 # open findings and stamps the report-state. Reads no SERVANT secret; the only
 # embedded value (the stamp epoch) is base64'd in via META, never the remote shell.
+#
+# RR2 C-7 (2026-06-27): this ssh-to-live mutation now writes a change_log audit
+# row in the SAME transaction (additive, best-effort, fail-open). The audit INSERT
+# is wrapped so an audit failure can NEVER abort the reset — the mutation stays
+# byte-identical; only an audit row is added.
 _REMOTE_BODY = r'''
 import sqlite3, json as _json
 DB = "/home/trevor/trevor/trevor.db"
@@ -56,6 +61,18 @@ try:
             "UPDATE servant_report_state SET last_handled_at=?, updated_at=? "
             "WHERE id=(SELECT id FROM servant_report_state ORDER BY id LIMIT 1)",
             (META["now"], META["now"]),
+        )
+    except Exception:
+        pass
+    # C-7 audit: additive change_log row in the same txn. Best-effort — an audit
+    # failure must not lose the reset (fail-open per the audit doctrine).
+    try:
+        con.execute(
+            "INSERT INTO change_log "
+            "(table_name, key, old_value, new_value, actor, source_type, session_id, notes) "
+            "VALUES ('servant_findings', 'handled', '0', '1', ?, 'UI', ?, ?)",
+            (META["author"], META["author"],
+             "SERVANT reset: marked %d open findings handled=1 via Hub (ssh-to-live)" % n),
         )
     except Exception:
         pass

@@ -38,6 +38,11 @@ ALLOWED_COMMANDS = {"analyze_now"}
 # Pure-stdlib program run ON THE VM as `trevor`. INSERTs one row into the LIVE
 # ai_engine_commands table. The payload arrives via the base64-embedded PARAMS
 # dict — never the remote shell — and is bound as SQL params.
+#
+# RR2 C-7 (2026-06-27): this ssh-to-live mutation now writes a change_log audit
+# row in the SAME transaction (additive, best-effort, fail-open). The audit
+# INSERT is wrapped so an audit failure can NEVER abort the command enqueue —
+# the mutation stays byte-identical; only an audit row is added.
 _REMOTE_BODY = r'''
 import sqlite3, json as _json
 DB = "/home/trevor/trevor/trevor.db"
@@ -49,8 +54,20 @@ try:
         "VALUES (?, ?, 'pending', ?)",
         (PARAMS["command"], PARAMS["params_json"], PARAMS["created_at"]),
     )
-    con.commit()
     rid = cur.lastrowid
+    # C-7 audit: additive change_log row in the same txn. Best-effort — an audit
+    # failure must not lose the enqueued command (fail-open per the audit doctrine).
+    try:
+        con.execute(
+            "INSERT INTO change_log "
+            "(table_name, row_id, key, new_value, actor, source_type, session_id, notes) "
+            "VALUES ('ai_engine_commands', ?, 'command', ?, ?, 'UI', ?, ?)",
+            (rid, PARAMS["command"], PARAMS["actor"], PARAMS["actor"],
+             "Analyze-now enqueue via Hub (ssh-to-live)"),
+        )
+    except Exception:
+        pass
+    con.commit()
     con.close()
     print(_json.dumps({"_status": "ok", "id": rid}))
 except Exception as e:
@@ -71,6 +88,7 @@ def enqueue(command: str, params: dict, author: str) -> None:
         "command": command,
         "params_json": json.dumps(params, default=str),
         "created_at": created_at,
+        "actor": author,  # C-7: provenance for the change_log audit row
     }
     b64 = base64.b64encode(json.dumps(payload).encode()).decode()
     program = (
