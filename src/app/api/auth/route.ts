@@ -35,16 +35,16 @@ export async function POST(request: NextRequest) {
     const { username, password } = body as { username: string; password: string };
     const { user, pass } = getCredentials();
 
+    // Fail CLOSED: if no password is configured, refuse ALL logins — never
+    // auto-issue a session. H2 (2026-06-28): removes the open-door footgun for a
+    // publicly-funnelled Hub — a dropped/empty DASHBOARD_PASS must lock everyone
+    // OUT, not let everyone IN. (Was: auto-login on empty pass.)
     if (!pass) {
-      const token = await signToken(user);
-      const res = NextResponse.json({ ok: true, message: "Logged in" });
-      res.cookies.set(SESSION_COOKIE, token, {
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: SESSION_MAX_AGE,
-        path: "/",
-      });
-      return res;
+      await new Promise((r) => setTimeout(r, 500));
+      return NextResponse.json(
+        { ok: false, error: "Login is disabled — no password configured" },
+        { status: 401 }
+      );
     }
 
     // Username compare is case-insensitive (Trevor / trevor / TREVOR all match).
