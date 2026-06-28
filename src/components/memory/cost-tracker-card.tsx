@@ -7,8 +7,8 @@ import { DollarSign, TrendingUp, TrendingDown } from "lucide-react";
 // B4 — GCP Cost tracker card on the Health home (sub-tab "cost", /health?tab=cost).
 //
 // Reads /api/cost (the cost_snapshots CACHE in data/hub.db, never BigQuery on page
-// load). Shows month-to-date total, a linear month-end forecast, per-service
-// breakdown, and a 30-day daily history bar chart. When the export is still
+// load). Shows month-to-date total, a trailing-window month-end forecast (B1), the
+// forward run rate, per-service breakdown, and a 30-day daily history bar chart. When the export is still
 // backfilling (cache empty) it renders a clean "syncing" state, never a broken
 // card. Cost is NOT rendered green (green = profit elsewhere) — a projected rise
 // vs last month reads gold/red, a fall reads mint.
@@ -32,6 +32,11 @@ interface CostData {
   days_elapsed: number;
   days_in_month: number;
   projected_month_end_usd: number;
+  alert_forecast_usd?: number;
+  forecast_naive_usd?: number;
+  trailing_daily_mean_usd?: number | null;
+  trailing_window_days?: number;
+  forecast_window_target?: number;
   last_month_total_usd: number | null;
   mom_pct: number | null;
   breakdown: Breakdown[];
@@ -176,6 +181,11 @@ export function CostTrackerCard() {
               <span className="text-micro text-fg-faint">
                 ({data!.days_elapsed}/{data!.days_in_month}d)
               </span>
+              {typeof data!.alert_forecast_usd === "number" && data!.alert_forecast_usd > 0 && (
+                <span className="text-micro text-fg-faint">
+                  · run rate ~{fmtUsd(data!.alert_forecast_usd)}/mo
+                </span>
+              )}
               {data!.mom_pct !== null &&
                 (data!.mom_pct >= 0 ? (
                   <Pill intent="warn" size="sm">
@@ -236,7 +246,8 @@ export function CostTrackerCard() {
           )}
 
           <p className="text-micro text-fg-faint">
-            Net cost (incl. credits). Forecast is a linear projection of month-to-date spend.
+            Net cost (incl. credits). Month-end forecast = spend so far + the trailing run rate
+            for the days left; the budget alert triggers on the run rate, not sunk spend.
           </p>
         </div>
       )}

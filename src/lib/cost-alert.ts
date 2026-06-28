@@ -34,7 +34,9 @@ export interface CostAlertResult {
 
 interface CostRollup {
   status: string;
-  projected_month_end_usd?: number;
+  projected_month_end_usd?: number; // honest month-end (card display)
+  alert_forecast_usd?: number; // forward run-rate projection (B1 — the alert driver)
+  forecast_naive_usd?: number; // old naive linear projection (shadow record only)
   mtd_total_usd?: number;
   month_label?: string | null;
   breakdown?: { service: string; net_usd: number }[];
@@ -62,20 +64,38 @@ export async function maybeSendCostAlert(): Promise<CostAlertResult> {
     }
 
     const threshold = readCostAlertThreshold();
-    const projected = Number(cost.projected_month_end_usd ?? 0);
-    if (!(projected > threshold)) {
-      return { alerted: false, reason: "under_threshold", projected, threshold };
+    // B1: the alert is driven by the forward RUN-RATE projection (trailing-window
+    // daily mean × days_in_month), NOT the sunk month-to-date month-end. An ENDED
+    // spike (run-rate back to normal) stops re-firing; a real ONGOING spike (elevated
+    // run-rate) still fires. The honest month-end stays on the card for display only.
+    const runRate = Number(cost.alert_forecast_usd ?? 0);
+    const monthEnd = Number(cost.projected_month_end_usd ?? 0);
+    const naive = Number(cost.forecast_naive_usd ?? 0);
+
+    // Shadow record (one cycle, before sole reliance): naive vs trailing forecast AND
+    // old-alert (naive month-end > threshold) vs new-alert (run-rate > threshold).
+    console.log(
+      `[cost-alert] shadow: naive=$${naive.toFixed(2)} trailing_month_end=$${monthEnd.toFixed(2)} ` +
+        `alert_run_rate=$${runRate.toFixed(2)} threshold=$${threshold.toFixed(2)} | ` +
+        `old_alert(naive>thr) would_fire=${naive > threshold} ` +
+        `new_alert(run_rate>thr) fires=${runRate > threshold}`,
+    );
+
+    if (!(runRate > threshold)) {
+      return { alerted: false, reason: "under_threshold", projected: runRate, threshold };
     }
 
     // 2. Top cost driver = first breakdown row (query_cost.py sorts net DESC).
     const top = cost.breakdown && cost.breakdown.length ? cost.breakdown[0] : null;
 
     // 3. Hand off to the notifier (anti-spam latch + Discord post). Best-effort.
+    //    `projected` = the run-rate (the metric that crossed); month_end is context.
     const payload = JSON.stringify({
-      projected,
+      projected: runRate,
       threshold,
       top_service: top ? { service: top.service, net_usd: top.net_usd } : null,
       mtd_total_usd: Number(cost.mtd_total_usd ?? 0),
+      month_end: monthEnd,
       month_label: cost.month_label ?? null,
     });
     const out = await runPython("scripts/db/cost_alert_notify.py", [], {

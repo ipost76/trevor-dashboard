@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 // Reads the cost_snapshots CACHE (data/hub.db) ONLY — never BigQuery on page load
 // (a per-view BigQuery query costs money + is slow). The daily refresh worker
 // (POST /api/cost/refresh) populates the cache; query_cost.py rolls it up into
-// month-to-date total + per-service breakdown + linear month-end forecast +
-// 30-day daily history. Session-gated by middleware.ts like every other data
+// month-to-date total + per-service breakdown + trailing-window month-end forecast
+// (B1) + forward run-rate + 30-day daily history. Session-gated by middleware.ts like every other data
 // route (only /api/cost/refresh is allow-listed). Fail-soft: never 500s the page.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,6 +31,11 @@ interface CostResponse {
   days_elapsed: number;
   days_in_month: number;
   projected_month_end_usd: number;
+  alert_forecast_usd: number;
+  forecast_naive_usd: number;
+  trailing_daily_mean_usd: number | null;
+  trailing_window_days: number;
+  forecast_window_target: number;
   last_month_total_usd: number | null;
   mom_pct: number | null;
   breakdown: Breakdown[];
@@ -48,6 +53,11 @@ const FALLBACK: CostResponse = {
   days_elapsed: 0,
   days_in_month: 0,
   projected_month_end_usd: 0,
+  alert_forecast_usd: 0,
+  forecast_naive_usd: 0,
+  trailing_daily_mean_usd: null,
+  trailing_window_days: 0,
+  forecast_window_target: 0,
   last_month_total_usd: null,
   mom_pct: null,
   breakdown: [],

@@ -54,13 +54,23 @@ def _out(d: dict) -> int:
     return 0
 
 
-def _build_embed(projected: float, threshold: float, top, mtd, month_label) -> dict:
-    """Clear, actionable budget-alert embed — what's projected, the threshold it crossed,
-    the driving service, and a nudge to the Hub cost card. Plain and direct, no filler."""
+def _build_embed(projected: float, threshold: float, top, mtd, month_label, month_end=None) -> dict:
+    """Clear, actionable budget-alert embed — the forward RUN-RATE that crossed the
+    threshold, the driving service, the honest month-end, and a nudge to the Hub cost
+    card. Plain and direct, no filler.
+
+    `projected` is the forward run-rate projection (trailing-window daily mean ×
+    days-in-month) — NOT the sunk month-to-date. That's the B1 change: an already-ENDED
+    spike (run-rate back to normal) no longer fires; a real ongoing spike still does."""
     lines = [
-        f"GCP spend projected at **${projected:,.2f}** by month-end.",
+        f"GCP spend on pace for **${projected:,.2f}/mo** at the current run rate (trailing window).",
         f"Alert threshold: **${threshold:,.2f}**.",
     ]
+    if month_end is not None:
+        try:
+            lines.append(f"This month's projected total: **${float(month_end):,.2f}**.")
+        except (TypeError, ValueError):
+            pass
     if isinstance(top, dict) and top.get("service"):
         try:
             ntl = float(top.get("net_usd") or 0.0)
@@ -132,6 +142,7 @@ def main(argv) -> int:
     top = data.get("top_service") if isinstance(data.get("top_service"), dict) else None
     mtd = data.get("mtd_total_usd")
     month_label = data.get("month_label")
+    month_end = data.get("month_end")  # honest month-end forecast (display context; optional)
     base = {
         "projected": round(projected, 2),
         "threshold": round(threshold, 2),
@@ -166,7 +177,7 @@ def main(argv) -> int:
     if last_date == today:
         return _out({"alerted": False, "reason": "already_alerted_today", **base})
 
-    embed = _build_embed(projected, threshold, top, mtd, month_label)
+    embed = _build_embed(projected, threshold, top, mtd, month_label, month_end)
 
     if dry_run:
         return _out({"alerted": False, "reason": "dry_run", "would_post": True, **base})

@@ -15,8 +15,24 @@ Output (ONE JSON object, exit 0 — fail-soft, never raises to the route):
     fetched_at | null }
 
 The "invoice month" is the current CALENDAR month in UTC (close enough to GCP's
-own month boundary for a forecast display). The forecast is a simple linear
-projection: mtd / days_elapsed * days_in_month — matches GCP's own method.
+own month boundary for a forecast display).
+
+FORECAST (B1, 2026-06-27 — trailing-window-aware, replaces naive linear):
+  • projected_month_end_usd (CARD)  = mtd_actual + trailing_daily_mean × days_remaining
+      The known elapsed-day actuals + the recent run rate for the days left. Honest
+      month-end total: a legacy spike already sunk in MTD stays counted (it was real
+      spend), but the REMAINING days are projected from the recent rate, not from the
+      front-loaded month average. Kills the naive over-projection of an ended spike.
+  • alert_forecast_usd (ALERT)      = trailing_daily_mean × days_in_month
+      Forward run-rate projection — "if a fresh month ran at the current rate." Drives
+      the budget alert so an ENDED spike (run-rate back to normal) stops re-firing while
+      a real ONGOING spike (elevated run-rate) still fires.
+  • forecast_naive_usd (SHADOW)     = mtd / days_elapsed * days_in_month — the old naive
+      linear projection, emitted only for the side-by-side comparison record.
+trailing_daily_mean = mean per-day NET total over the last COST_FORECAST_WINDOW_DAYS
+(default 7) COMPLETE days (the current incomplete day is excluded — its export is
+partial) that recorded spend (missing/zero days excluded — a skipped refresh ≠ a
+free day). Falls back to the naive projection if no complete trailing day exists yet.
 """
 import calendar
 import json
@@ -38,6 +54,11 @@ def _empty(reason: str) -> dict:
         "days_elapsed": 0,
         "days_in_month": 0,
         "projected_month_end_usd": 0.0,
+        "alert_forecast_usd": 0.0,
+        "forecast_naive_usd": 0.0,
+        "trailing_daily_mean_usd": None,
+        "trailing_window_days": 0,
+        "forecast_window_target": 0,
         "last_month_total_usd": None,
         "mom_pct": None,
         "breakdown": [],
@@ -88,7 +109,47 @@ def main() -> int:
         has_last_month = lm_rows[0] > 0
         last_month_total = float(lm_rows[1])
 
-        projected = (mtd_net / days_elapsed * days_in_month) if days_elapsed > 0 else mtd_net
+        # ── Trailing-window forecast (B1) ───────────────────────────────────
+        # Naive linear (mtd/elapsed×dim) over-projects when spend is front-loaded:
+        # a legacy spike that already ENDED still smears across the whole month.
+        # Instead project the REMAINING days from the recent run rate.
+        try:
+            window_n = int(os.environ.get("COST_FORECAST_WINDOW_DAYS", "7"))
+        except (TypeError, ValueError):
+            window_n = 7
+        if window_n < 1:
+            window_n = 7
+
+        today_str = now.strftime("%Y-%m-%d")
+        # Last N COMPLETE days (snapshot_date < today → excludes the incomplete
+        # current day) that recorded spend (HAVING day_total > 0 → a missing or
+        # zero-data refresh is excluded, not treated as a free $0 day).
+        trailing_rows = conn.execute(
+            "SELECT snapshot_date, SUM(net_cost_usd) AS day_total FROM cost_snapshots "
+            "WHERE snapshot_date < ? GROUP BY snapshot_date HAVING day_total > 0 "
+            "ORDER BY snapshot_date DESC LIMIT ?",
+            (today_str, window_n),
+        ).fetchall()
+        trailing_days = len(trailing_rows)
+        trailing_mean = (
+            sum(float(r[1]) for r in trailing_rows) / trailing_days
+            if trailing_days
+            else None
+        )
+
+        days_remaining = max(0, days_in_month - days_elapsed)
+        naive_forecast = (mtd_net / days_elapsed * days_in_month) if days_elapsed > 0 else mtd_net
+
+        if trailing_mean is not None:
+            # CARD: known elapsed actuals + recent run rate for the days left.
+            projected = mtd_net + trailing_mean * days_remaining
+            # ALERT: forward run rate over a full month (ended spike → stops firing).
+            alert_forecast = trailing_mean * days_in_month
+        else:
+            # No complete trailing day yet (very early in the export's life) →
+            # degrade to the naive projection rather than a $0 forecast.
+            projected = naive_forecast
+            alert_forecast = naive_forecast
 
         mom_pct = None
         if has_last_month and last_month_total > 0:
@@ -123,6 +184,11 @@ def main() -> int:
             "days_elapsed": days_elapsed,
             "days_in_month": days_in_month,
             "projected_month_end_usd": round(projected, 2),
+            "alert_forecast_usd": round(alert_forecast, 2),
+            "forecast_naive_usd": round(naive_forecast, 2),
+            "trailing_daily_mean_usd": round(trailing_mean, 4) if trailing_mean is not None else None,
+            "trailing_window_days": trailing_days,
+            "forecast_window_target": window_n,
             "last_month_total_usd": round(last_month_total, 2) if has_last_month else None,
             "mom_pct": mom_pct,
             "breakdown": breakdown,
