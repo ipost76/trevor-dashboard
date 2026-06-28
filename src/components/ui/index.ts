@@ -64,6 +64,3 @@ export type { ActivityRowProps } from "./activity-row";
 
 export { LiveValue } from "./live-value";
 export type { LiveValueProps } from "./live-value";
-
-export { LiveStatusPill } from "./live-status-pill";
-export type { LiveStatusPillProps } from "./live-status-pill";
