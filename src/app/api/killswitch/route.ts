@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { timingSafeEqual } from "node:crypto";
 import { runPython } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
 import { callGateway, gatewayResponse } from "@/lib/gateway-client";
@@ -23,6 +24,26 @@ function getDashboardPass(): string {
   } catch {
     return process.env.DASHBOARD_PASS || "";
   }
+}
+
+/**
+ * Constant-time password compare for the killswitch gate.
+ *
+ * Pure (no .env read — both values passed in) so it can be unit-tested at the
+ * function level without POSTing the live route. Fails CLOSED:
+ *  - empty submitted OR empty stored → false (never authorize on an empty
+ *    configured pass — timingSafeEqual("","") would otherwise return true).
+ *  - length mismatch → false, returned BEFORE timingSafeEqual (which THROWS on
+ *    differing buffer lengths), so a length difference can never throw/500.
+ * Equal non-empty lengths → timingSafeEqual byte compare (no early-exit timing
+ * side-channel).
+ */
+function passwordsMatch(submitted: string, stored: string): boolean {
+  if (submitted.length === 0 || stored.length === 0) return false;
+  const a = Buffer.from(submitted, "utf8");
+  const b = Buffer.from(stored, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 // 5-second cache matches the client poll cadence in KillswitchPill.tsx —
@@ -104,7 +125,10 @@ export async function POST(request: Request) {
   // is NOT weakened).
   const password = String(body.password ?? "");
   const dashboardPass = getDashboardPass();
-  if (!password || !dashboardPass || password !== dashboardPass) {
+  // KILLSWITCH-TIMING-SAFE: constant-time compare with length guard (fail-closed
+  // — empty/length-mismatch/mismatch → same 401, never a throw). Reject body is
+  // byte-identical to the prior plain-=== path.
+  if (!passwordsMatch(password, dashboardPass)) {
     return NextResponse.json(
       { ok: false, error: "Invalid or missing password" },
       { status: 401 },
