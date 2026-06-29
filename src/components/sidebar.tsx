@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  TrendingUp, Brain, Settings, MessageSquare, Bot,
+  TrendingUp, Brain, Settings, Bot,
   ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightSmall,
 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef, Suspense } from "react";
@@ -55,13 +55,6 @@ const NAV_ZONES: NavZone[] = [
     children: [
       { label: "Control Panel", href: "/command?tab=control", tabKey: "control" },
     ],
-  },
-  {
-    id: "chat",
-    label: "CHAT",
-    icon: MessageSquare,
-    href: "/chat",
-    children: [],
   },
 ];
 

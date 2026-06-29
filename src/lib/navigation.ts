@@ -32,7 +32,6 @@ import {
   BookOpen,
   Database,
   Activity,
-  MessageSquare,
 } from "lucide-react";
 
 export type ZoneId = "auto" | "servant" | "intel" | "docs" | "memory" | "health";
@@ -157,15 +156,6 @@ export const ZONES: ReadonlyArray<Zone> = [
     defaultSubTab: "health",
   },
 ] as const;
-
-export const CHAT_FAB = {
-  id: "chat" as const,
-  href: "/chat" as const,
-  label: "Chat",
-  shortLabel: "Chat",
-  icon: MessageSquare,
-  accent: "cyan" as const,
-};
 
 export const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/trading", "/autotrader"], // was /stocks — zone removed (Stock+DCA removal 2026-06-19)
