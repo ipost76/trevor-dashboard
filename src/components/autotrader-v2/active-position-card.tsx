@@ -19,21 +19,29 @@ interface OpenPosition {
   ticker: string;
   direction: "LONG" | "SHORT";
   entry_price: number;
-  stop_price: number;
-  target_price: number;
+  // KPI-RECON: nullable — a heartbeat-only ("thin") live position has no replica
+  // detail yet, so stop/target/confidence/opened_at arrive null until it syncs.
+  stop_price: number | null;
+  target_price: number | null;
   leverage: number;
-  confidence: number;
+  confidence: number | null;
   notional_usd: number;
-  opened_at: string;
+  opened_at: string | null;
   peak_pnl_pct?: number | null;
   exit_signals_log?: string | null;
   trade_mode?: "live" | "paper";
+  // KPI-RECON: true ⇒ live-from-heartbeat but not yet in the replica (thin card).
+  thin?: boolean;
 }
 
 interface OpenTradesResponse {
   type: "open";
   count: number;
   positions: OpenPosition[];
+  // KPI-RECON: open-set tier. true ⇒ live heartbeat membership (badge LIVE);
+  // false ⇒ heartbeat down, replica fallback (badge REPLICA). The list length
+  // equals the header's open-count because both read the same heartbeat set.
+  live?: boolean;
 }
 
 interface PriceMap {
@@ -191,6 +199,12 @@ function PositionRow({ p, live }: { p: EnrichedPosition; live: boolean }) {
               {p.trade_mode}
             </Pill>
           )}
+          {/* KPI-RECON: live-but-not-yet-replicated — its detail is still syncing. */}
+          {p.thin && (
+            <Pill intent="warn" size="sm">
+              syncing
+            </Pill>
+          )}
           <span className="text-h3 font-bold tabular-nums">
             {p.ticker}{" "}
             <span
@@ -234,10 +248,14 @@ function PositionRow({ p, live }: { p: EnrichedPosition; live: boolean }) {
         <span className="tabular-nums">
           {p.leverage}x · ${p.notional_usd?.toFixed(2)}
         </span>
-        <span className="flex items-center gap-1 tabular-nums">
-          <Clock size={12} aria-hidden />
-          {fmtHold(holdMin(p.opened_at))}
-        </span>
+        {/* KPI-RECON: a thin (heartbeat-only) live position has no opened_at
+            until it replicates — omit hold-time rather than render "0m". */}
+        {p.opened_at && (
+          <span className="flex items-center gap-1 tabular-nums">
+            <Clock size={12} aria-hidden />
+            {fmtHold(holdMin(p.opened_at))}
+          </span>
+        )}
         {typeof effPeak === "number" && effPeak !== 0 && (
           <span className="flex items-center gap-1">
             peak
@@ -261,6 +279,10 @@ function PositionRow({ p, live }: { p: EnrichedPosition; live: boolean }) {
           {p.target_price ? (
             <> · tgt ${fmtPrice(p.target_price)}</>
           ) : null}
+          {/* KPI-RECON: thin live card — stop/tgt not yet replicated. */}
+          {p.thin ? (
+            <span className="text-fg-faint"> · stop/tgt syncing…</span>
+          ) : null}
         </span>
         {(() => {
           const ev = latestExitEvent(p.exit_signals_log);
@@ -282,6 +304,11 @@ export function ActivePositionCard() {
   const [positions, setPositions] = React.useState<OpenPosition[] | null>(null);
   const [prices, setPrices] = React.useState<PriceMap>({});
   const [loading, setLoading] = React.useState(true);
+  // KPI-RECON: the open-set freshness tier from /api/auto/trades. true ⇒ live
+  // heartbeat (badge LIVE), false ⇒ replica fallback (badge REPLICA), null ⇒
+  // not yet known / error fallback (no badge). Never show a live card under a
+  // stale label — this badge always reflects the source the rows actually came from.
+  const [liveTier, setLiveTier] = React.useState<boolean | null>(null);
   // RM-LIVE B4: live-terminal flag (default OFF). Called unconditionally; only
   // the displayed value branches on it. Each <PositionRow> calls useLiveMark.
   const liveTerminal = useLiveTerminal();
@@ -298,6 +325,8 @@ export function ActivePositionCard() {
         if (snapRes.ok && !cancelled) {
           const j = (await snapRes.json()) as OpenTradesResponse;
           setPositions(j.positions ?? []);
+          // KPI-RECON: track the tier so the header badge matches the source.
+          setLiveTier(typeof j.live === "boolean" ? j.live : null);
         }
       } catch {
         /* keep last good state */
@@ -384,6 +413,20 @@ export function ActivePositionCard() {
           <span className="flex items-center gap-2 uppercase tracking-wider">
             <Activity size={14} aria-hidden />
             Active · {positions?.length ?? 0}
+            {/* KPI-RECON: open-set tier badge — the count + cards come from the
+                live heartbeat (same source as the header's open-count), so this
+                cluster is the LIVE tier. Falls back to a REPLICA badge only if
+                the heartbeat was unavailable. Never a live card under a stale label. */}
+            {liveTier === true && (
+              <Pill intent="live" size="sm">
+                LIVE
+              </Pill>
+            )}
+            {liveTier === false && (
+              <Pill intent="warn" size="sm">
+                REPLICA
+              </Pill>
+            )}
           </span>
         </CardTitle>
       </CardHeader>
