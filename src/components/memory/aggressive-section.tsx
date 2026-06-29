@@ -7,13 +7,9 @@ import {
   Pill,
   EmptyState,
   Skeleton,
-  HapticButton,
-  BottomSheet,
 } from "@/components/ui";
 import {
   Zap,
-  Lock,
-  AlertTriangle,
   ShieldOff,
   Clock,
 } from "lucide-react";
@@ -42,19 +38,6 @@ interface AggressiveResponse {
   audit: ReadonlyArray<AuditEntry>;
   error?: string;
 }
-interface ToggleResponse {
-  ok: boolean;
-  no_change?: boolean;
-  prev_value?: string;
-  new_value?: string;
-  command_id?: number;
-  audit_id?: number;
-  queued?: boolean;
-  note?: string;
-  gate_locked?: boolean;
-  error?: string;
-}
-
 const POLL_MS = 30_000;
 
 function fmtMinutes(m: number | null | undefined): string {
@@ -68,12 +51,6 @@ function fmtMinutes(m: number | null | undefined): string {
 export function AggressiveModeSection() {
   const [data, setData] = React.useState<AggressiveResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [confirmTarget, setConfirmTarget] = React.useState<"on" | "off" | null>(null);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [result, setResult] = React.useState<{
-    tone: "ok" | "err";
-    message: string;
-  } | null>(null);
 
   const fetchState = React.useCallback(async () => {
     try {
@@ -90,49 +67,6 @@ export function AggressiveModeSection() {
     return () => clearInterval(id);
   }, [fetchState]);
 
-  const submit = async (target: "on" | "off") => {
-    setSubmitting(true);
-    setResult(null);
-    try {
-      const value = target === "on" ? "true" : "false";
-      const res = await fetch("/api/memory/aggressive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value, author: "ghost" }),
-      });
-      const payload = (await res.json()) as ToggleResponse;
-      if (res.status === 423) {
-        setResult({
-          tone: "err",
-          message: "Locked — HUB_AGGRESSIVE_TOGGLE_ENABLED is false.",
-        });
-      } else if (res.ok && payload.ok) {
-        if (payload.no_change) {
-          setResult({
-            tone: "ok",
-            message: `Already ${payload.new_value?.toUpperCase()} — no change.`,
-          });
-        } else {
-          setResult({
-            tone: "ok",
-            message: `Queued ${target.toUpperCase()} (audit #${payload.audit_id}, cmd #${payload.command_id}). Bot applies in ~10s.`,
-          });
-        }
-      } else {
-        setResult({
-          tone: "err",
-          message: payload.error || "Toggle failed.",
-        });
-      }
-    } catch (err) {
-      setResult({ tone: "err", message: String(err) });
-    } finally {
-      setSubmitting(false);
-      setConfirmTarget(null);
-      void fetchState();
-    }
-  };
-
   if (loading && !data) {
     return (
       <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
@@ -144,7 +78,6 @@ export function AggressiveModeSection() {
   }
 
   const enabled = !!data?.enabled;
-  const toggleEnabled = !!data?.toggle_enabled;
   const killswitchOn = !!data?.killswitch_enabled;
 
   return (
@@ -240,63 +173,6 @@ export function AggressiveModeSection() {
         </Card>
       )}
 
-      {/* Toggle controls */}
-      <Card padding="md">
-        <CardHeader>
-          <CardTitle>Toggle</CardTitle>
-        </CardHeader>
-        {!toggleEnabled && (
-          <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
-            <Lock size={16} className="shrink-0 mt-0.5" />
-            <div>
-              <div className="font-semibold">Toggle locked</div>
-              <div className="text-micro text-fg-muted">
-                Set{" "}
-                <code className="rounded bg-bg-elevated px-1 font-mono text-accent-cyan-soft">
-                  HUB_AGGRESSIVE_TOGGLE_ENABLED=true
-                </code>{" "}
-                in <code className="font-mono">auto_config</code> to unlock.
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-          <HapticButton
-            variant="primary"
-            size="md"
-            fullWidth
-            onClick={() => setConfirmTarget("on")}
-            disabled={!toggleEnabled || enabled || submitting}
-            aria-label="Set Aggressive Mode ON"
-          >
-            <Zap size={16} className="mr-2" />
-            Set ON
-          </HapticButton>
-          <HapticButton
-            variant="secondary"
-            size="md"
-            fullWidth
-            onClick={() => setConfirmTarget("off")}
-            disabled={!toggleEnabled || !enabled || submitting}
-            aria-label="Set Aggressive Mode OFF"
-          >
-            Set OFF
-          </HapticButton>
-        </div>
-        {result && (
-          <div
-            className={
-              "mt-3 flex items-start gap-2 rounded-md border p-3 font-sans text-caption " +
-              (result.tone === "ok"
-                ? "border-accent-mint/40 bg-accent-mint/10 text-accent-mint-strong"
-                : "border-accent-red/40 bg-accent-red/10 text-accent-red")
-            }
-          >
-            <span className="break-words">{result.message}</span>
-          </div>
-        )}
-      </Card>
-
       {/* Recent toggles */}
       <Card padding="md">
         <CardHeader>
@@ -351,54 +227,6 @@ export function AggressiveModeSection() {
         )}
       </Card>
 
-      {/* 2-tap confirm sheet */}
-      <BottomSheet
-        open={confirmTarget !== null}
-        onClose={() => (submitting ? undefined : setConfirmTarget(null))}
-        title={`Confirm Aggressive ${confirmTarget?.toUpperCase() ?? ""}`}
-      >
-        <div className="space-y-4 p-4">
-          <div className="flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
-            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-semibold">
-                {confirmTarget === "on" ? "Engage Aggressive Mode" : "Revert to Standard"}
-              </div>
-              <div className="text-micro text-fg-muted">
-                {confirmTarget === "on"
-                  ? `Threshold lowered by 5 for ~48h. Killswitch still applies. Capital cap removed per RM-07 P00. Auto-reverts.`
-                  : "Returns to standard threshold. No effect on currently open positions."}
-              </div>
-            </div>
-          </div>
-          <div className="font-sans text-micro text-fg-muted">
-            Author: <span className="text-fg-primary">ghost</span> · Audit row
-            will be written to <code className="font-mono">aggressive_mode_history</code>.
-          </div>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            <HapticButton
-              variant="ghost"
-              size="md"
-              fullWidth
-              onClick={() => setConfirmTarget(null)}
-              disabled={submitting}
-            >
-              Cancel
-            </HapticButton>
-            <HapticButton
-              variant={confirmTarget === "on" ? "primary" : "destructive"}
-              size="md"
-              fullWidth
-              onClick={() => confirmTarget && void submit(confirmTarget)}
-              disabled={submitting}
-            >
-              {submitting
-                ? "Queueing…"
-                : `Confirm ${confirmTarget?.toUpperCase() ?? ""}`}
-            </HapticButton>
-          </div>
-        </div>
-      </BottomSheet>
     </div>
   );
 }

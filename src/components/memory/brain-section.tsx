@@ -7,10 +7,9 @@ import {
   Pill,
   EmptyState,
   Skeleton,
-  HapticButton,
   BottomSheet,
 } from "@/components/ui";
-import { FileText, Lock, Edit, AlertTriangle } from "lucide-react";
+import { FileText, Lock, Edit } from "lucide-react";
 
 interface BrainFile {
   path: string;
@@ -36,23 +35,11 @@ interface BrainContent {
   lines: number;
   error?: string;
 }
-interface SaveResult {
-  ok?: boolean;
-  no_change?: boolean;
-  lines_changed_estimate?: number;
-  backup_path?: string;
-  error?: string;
-}
-
 export function BrainSection() {
   const [data, setData] = React.useState<BrainListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [openName, setOpenName] = React.useState<string | null>(null);
   const [content, setContent] = React.useState<BrainContent | null>(null);
-  const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const [saveResult, setSaveResult] = React.useState<string | null>(null);
 
   const fetchList = React.useCallback(async () => {
     try {
@@ -70,14 +57,11 @@ export function BrainSection() {
   const openFile = async (name: string) => {
     setOpenName(name);
     setContent(null);
-    setEditing(false);
-    setSaveResult(null);
     try {
       const res = await fetch(`/api/memory/brain/${encodeURIComponent(name)}`, { cache: "no-store" });
       if (res.ok) {
         const c = (await res.json()) as BrainContent;
         setContent(c);
-        setDraft(c.content ?? "");
       }
     } catch (err) {
       setContent({
@@ -95,36 +79,6 @@ export function BrainSection() {
   const closeSheet = () => {
     setOpenName(null);
     setContent(null);
-    setEditing(false);
-    setSaveResult(null);
-  };
-
-  const save = async () => {
-    if (!content || content.is_sacred) return;
-    setSaving(true);
-    setSaveResult(null);
-    try {
-      const res = await fetch(`/api/memory/brain/${encodeURIComponent(content.name)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: draft, author: "ghost" }),
-      });
-      const j = (await res.json()) as SaveResult;
-      if (j.error) {
-        setSaveResult(`Failed: ${j.error}`);
-      } else if (j.no_change) {
-        setSaveResult("No change");
-        setEditing(false);
-      } else {
-        setSaveResult(`Saved ✓ (${j.lines_changed_estimate ?? 0} lines changed; backup at ${j.backup_path ?? "?"})`);
-        setEditing(false);
-        void fetchList();
-      }
-    } catch (err) {
-      setSaveResult(`Failed: ${String(err)}`);
-    } finally {
-      setSaving(false);
-    }
   };
 
   return (
@@ -217,58 +171,9 @@ export function BrainSection() {
               <span>· modified <span className="font-mono">{new Date(content.modified_at).toLocaleDateString()}</span></span>
             </div>
 
-            {!editing && (
-              <pre className="rounded-md border border-border-subtle bg-bg-elevated p-3 text-caption text-fg-primary whitespace-pre-wrap break-words max-h-[60vh] overflow-auto">
-                {content.content}
-              </pre>
-            )}
-
-            {editing && (
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                className="w-full max-h-[60vh] min-h-[40vh] rounded-md border border-border-strong bg-bg-elevated p-3 text-caption text-fg-primary font-mono"
-                spellCheck={false}
-              />
-            )}
-
-            {!content.is_sacred && data?.edit_enabled && !editing && (
-              <HapticButton variant="primary" fullWidth onClick={() => setEditing(true)}>
-                <Edit size={14} /> Edit
-              </HapticButton>
-            )}
-
-            {!content.is_sacred && data?.edit_enabled && editing && (
-              <div className="space-y-2">
-                <div className="flex items-start gap-2 rounded-md border border-accent-gold/40 bg-accent-gold/10 p-3 font-sans text-caption text-accent-gold-strong">
-                  <AlertTriangle size={16} className="mt-0.5 flex-none" />
-                  <span>Saving creates a timestamped .bak and writes an audit row. Sacred files cannot be edited.</span>
-                </div>
-                <HapticButton variant="primary" fullWidth disabled={saving} onClick={save}>
-                  {saving ? "Saving…" : "Confirm Save"}
-                </HapticButton>
-                <HapticButton
-                  variant="ghost"
-                  fullWidth
-                  onClick={() => {
-                    setEditing(false);
-                    setDraft(content.content);
-                  }}
-                >
-                  Cancel
-                </HapticButton>
-              </div>
-            )}
-
-            {saveResult && (
-              <div
-                className={`font-sans text-caption ${
-                  saveResult.startsWith("Failed") ? "text-accent-red" : "text-accent-mint-strong"
-                }`}
-              >
-                {saveResult}
-              </div>
-            )}
+            <pre className="rounded-md border border-border-subtle bg-bg-elevated p-3 text-caption text-fg-primary whitespace-pre-wrap break-words max-h-[60vh] overflow-auto">
+              {content.content}
+            </pre>
 
             {content.is_sacred && (
               <div className="font-sans text-micro text-fg-muted">

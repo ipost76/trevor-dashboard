@@ -7,18 +7,16 @@ import {
   Pill,
   EmptyState,
   Skeleton,
-  HapticButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { Sparkles, Play, Download } from "lucide-react";
+import { Sparkles, Download } from "lucide-react";
 
 // B4 AI engine (Hub read-side) — AI findings panel on the Health home (default tab).
 //
 // Reads /api/health/ai-findings (findings WHERE status != 'resolved') and renders
-// each finding as a card. The "Analyze now" button POSTs to the same endpoint →
-// set_ai_command.py → enqueues a 'pending' row on the VM LIVE ai_engine_commands
-// queue. READ + one write surface; the engine is capped until 2026-07-01, so the
-// list is EMPTY today and Analyze-now just queues — this NEVER errors on empty.
+// each finding as a card. READ-ONLY (B2 read-only lockdown removed the
+// "Analyze now" write trigger); the engine is capped until 2026-07-01, so the
+// list is EMPTY today until the engine processes findings.
 
 const ENDPOINT = "/api/health/ai-findings";
 const POLL_MS = 60_000;
@@ -78,8 +76,6 @@ function sevBorder(sev: string | null): string {
 export function AiFindingsPanel() {
   const [findings, setFindings] = React.useState<AiFinding[] | null>(null);
   const [loaded, setLoaded] = React.useState(false);
-  const [analyzing, setAnalyzing] = React.useState(false);
-  const [toast, setToast] = React.useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
   const load = React.useCallback(async (signal?: AbortSignal) => {
     try {
@@ -108,30 +104,6 @@ export function AiFindingsPanel() {
     };
   }, [load]);
 
-  const analyzeNow = React.useCallback(async () => {
-    if (analyzing) return;
-    setAnalyzing(true);
-    setToast(null);
-    try {
-      const res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "analyze_now" }),
-      });
-      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: number; error?: string };
-      if (res.ok && out.ok) {
-        setToast({ kind: "ok", msg: `Queued analysis #${out.id ?? "?"} — engine runs it when uncapped.` });
-        void load();
-      } else {
-        setToast({ kind: "err", msg: out.error ?? `Failed (HTTP ${res.status})` });
-      }
-    } catch (e) {
-      setToast({ kind: "err", msg: String(e) });
-    } finally {
-      setAnalyzing(false);
-    }
-  }, [analyzing, load]);
-
   const list = findings ?? [];
 
   return (
@@ -143,30 +115,7 @@ export function AiFindingsPanel() {
             AI Analysis
           </span>
         </CardTitle>
-        <HapticButton
-          variant="primary"
-          size="sm"
-          onClick={analyzeNow}
-          disabled={analyzing}
-          aria-label="Enqueue an AI analysis now"
-        >
-          <Play size={12} aria-hidden />
-          {analyzing ? "Queuing…" : "Analyze now"}
-        </HapticButton>
       </CardHeader>
-
-      {toast && (
-        <div
-          className={cn(
-            "mb-3 rounded-md border px-3 py-2 text-caption",
-            toast.kind === "ok"
-              ? "border-accent-mint/40 text-accent-mint"
-              : "border-accent-red/40 text-accent-red",
-          )}
-        >
-          {toast.msg}
-        </div>
-      )}
 
       {!loaded && <Skeleton className="h-20 w-full" />}
 
