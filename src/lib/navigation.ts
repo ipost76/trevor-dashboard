@@ -64,11 +64,13 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Auto",
     icon: Bot,
     accent: "green",
+    // B1 (2026-06-28, Hub Read-Only Lockdown): the Config + Control sub-tabs
+    // (the concentrated bot-control UI) were removed — all config/control now
+    // happens via CC prompts, never the Hub. Dashboard/Recent/Activity stay as
+    // read-only views; the killswitch lives in the header/scalper-header/health.
     subTabs: [
       { key: "dashboard", label: "Dashboard" },
       { key: "recent", label: "Recent" },
-      { key: "config", label: "Config" },
-      { key: "control", label: "Control" },
       { key: "activity", label: "Activity" },
     ],
     defaultSubTab: "dashboard",
