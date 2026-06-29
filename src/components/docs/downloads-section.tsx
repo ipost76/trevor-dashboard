@@ -12,8 +12,13 @@ import {
 import {
   Download,
   FolderOpen,
+  Trash2,
+  FolderInput,
+  Settings,
 } from "lucide-react";
 import { CategoryTabs, UNCATEGORIZED_KEY, type DocsCategory } from "./category-tabs";
+import { MoveToSheet } from "./move-to-sheet";
+import { CategorySettingsSheet } from "./category-settings-sheet";
 import { DownloadFormatSheet } from "./download-format-sheet";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -83,16 +88,63 @@ function fileTypePillTone(
 
 interface FileCardProps {
   file: DownloadFile;
+  deleting: boolean;
+  moving: boolean;
   onDownload: (filename: string) => void;
+  onDelete: (filename: string) => Promise<boolean>;
+  onMove: (file: DownloadFile) => void;
 }
 
 function DownloadFileCard({
   file,
+  deleting,
+  moving,
   onDownload,
+  onDelete,
+  onMove,
 }: FileCardProps) {
   const ext = file.file_type || "";
   const tone = fileTypePillTone(ext);
   const handleDownload = () => onDownload(file.filename);
+
+  // Delete is a two-tap confirm: the first tap arms "Confirm Delete" for 3s,
+  // a second tap within that window fires the delete. Guards accidental
+  // mobile taps. A failed delete shows "Failed" for 2s, then reverts.
+  const [deletePhase, setDeletePhase] = React.useState<
+    "idle" | "confirm" | "error"
+  >("idle");
+  const deleteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearDeleteTimer = () => {
+    if (deleteTimer.current) {
+      clearTimeout(deleteTimer.current);
+      deleteTimer.current = null;
+    }
+  };
+  React.useEffect(() => {
+    return () => {
+      if (deleteTimer.current) clearTimeout(deleteTimer.current);
+    };
+  }, []);
+
+  const handleDeleteClick = async () => {
+    if (deletePhase === "idle") {
+      clearDeleteTimer();
+      setDeletePhase("confirm");
+      deleteTimer.current = setTimeout(() => setDeletePhase("idle"), 3000);
+      return;
+    }
+    if (deletePhase === "confirm") {
+      clearDeleteTimer();
+      const ok = await onDelete(file.filename);
+      // On success the parent drops this card from the list (it unmounts);
+      // on failure, surface a brief error state, then revert.
+      if (!ok) {
+        setDeletePhase("error");
+        deleteTimer.current = setTimeout(() => setDeletePhase("idle"), 2000);
+      }
+    }
+  };
 
   return (
     <Card padding="sm">
@@ -139,6 +191,44 @@ function DownloadFileCard({
             <Download size={14} />
             Download
           </HapticButton>
+          <HapticButton
+            variant="ghost"
+            size="sm"
+            disabled={moving}
+            onClick={() => onMove(file)}
+            aria-label={`Move ${file.filename} to another category`}
+            className="border border-accent-plum/30 bg-accent-plum/10 text-accent-plum-strong hover:bg-accent-plum/20 hover:text-accent-plum-strong disabled:opacity-50"
+          >
+            <FolderInput size={14} />
+            {moving ? "..." : "Move"}
+          </HapticButton>
+          <HapticButton
+            variant="ghost"
+            size="sm"
+            disabled={deleting}
+            onClick={() => void handleDeleteClick()}
+            aria-label={
+              deletePhase === "confirm"
+                ? `Confirm permanent deletion of ${file.filename}`
+                : `Delete ${file.filename}`
+            }
+            className={
+              deletePhase === "confirm"
+                ? "animate-pulse border border-accent-red/60 bg-accent-red/25 text-accent-red hover:bg-accent-red/35 hover:text-accent-red disabled:opacity-50"
+                : deletePhase === "error"
+                  ? "border border-accent-red-subtle bg-accent-red/10 text-fg-muted disabled:opacity-50"
+                  : "border border-accent-red-subtle bg-accent-red/10 text-accent-red hover:bg-accent-red/20 hover:text-accent-red disabled:opacity-50"
+            }
+          >
+            <Trash2 size={14} />
+            {deleting
+              ? "..."
+              : deletePhase === "confirm"
+                ? "Confirm Delete"
+                : deletePhase === "error"
+                  ? "Failed"
+                  : "Delete"}
+          </HapticButton>
         </div>
       </div>
     </Card>
@@ -150,6 +240,17 @@ function DownloadFileCard({
 export function DownloadsSection() {
   const [data, setData] = React.useState<DownloadsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [deleting, setDeleting] = React.useState<Set<string>>(new Set());
+  // In-flight set for the MOVE button (Wave B2). Mirrors the `deleting` set
+  // pattern (the parallel `archiving` set was removed 2026-05-20 along with
+  // the Archive button).
+  const [moving, setMoving] = React.useState<Set<string>>(new Set());
+  // The file currently targeted by the Move-to sheet. `null` = sheet closed.
+  const [moveSheetFile, setMoveSheetFile] = React.useState<DownloadFile | null>(
+    null,
+  );
+  // Settings (category management) sheet visibility — Wave B2.
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   // Filename currently targeted by the Download-format sheet (.md vs PDF
   // picker). `null` = sheet closed. The Download button on a file card now
   // opens this sheet instead of firing a direct .md download.
@@ -275,6 +376,72 @@ export function DownloadsSection() {
     setDownloadSheetFile(filename);
   };
 
+  const handleMove = async (
+    filename: string,
+    category_id: string | null,
+  ): Promise<boolean> => {
+    setMoving((prev) => new Set(prev).add(filename));
+    try {
+      const res = await fetch(
+        `/api/docs/downloads/${encodeURIComponent(filename)}/move`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category_id }),
+        },
+      );
+      const result = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+      };
+      const ok = res.ok && result.success !== false;
+      if (ok) {
+        // Single-fetch design (Wave B1): one refetch yields the moved file's
+        // new category_id, which the counts useMemo derives — tab badges
+        // increment/decrement automatically and the card drops from the
+        // current tab.
+        await fetchData();
+      }
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      setMoving((prev) => {
+        const next = new Set(prev);
+        next.delete(filename);
+        return next;
+      });
+    }
+  };
+
+  const handleDelete = async (filename: string): Promise<boolean> => {
+    setDeleting((prev) => new Set(prev).add(filename));
+    try {
+      const res = await fetch("/api/intel/downloads/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      const result = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+      };
+      const ok = res.ok && result.success === true;
+      if (ok) {
+        // Refetch — the file drops from the list and the stats (file count +
+        // total size) refresh from server truth.
+        await fetchData();
+      }
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      setDeleting((prev) => {
+        const next = new Set(prev);
+        next.delete(filename);
+        return next;
+      });
+    }
+  };
+
   const stats = data?.stats;
   // Initial paint waits for the listing AND the default-tab pick so the file
   // list never flashes Uncategorized before resolving to the chosen tab.
@@ -311,6 +478,17 @@ export function DownloadsSection() {
                 </>
               )}
             </div>
+            {/* Settings gear — opens the category management sheet (Wave B2). */}
+            <HapticButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Manage categories"
+              title="Manage categories"
+              className="border border-border-subtle bg-bg-elevated/30 text-fg-muted hover:border-accent-plum/40 hover:bg-accent-plum/10 hover:text-accent-plum-strong"
+            >
+              <Settings size={14} aria-hidden />
+            </HapticButton>
           </div>
         </CardHeader>
       </Card>
@@ -362,7 +540,11 @@ export function DownloadsSection() {
             <li key={f.filename}>
               <DownloadFileCard
                 file={f}
+                deleting={deleting.has(f.filename)}
+                moving={moving.has(f.filename)}
                 onDownload={handleDownload}
+                onDelete={handleDelete}
+                onMove={setMoveSheetFile}
               />
             </li>
           ))}
@@ -379,6 +561,32 @@ export function DownloadsSection() {
         filename={downloadSheetFile}
       />
 
+      {/* Move-to sheet — one shared instance; opens for whichever file's MOVE
+          button was tapped (Wave B2). Categories list is the same one the
+          tab strip uses, so the destination list always matches the tabs. */}
+      <MoveToSheet
+        open={moveSheetFile !== null}
+        onClose={() => setMoveSheetFile(null)}
+        file={moveSheetFile}
+        categories={categories ?? []}
+        onMove={handleMove}
+      />
+
+      {/* Category management sheet — opened by the ⚙️ gear in the header
+          (Wave B2). On every successful create/rename/delete we re-fetch both
+          the categories array (drives the tab strip + Move-to destinations)
+          and the file listing (delete moves files to Uncategorized → counts
+          and category_ids change). */}
+      <CategorySettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        categories={categories ?? []}
+        counts={counts}
+        onCategoriesChanged={() => {
+          void fetchCategories();
+          void fetchData();
+        }}
+      />
     </div>
   );
 }
