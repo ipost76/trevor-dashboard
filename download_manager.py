@@ -473,6 +473,21 @@ def delete_download(filename: str) -> dict:
                 break
 
         if disk_path is not None:
+            # Safety guard (defense-in-depth): confirm the resolved target is
+            # inside the downloads root before unlinking, so a crafted filename
+            # can never delete a file elsewhere on the box. This is local to the
+            # unlink and independent of the route-level (/, ..) reject + the
+            # manifest-membership gate above — belt-and-suspenders for a write
+            # surface the read-only lockdown deliberately reopened.
+            root = DOWNLOADS_DIR.resolve()
+            resolved = disk_path.resolve()
+            if root not in resolved.parents:
+                logger.warning(
+                    f"[DOWNLOADS] delete_download: REFUSED {filename} — resolved "
+                    f"path {resolved} is outside downloads root {root}"
+                )
+                return {"deleted": False, "discord_deleted": False,
+                        "error": "refused: path outside downloads root"}
             try:
                 disk_path.unlink()
             except Exception as e:
