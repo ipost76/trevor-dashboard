@@ -2,7 +2,7 @@
 import * as React from "react";
 import { LogOut, Sun, Moon, KeyRound } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { KillswitchPill } from "@/components/ui";
 import PriceStrip from "@/components/PriceStrip";
 import { useScrollDirection } from "@/hooks/useScrollDirection";
@@ -24,12 +24,9 @@ interface StatusData {
  *
  * Mobile: collapses on scroll-down, restores on scroll-up.
  * Desktop: always visible.
- *
- * /chat route renders a minimal back-button + title variant.
  */
 export function Header() {
   const router = useRouter();
-  const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const [status, setStatus] = React.useState<StatusData | null>(null);
   const [now, setNow] = React.useState<string>("");
@@ -85,9 +82,6 @@ export function Header() {
   const dotCls = isOffline ? "bg-accent-red" : "bg-accent-mint";
   const liveLabel = isOffline ? "OFFLINE" : "LIVE";
 
-  // /chat minimal variant detection
-  const isChat = pathname === "/chat";
-
   // Hide on scroll-down, show on scroll-up (mobile only; desktop always visible)
   const hidden = scrollDir === "down";
 
@@ -108,26 +102,6 @@ export function Header() {
 
   const toggleTheme = () =>
     setTheme(resolvedTheme === "dark" ? "light" : "dark");
-
-  // Per-zone variant: /chat renders minimal topbar
-  if (isChat) {
-    return (
-      <header className="safe-pt sticky top-0 z-30 flex items-center gap-3 border-b border-border-subtle bg-bg-sidebar/95 px-4 py-2 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          aria-label="Back"
-          className="tap-target rounded-md p-2 text-fg-muted hover:text-fg-primary"
-        >
-          ←
-        </button>
-        <span className="font-sans text-h3 font-semibold tracking-tight">TREVOR CHAT</span>
-        <span className="ml-auto inline-flex items-center" aria-label={liveLabel}>
-          <span className={`h-2 w-2 rounded-full ${dotCls}`} />
-        </span>
-      </header>
-    );
-  }
 
   return (
     <header

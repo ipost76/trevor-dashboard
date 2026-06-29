@@ -100,7 +100,7 @@ Conventions:
 
 - Top-level: `app-shell.tsx` (+ `-nav`, `-legacy`), `header.tsx` (+ `-legacy`), `sidebar.tsx`, `status-bar.tsx`, `theme-provider.tsx`, `KillswitchPill.tsx`, `PriceStrip.tsx`, `change-password-modal.tsx`, `TabContainer.tsx`, `Skeleton.tsx`.
 - `layout.tsx` mounts `<ThemeProvider><AppShell>`; the `*-legacy` shells are pre-redesign chrome kept for `HUB_REDESIGN_NAV` rollback.
-- Chat was REMOVED entirely (B2, 2026-06-28, Read-Only Lockdown): the `/chat` page, the `chat/` components, and the orphaned `chat-fab` overlay (already replaced by NotesWidget, W1-P1) are all gone. `typing-dots.tsx` was deleted (DEADCODE-B1, 2026-06-29 — its only consumer was `/chat`). The `/api/chat/*` routes (all 4) were deleted in DEADCODE-B1 (2026-06-29).
+- Chat was REMOVED entirely (B2, 2026-06-28, Read-Only Lockdown): the `/chat` page, the `chat/` components, and the orphaned `chat-fab` overlay (already replaced by NotesWidget, W1-P1) are all gone. `typing-dots.tsx` was deleted (DEADCODE-B1, 2026-06-29 — its only consumer was `/chat`). The `/api/chat/*` routes (all 4) were deleted in DEADCODE-B1 (2026-06-29). DEADCODE-B1 also stripped the dead `isChat` no-op branches (always-false since `/chat` is gone) from `header.tsx` (with its now-orphaned `usePathname`/`pathname`) and `app-shell-legacy.tsx` (ternaries collapsed to the non-chat branch; `pathname` kept for the `/login` bypass — file remains the rollback chrome).
 - `scout/` carries its own data layer (`api.ts`, `use-fetch.ts`, `types.ts`, `format.ts`), separate from the shared `runPython` path.
 
 ---
