@@ -32,47 +32,8 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Rate limiting — 30 messages per hour
-const _chatLog: number[] = [];
-const MAX_PER_HOUR = 30;
-
-export async function POST(request: NextRequest) {
-  const now = Date.now();
-  while (_chatLog.length > 0 && _chatLog[0] < now - 3600000) _chatLog.shift();
-  if (_chatLog.length >= MAX_PER_HOUR) {
-    return NextResponse.json({ error: "Rate limit exceeded (30/hour)" }, { status: 429 });
-  }
-  _chatLog.push(now);
-
-  const body = await request.json();
-  const messages = body.messages;
-
-  // Legacy single-message format — route through chat_bridge as argv (no shell).
-  if (!messages && body.message) {
-    try {
-      // User input crosses as argv[2]. NO shell, NO escape dance. 2000-char cap.
-      const msg = String(body.message ?? "").slice(0, 2000);
-      const raw = await runPython("chat_bridge.py", ["chat", msg], { timeout: 90000 });
-      return NextResponse.json(JSON.parse(raw));
-    } catch (err) {
-      return NextResponse.json({ error: String(err), ok: false }, { status: 500 });
-    }
-  }
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return NextResponse.json({ error: "No messages provided" }, { status: 400 });
-  }
-
-  try {
-    // Pipe JSON via stdin — no shell echo, no interpolation.
-    const input = JSON.stringify({ messages: messages.slice(-10) });
-    const raw = await runPython("chat_ai.py", [], { timeout: 30000, input });
-    const data = JSON.parse(raw);
-    if (data.error) {
-      return NextResponse.json({ error: data.error }, { status: 502 });
-    }
-    return NextResponse.json(data);
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
-}
+// [B3] Hub read-only lockdown (2026-06-28): the POST write surface (chat_bridge.py
+// chat + chat_ai.py — wrote the VM chat log) was removed, along with its in-memory
+// rate-limit. Only the GET read (health/history) remains; the path 405s on a write
+// verb. NB the chat *stream* write lives in a separate gateway-backed route
+// (/api/chat/stream → chat.log_user/log_assistant ops), killed at ops.js (Phase 2).

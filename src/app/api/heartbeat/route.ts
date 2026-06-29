@@ -8,7 +8,6 @@ import { createSwrCache } from "@/lib/single-flight";
 // Observatory was moved off :3335 to the tailnet :8443 endpoint (W-E-P2b) and then
 // onto the new box trevor-prime-2 (OBS-REPOINT). The live target is OBSERVATORY_URL.
 const OBSERVATORY_URL = "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
-const OBSERVATORY_REFRESH_URL = "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -55,24 +54,6 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  try {
-    const res = await fetch(OBSERVATORY_REFRESH_URL, {
-      method: "POST",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: `Observatory refresh returned ${res.status}` },
-        { status: 502 },
-      );
-    }
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Observatory unreachable", details: String(error) },
-      { status: 503 },
-    );
-  }
-}
+// [B3] Hub read-only lockdown (2026-06-28): the POST write-action (poked the
+// Observatory /api/heartbeat/refresh URL) was removed. Only the GET read-proxy
+// remains — the 30s GET poll covers refresh; the path 405s on a write verb.
