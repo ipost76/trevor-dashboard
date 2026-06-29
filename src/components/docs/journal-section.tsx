@@ -8,10 +8,9 @@ import {
   Skeleton,
   MoneyText,
   Pill,
-  HapticButton,
   BottomSheet,
 } from "@/components/ui";
-import { BookOpen, Sparkles, Lock } from "lucide-react";
+import { BookOpen, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface JournalTrade {
@@ -168,7 +167,6 @@ export function JournalSection() {
   const [loading, setLoading] = React.useState(true);
   const [openTrade, setOpenTrade] = React.useState<JournalTrade | null>(null);
   const [narrative, setNarrative] = React.useState<NarrativeResponse | null>(null);
-  const [generating, setGenerating] = React.useState(false);
 
   const fetchList = React.useCallback(async () => {
     setLoading(true);
@@ -196,44 +194,6 @@ export function JournalSection() {
       } catch (err) {
         setNarrative({ error: String(err) });
       }
-    }
-  };
-
-  const generate = async () => {
-    if (!openTrade) return;
-    setGenerating(true);
-    try {
-      const res = await fetch(`/api/intel/journal/${openTrade.trade_source}/${openTrade.trade_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const j = (await res.json()) as NarrativeResponse;
-      setNarrative(j);
-      fetchList();
-    } catch (err) {
-      setNarrative({ error: String(err) });
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const regenerate = async () => {
-    if (!openTrade) return;
-    setGenerating(true);
-    try {
-      const res = await fetch(`/api/intel/journal/${openTrade.trade_source}/${openTrade.trade_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
-      });
-      const j = (await res.json()) as NarrativeResponse;
-      setNarrative(j);
-      fetchList();
-    } catch (err) {
-      setNarrative({ error: String(err) });
-    } finally {
-      setGenerating(false);
     }
   };
 
@@ -360,36 +320,15 @@ export function JournalSection() {
               )}
             </div>
 
-            {!narrative && !generating && (
+            {!narrative && (
               <EmptyState
                 icon={<Sparkles size={20} />}
                 title="No journal entry yet"
-                body="Generate a Haiku-written summary for this trade. Spends ~600 tokens (≈$0.0006)."
-                action={
-                  <HapticButton variant="primary" size="md" onClick={generate}>
-                    Generate
-                  </HapticButton>
-                }
+                body="No Haiku-written summary has been generated for this trade yet."
               />
             )}
 
-            {generating && <Skeleton className="h-32 w-full" />}
-
-            {narrative?.error === "budget_exceeded" && (
-              <Card padding="md" className="card-warn">
-                <div className="flex items-start gap-2">
-                  <Lock size={16} className="mt-0.5 text-accent-gold" />
-                  <div className="font-sans text-caption text-accent-gold-strong">
-                    Daily budget exceeded ({narrative.tokens_used_today}/{narrative.tokens_cap}{" "}
-                    tokens). Try again after reset, or raise{" "}
-                    <code className="font-mono">ANTHROPIC_API_DAILY_BUDGET_TOKENS</code> via{" "}
-                    <code className="font-mono">auto_config</code>.
-                  </div>
-                </div>
-              </Card>
-            )}
-
-            {narrative?.error && narrative.error !== "budget_exceeded" && (
+            {narrative?.error && (
               <EmptyState title="Failed to load" body={narrative.error} />
             )}
 
@@ -420,11 +359,6 @@ export function JournalSection() {
                     <span className="font-mono">{new Date(narrative.generated_at).toLocaleString()}</span>
                   )}
                 </div>
-                {narrative.from_cache && (
-                  <HapticButton variant="ghost" size="sm" onClick={regenerate}>
-                    Regenerate
-                  </HapticButton>
-                )}
               </Card>
             )}
           </div>
