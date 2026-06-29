@@ -51,6 +51,7 @@ export function KillswitchControlCard() {
   const [state, setState] = React.useState<KillswitchState | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [confirmTarget, setConfirmTarget] = React.useState<"on" | "off" | null>(null);
+  const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [result, setResult] = React.useState<{ tone: "ok" | "err"; message: string } | null>(null);
@@ -81,6 +82,9 @@ export function KillswitchControlCard() {
           action: target,
           reason: target === "on" ? "Hub: engaged via System Health" : "Hub: released via System Health",
           author: "ghost",
+          // B5: server-verified password re-confirm. Wrong/empty → 401, killswitch
+          // does NOT fire (gateway never called); the error surfaces below.
+          password,
         }),
       });
       const payload = (await res.json()) as SetResponse;
@@ -104,6 +108,7 @@ export function KillswitchControlCard() {
     } finally {
       setSubmitting(false);
       setConfirmTarget(null);
+      setPassword(""); // never persist the secret in state after an attempt
       void fetchState();
     }
   };
@@ -228,7 +233,12 @@ export function KillswitchControlCard() {
       {/* 2-tap confirm sheet */}
       <BottomSheet
         open={confirmTarget !== null}
-        onClose={() => (submitting ? undefined : setConfirmTarget(null))}
+        onClose={() => {
+          if (!submitting) {
+            setConfirmTarget(null);
+            setPassword("");
+          }
+        }}
         title={`Confirm ${confirmTarget === "on" ? "Activate" : "Release"} Killswitch`}
       >
         <div className="space-y-4 p-4">
@@ -259,12 +269,42 @@ export function KillswitchControlCard() {
             in <code className="font-mono">auto_config.EMERGENCY_KILLSWITCH_LAST_*</code> · WARNING
             sentinel <code className="font-mono">[KILLSWITCH-{confirmTarget?.toUpperCase()}]</code> emitted.
           </div>
+          {/* B5: server-verified password re-confirm before the killswitch fires */}
+          <div className="space-y-1.5">
+            <label
+              htmlFor="killswitch-password"
+              className="block font-sans text-micro uppercase tracking-wider text-fg-muted"
+            >
+              Re-enter dashboard password
+            </label>
+            <input
+              id="killswitch-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && password.trim() && !submitting && confirmTarget) {
+                  void submit(confirmTarget);
+                }
+              }}
+              disabled={submitting}
+              placeholder="Password required to fire"
+              className="w-full rounded-md border border-accent-cyan-soft/40 bg-bg-elevated px-3 py-2 font-mono text-caption text-fg-primary outline-none transition-colors duration-fast focus:border-accent-cyan-soft focus:shadow-glow-focus"
+            />
+            <p className="font-sans text-micro text-fg-muted">
+              Verified server-side — a wrong or empty password will NOT fire the killswitch.
+            </p>
+          </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <HapticButton
               variant="ghost"
               size="md"
               fullWidth
-              onClick={() => setConfirmTarget(null)}
+              onClick={() => {
+                setConfirmTarget(null);
+                setPassword("");
+              }}
               disabled={submitting}
             >
               Cancel
@@ -274,7 +314,7 @@ export function KillswitchControlCard() {
               size="md"
               fullWidth
               onClick={() => confirmTarget && void submit(confirmTarget)}
-              disabled={submitting}
+              disabled={submitting || !password.trim()}
             >
               {submitting
                 ? "Saving…"

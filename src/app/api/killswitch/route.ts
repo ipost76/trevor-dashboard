@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { runPython } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
 import { callGateway, gatewayResponse } from "@/lib/gateway-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * B5 (2026-06-28): read DASHBOARD_PASS from .env.local directly — the SAME
+ * source the login uses (mirrors auth/route.ts `getCredentials`), so the
+ * killswitch password gate tracks the same live password as login after a
+ * rotation (no restart, no desync). Falls back to process.env. Never logged.
+ */
+function getDashboardPass(): string {
+  try {
+    const envPath = join(process.cwd(), ".env.local");
+    const content = readFileSync(envPath, "utf-8");
+    const passMatch = content.match(/^DASHBOARD_PASS=(.+)$/m);
+    return passMatch ? passMatch[1].trim() : process.env.DASHBOARD_PASS || "";
+  } catch {
+    return process.env.DASHBOARD_PASS || "";
+  }
+}
 
 // 5-second cache matches the client poll cadence in KillswitchPill.tsx —
 // coalesces multi-tab requests, keeps Python spawn rate to <1/sec.
@@ -56,7 +75,7 @@ export async function GET() {
  *   500 — internal / DB error
  */
 export async function POST(request: Request) {
-  let body: { action?: unknown; reason?: unknown; author?: unknown } = {};
+  let body: { action?: unknown; reason?: unknown; author?: unknown; password?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -76,8 +95,24 @@ export async function POST(request: Request) {
   const reason = String(body.reason ?? "Hub toggle").trim() || "Hub toggle";
   const author = String(body.author ?? "ghost").trim() || "ghost";
 
-  // W-C-P2a: routed through the gateway → VM (audited). The killswitch is the
-  // emergency stop — it intentionally has NO write-enable gate (always actionable).
+  // B5 (2026-06-28): server-verified password re-confirm before the emergency
+  // stop fires — so a casual viewer holding a Hub session can't trip it. Read
+  // DASHBOARD_PASS from .env.local directly (mirrors login) so it tracks the
+  // same live password after a rotation. Fail CLOSED — missing/empty/mismatch →
+  // 401, gateway NEVER called, password NEVER logged. Additive gating only: the
+  // killswitch stays fully functional on the correct password (emergency stop
+  // is NOT weakened).
+  const password = String(body.password ?? "");
+  const dashboardPass = getDashboardPass();
+  if (!password || !dashboardPass || password !== dashboardPass) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid or missing password" },
+      { status: 401 },
+    );
+  }
+
+  // W-C-P2a: routed through the gateway → VM (audited). Transport is unchanged;
+  // the password gate above is the new barrier in front of it.
   const gw = await callGateway(
     "killswitch.set",
     { action, reason, author },
