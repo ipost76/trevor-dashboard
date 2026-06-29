@@ -1,21 +1,18 @@
 "use client";
 import * as React from "react";
-import { ChevronDown, Download, RotateCcw, Crosshair } from "lucide-react";
-import { EmptyState, Skeleton, Pill, ConfirmModal } from "@/components/ui";
+import { ChevronDown, Download, Crosshair } from "lucide-react";
+import { EmptyState, Skeleton, Pill } from "@/components/ui";
 import { fmtUsd } from "@/lib/shadow-aggregate";
 import { cn } from "@/lib/utils";
 
 // SERVANT (Edge-Hunter, B5) — the surface where Ghost reads the edge-hunter's
-// findings and acts on them. READS /api/servant/findings (servant_findings WHERE
-// handled=0, rank-ordered, READ-ONLY over the litestream replica) and DISPLAYS
-// them as DAILY-EDGE-style ranked cards. Two actions only:
+// findings. READS /api/servant/findings (servant_findings WHERE handled=0,
+// rank-ordered, READ-ONLY over the litestream replica) and DISPLAYS them as
+// DAILY-EDGE-style ranked cards. One action only:
 //   • Download report → streams the current rolling .md (/api/servant/report).
-//   • Reset report    → round-trips to the VM (/api/servant/reset): marks
-//     handled=1, NEVER deletes, NEVER clears what SERVANT learned. The page then
-//     shows the empty state, ready for the next hunt.
-// The Hub is READ-ONLY on the replica; the reset is the ONLY write and it targets
-// the VM live db (the engine owns the write). Mirrors daily-edge-section.tsx
-// (fetch + 60s poll + freshness badge + Hero/RunnerUp rank cards + honest states).
+// The Hub is fully READ-ONLY here (B2 read-only lockdown removed the Reset-report
+// write). Mirrors daily-edge-section.tsx (fetch + 60s poll + freshness badge +
+// Hero/RunnerUp rank cards + honest states).
 //
 // HONESTY (load-bearing):
 //   • The $ shown is realized_dollars — the engine's DEDUP'd per-distinct-trade Σ
@@ -281,8 +278,6 @@ function RunnerUpCard({ c, rank }: { c: Finding; rank: number }) {
 export function ServantSection() {
   const [data, setData] = React.useState<ServantResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [toast, setToast] = React.useState<{ kind: "ok" | "err"; msg: string } | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -309,13 +304,6 @@ export function ServantSection() {
     };
   }, [load]);
 
-  // Toast auto-dismiss.
-  React.useEffect(() => {
-    if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 5_000);
-    return () => window.clearTimeout(id);
-  }, [toast]);
-
   // Download report — streams the current rolling .md from /api/servant/report
   // (Content-Disposition: attachment). Server stream, no client Blob.
   const handleDownload = React.useCallback(() => {
@@ -326,25 +314,6 @@ export function ServantSection() {
     link.click();
     document.body.removeChild(link);
   }, []);
-
-  // Reset report — round-trips to the VM (marks handled=1, never deletes, never
-  // clears memory). On success the page goes to the empty state.
-  const handleReset = React.useCallback(async () => {
-    try {
-      const res = await fetch("/api/servant/reset", { method: "POST" });
-      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (res.ok && out.ok) {
-        setToast({ kind: "ok", msg: "Report cleared — SERVANT keeps what it learned." });
-        await load(); // refetch → empty state
-      } else {
-        setToast({ kind: "err", msg: out.error ?? `Reset failed (HTTP ${res.status})` });
-      }
-    } catch (e) {
-      setToast({ kind: "err", msg: `Reset failed — ${String(e)}` });
-    } finally {
-      setConfirmOpen(false);
-    }
-  }, [load]);
 
   if (loading && !data) {
     return (
@@ -357,7 +326,6 @@ export function ServantSection() {
   const findings = data?.findings ?? [];
   const hero = findings[0] ?? null;
   const runnerUps = findings.slice(1);
-  const openCount = data?.open_count ?? findings.length;
   const generated = parseUnix(data?.generated_at ?? null);
   const windowStart = parseUnix(data?.window_start_at ?? null);
 
@@ -387,8 +355,7 @@ export function ServantSection() {
           )}
         </div>
 
-        {/* Actions (right-aligned). Download streams the rolling .md; Reset asks
-            to confirm, then round-trips to the VM. */}
+        {/* Actions (right-aligned). Download streams the rolling .md report. */}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -403,41 +370,8 @@ export function ServantSection() {
             <Download size={13} aria-hidden />
             Download report
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirmOpen(true)}
-            disabled={openCount === 0}
-            title={
-              openCount === 0
-                ? "Nothing to reset — no open edges"
-                : "Mark all open edges handled (clears the report; never deletes what SERVANT learned)"
-            }
-            className={cn(
-              "tap-target inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-bg-card",
-              "px-3 py-1.5 font-sans text-micro uppercase tracking-wider text-fg-muted",
-              "transition-colors duration-fast hover:border-accent-gold/50 hover:text-accent-gold-strong",
-              "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-subtle disabled:hover:text-fg-muted",
-            )}
-          >
-            <RotateCcw size={13} aria-hidden />
-            Reset report
-          </button>
         </div>
       </div>
-
-      {/* Toast — reset result. */}
-      {toast && (
-        <div
-          className={cn(
-            "rounded-md border px-3 py-2 font-sans text-caption",
-            toast.kind === "ok"
-              ? "border-accent-mint/40 bg-accent-mint/5 text-accent-mint-strong"
-              : "border-accent-red/40 bg-accent-red/5 text-accent-red",
-          )}
-        >
-          {toast.msg}
-        </div>
-      )}
 
       {/* Honest framing. */}
       <p className="font-sans text-micro leading-relaxed text-fg-muted">
@@ -474,16 +408,6 @@ export function ServantSection() {
           )}
         </>
       )}
-
-      <ConfirmModal
-        isOpen={confirmOpen}
-        title="Reset SERVANT report?"
-        message={`Mark all ${openCount} open edge${openCount === 1 ? "" : "s"} as handled. This clears the report so the next hunt starts fresh. It NEVER deletes findings and NEVER clears what SERVANT has learned — the rows stay, only their handled flag flips.`}
-        confirmLabel="Reset report"
-        cancelLabel="Cancel"
-        onConfirm={handleReset}
-        onCancel={() => setConfirmOpen(false)}
-      />
     </div>
   );
 }
