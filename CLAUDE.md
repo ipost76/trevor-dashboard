@@ -60,7 +60,7 @@ App Router pages under `src/app/`, verified against the filesystem:
 
 ## API Routes
 
-68 `route.ts` files under `src/app/api/`, grouped by zone (Wave E2 deleted 7 manual-scalp routes; Wave RM-AH-E2 deleted 3 duplicate/dead routes; B3 added `auto/exit-controls` 2026-05-27):
+84 `route.ts` files under `src/app/api/`, grouped by zone (Wave E2 deleted 7 manual-scalp routes; Wave RM-AH-E2 deleted 3 duplicate/dead routes; B3 added `auto/exit-controls` 2026-05-27; DEADCODE-B1 2026-06-29 deleted the 4 dead `chat/*` routes):
 
 - **Dashboard** — `status`, `live`, `dashboard/calibration`, `stats/daily-pnl`, `heartbeat`, `prices`, `nav-badges`, `hub/drift-state` (B4 — READ-ONLY live-heartbeat-vs-replica open-count drift + replica age; both reads error-handled, never 500). (Wave B1 dropped the `/dashboard` page and its `active`/`pnl`/`edge`/`quick-stats` API routes. `dashboard/calibration` is kept but now orphaned — its sole consumer, the SCALP calibration section, was deleted in Wave C2; retained pending a cleanup wave.)
 - **AutoTrader** — `auto/{state,config,trades,exit-controls,profit-risk,leverage-regime}`, `capital`, `circuit-breaker`, `entry-preflight`, `exit-signals`, `analytics/{confidence-tiers,duration,regime-performance}`, `time-slots`, `trade-stats`. (`auto/profit-risk` — S1-P06, READ-ONLY: per open-trade exit posture [breakeven armed?, ratchet floor R, partials taken + realized partial P&L, intended risk $/%] + consolidated circuit-breaker state [entries_allowed?, active breakers, each breaker's reading vs limit]. Backed by `query_profit_risk.py` which reads `auto_trades` (sqlite RO) + `circuit_breaker.CircuitBreakerSystem().get_status()`; 10s in-route cache, fail-safe shape. Never mutates / sends bot commands.)
@@ -68,13 +68,11 @@ App Router pages under `src/app/`, verified against the filesystem:
 - **Intel** — `intel/{lessons,journal,shadow,downloads}`, `journal`, `quality`, `training`. (Wave 2026-05-20 deleted `intel/similar/[source]/[id]` and `intel/calibration`; Wave 2026-05-26 deleted `intel/optuna` with the Optuna A/B removal; Notes is client-side and has no API.)
 - **Docs** — `docs/categories` (GET list + POST create), `docs/categories/[id]` (PUT rename / DELETE), `docs/categories/reorder` (PUT), `docs/downloads/[filename]/move` (PUT). Downloads category/folder system — all route through `query_docs_categories.py` → bot-side `download_manager` (backend, 2026-05-19; frontend lands in B1).
 - **Memory** — `memory/{brain,chroma,daily,health,journal,aggressive,autotrader-toggle}`, `brain`, `system-health`, `aggressive`.
-- **Chat** — `chat`, `chat/{stream,budget,suggestions}`.
 - **Control / Admin** — `killswitch`, `admin/{current-state,reset-capital,reset-pnl-stats}`, `feature-flags`, `commits`, `auth`, `health`.
 
 Conventions:
 - Handlers call `runPython()`, parse its stdout as JSON, and return that. Live-data routes set `export const dynamic = "force-dynamic"` to bypass caching; several wrap the call in try/catch and return a fail-safe JSON shape instead of throwing.
 - About 30 of the 70 accept `POST` (writes/actions); the rest are GET-only reads.
-- `chat/stream` is the one streaming endpoint — it returns a `ReadableStream` (SSE); every other route returns plain JSON.
 - `admin/*` routes are destructive resets (capital / P&L stats / history) — POST-gated, Ghost-only. `commits` reads recent git history for the in-app deploy widget.
 - High-traffic reads: `live` (full dashboard payload), `status` (service state + signal counts), `nav-badges` (bottom-nav unread counts), `heartbeat` (Observatory pulse).
 - Dynamic segments: `intel/journal/[source]/[id]`, `memory/brain/[name]`, `memory/daily/[date]`, `quality/[id]`, `intel/downloads/[filename]`, `docs/categories/[id]`, `docs/downloads/[filename]/move`.
@@ -95,14 +93,14 @@ Conventions:
 | `intel/` | 4 | `intel-zone-view`, `notes-section`, `shadow-section`, `shadow-table-card` (`similar-trades-section` + `calibration-section` removed 2026-05-20; Lessons / Journal sections live under `components/docs/`; `shadow-table-card` added 2026-05-26 for the per-table inventory grid) |
 | `docs/` | 4 | `downloads-section`, `lessons-section`, `lesson-card`, `journal-section` (migrated from `intel/`, Wave D2) |
 | `memory/` | 11 | `memory-zone-view`, `brain-section`, `chroma-section`, `health-section` (mounts the cards below), `killswitch-control-card`, `data-freshness-card` (B4 — live/replica open-count drift via `/api/hub/drift-state`), `reconcile-health-card` (B4 — DB↔HL reconcile via the heartbeat `reconcile` category, Phase 2/VM) |
-| `chat/` | 0 | **REMOVED (B2, 2026-06-28, Read-Only Lockdown)** — chat was write-only (no transcript history); the `/chat` page + all 4 components + the orphaned `navigation/chat-fab` deleted. Directory gone. `/api/chat/*` routes die server-side in B3. |
+| `chat/` | 0 | **REMOVED (B2, 2026-06-28, Read-Only Lockdown)** — chat was write-only (no transcript history); the `/chat` page + all 4 components + the orphaned `navigation/chat-fab` deleted. Directory gone. `/api/chat/*` routes (all 4: `route`/`stream`/`budget`/`suggestions`) deleted in DEADCODE-B1 (2026-06-29). |
 | `trades/` | 0 | **REMOVED (QUAL-05, 2026-06-03)** — `trade-form`/`history-table`/`journal-tab` were dead (zero importers); `live-board` deleted earlier (Wave E2). Directory gone. |
 | `charts/` | 0 components (`theme.ts` only) | **`StyledLineChart` + `StyledBarChart` REMOVED (QUAL-05, 2026-06-03)** — the only recharts wrappers; deleted with the `recharts` dep. `theme.ts` retained (now orphaned). |
 | `control/` | 0 | **REMOVED (B2, 2026-06-28, Read-Only Lockdown)** — `brain-editor` + `chroma-browser` were orphaned dead code (zero importers, no `/control` page); live Memory surfaces are `memory/brain-section` + `memory/chroma-section`. Directory gone. |
 
 - Top-level: `app-shell.tsx` (+ `-nav`, `-legacy`), `header.tsx` (+ `-legacy`), `sidebar.tsx`, `status-bar.tsx`, `theme-provider.tsx`, `KillswitchPill.tsx`, `PriceStrip.tsx`, `change-password-modal.tsx`, `TabContainer.tsx`, `typing-dots.tsx`, `Skeleton.tsx`.
 - `layout.tsx` mounts `<ThemeProvider><AppShell>`; the `*-legacy` shells are pre-redesign chrome kept for `HUB_REDESIGN_NAV` rollback.
-- Chat was REMOVED entirely (B2, 2026-06-28, Read-Only Lockdown): the `/chat` page, the `chat/` components, and the orphaned `chat-fab` overlay (already replaced by NotesWidget, W1-P1) are all gone. `typing-dots.tsx` is now orphaned (its only consumer was `/chat`). The `/api/chat/*` routes are neutralized server-side in B3.
+- Chat was REMOVED entirely (B2, 2026-06-28, Read-Only Lockdown): the `/chat` page, the `chat/` components, and the orphaned `chat-fab` overlay (already replaced by NotesWidget, W1-P1) are all gone. `typing-dots.tsx` is now orphaned (its only consumer was `/chat`). The `/api/chat/*` routes (all 4) were deleted in DEADCODE-B1 (2026-06-29).
 - `scout/` carries its own data layer (`api.ts`, `use-fetch.ts`, `types.ts`, `format.ts`), separate from the shared `runPython` path.
 
 ---
