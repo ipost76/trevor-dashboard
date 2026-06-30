@@ -21,7 +21,7 @@ conn.row_factory = sqlite3.Row
 
 rows = conn.execute("""
     SELECT id, ticker, direction, pnl_pct, opened_at, closed_at, confidence
-    FROM active_trades
+    FROM auto_trades
     WHERE status='closed' AND opened_at IS NOT NULL AND closed_at IS NOT NULL
     ORDER BY id
 """).fetchall()
