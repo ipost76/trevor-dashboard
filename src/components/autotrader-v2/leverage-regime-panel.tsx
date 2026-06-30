@@ -68,6 +68,8 @@ interface LevTrade {
   required_liq_distance: number | null;
   liq_safe: boolean | null;
   breakdown: LevBreakdown | null;
+  // B2: true ⇒ live-from-heartbeat, not yet replicated (thin "syncing" card).
+  thin?: boolean;
 }
 
 interface RegimeRow {
@@ -116,6 +118,8 @@ interface LeverageRegimeResponse {
   data_available: boolean;
   ts: number;
   open_count: number;
+  // B2: Σ notional_usd over the merged (deduped + closed-id-evicted) open set.
+  open_notional?: number;
   leverage_dynamic_enabled: boolean;
   leverage_weighting_enabled: boolean;
   autotrader_enabled: boolean;
@@ -124,6 +128,8 @@ interface LeverageRegimeResponse {
   regimes: RegimeRow[];
   margin: MarginState;
   regime_exit_shadow: RegimeExitShadow;
+  // B2: true ⇒ live heartbeat membership; false ⇒ replica fallback.
+  live?: boolean;
   error?: string;
 }
 
@@ -259,6 +265,12 @@ export function LeverageRegimePanel() {
               ) : (
                 data?.open_count ?? 0
               )}
+              {/* B2: OPEN-NOTIONAL subtotal — Σ over the merged heartbeat open-set. */}
+              {(data?.open_notional ?? 0) > 0 && (
+                <span className="font-normal normal-case tracking-normal text-fg-muted">
+                  · ${(data?.open_notional ?? 0).toFixed(2)}
+                </span>
+              )}
               {data && (
                 <Pill
                   intent={data.leverage_dynamic_enabled ? "active" : "warn"}
@@ -300,6 +312,42 @@ export function LeverageRegimePanel() {
         {trades.length > 0 && (
           <ul className="divide-y divide-border-subtle">
             {trades.map((t) => {
+              // B2: a thin (heartbeat-only, not-yet-replicated) live position — its
+              // Stage-2 leverage detail (liq safety / multiplier breakdown) is still
+              // syncing. Render identity + live leverage + a "syncing" pill.
+              if (t.thin) {
+                const thinLev = t.leverage_at_entry ?? t.leverage;
+                return (
+                  <li key={t.id} className="flex flex-col gap-1 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Pill intent="warn" size="sm">
+                          syncing
+                        </Pill>
+                        <span className="text-h3 font-bold tabular-nums">
+                          {t.ticker}{" "}
+                          <span
+                            className={
+                              t.direction === "LONG"
+                                ? "text-accent-mint"
+                                : "text-accent-red"
+                            }
+                          >
+                            {t.direction}
+                          </span>
+                        </span>
+                      </div>
+                      <span className="text-h3 font-bold tabular-nums text-accent-cyan-soft">
+                        {thinLev != null ? `${Number(thinLev).toFixed(0)}×` : "—"}
+                      </span>
+                    </div>
+                    <span className="text-micro text-fg-faint">
+                      liq safety / multiplier breakdown syncing… (live from heartbeat,
+                      not yet replicated)
+                    </span>
+                  </li>
+                );
+              }
               const lev = t.leverage_at_entry ?? t.leverage;
               const safe = t.liq_safe;
               return (

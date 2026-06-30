@@ -55,6 +55,8 @@ interface OpenTrade {
   partial_pnl_realized: number;
   risk_dollars: number | null;
   risk_pct: number | null;
+  // B2: true ⇒ live-from-heartbeat, not yet replicated (thin "syncing" card).
+  thin?: boolean;
 }
 
 interface BreakerGauge {
@@ -86,8 +88,12 @@ interface ProfitRiskResponse {
   data_available: boolean;
   ts: number;
   open_count: number;
+  // B2: Σ notional_usd over the merged (deduped + closed-id-evicted) open set.
+  open_notional?: number;
   open_trades: OpenTrade[];
   breakers: BreakerState;
+  // B2: true ⇒ live heartbeat membership; false ⇒ replica fallback.
+  live?: boolean;
   error?: string;
 }
 
@@ -200,6 +206,12 @@ export function ProfitRiskPanel() {
               ) : (
                 data?.open_count ?? 0
               )}
+              {/* B2: OPEN-NOTIONAL subtotal — Σ over the merged heartbeat open-set. */}
+              {(data?.open_notional ?? 0) > 0 && (
+                <span className="font-normal normal-case tracking-normal text-fg-muted">
+                  · ${(data?.open_notional ?? 0).toFixed(2)}
+                </span>
+              )}
             </span>
           </CardTitle>
           {replicaAge !== null && (
@@ -227,6 +239,44 @@ export function ProfitRiskPanel() {
         {trades.length > 0 && (
           <ul className="divide-y divide-border-subtle">
             {trades.map((t) => {
+              // B2: a thin (heartbeat-only, not-yet-replicated) live position — its
+              // Stage-1 exit/risk detail is still syncing. Render identity + live
+              // leverage/notional + a "syncing" pill, NOT a misleading BE-OFF row.
+              if (t.thin) {
+                return (
+                  <li key={t.id} className="flex flex-col gap-1 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Pill intent="warn" size="sm">
+                          syncing
+                        </Pill>
+                        <span className="text-h3 font-bold tabular-nums">
+                          {t.ticker}{" "}
+                          <span
+                            className={
+                              t.direction === "LONG"
+                                ? "text-accent-green"
+                                : "text-accent-red"
+                            }
+                          >
+                            {t.direction}
+                          </span>
+                        </span>
+                      </div>
+                      <span className="text-caption tabular-nums text-fg-muted">
+                        {t.leverage != null ? `${Number(t.leverage).toFixed(0)}x` : ""}
+                        {t.notional_usd != null
+                          ? ` · $${Number(t.notional_usd).toFixed(2)}`
+                          : ""}
+                      </span>
+                    </div>
+                    <span className="text-micro text-fg-faint">
+                      breakeven / ratchet / partials syncing… (live from heartbeat,
+                      not yet replicated)
+                    </span>
+                  </li>
+                );
+              }
               const scaledOut =
                 t.original_notional_usd != null &&
                 t.notional_usd != null &&
