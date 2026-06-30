@@ -30,7 +30,7 @@ rows = conn.execute("""
            ROUND(AVG(pnl_pct), 2) as avg_pnl,
            MAX(pnl_pct) as best_pnl,
            MIN(pnl_pct) as worst_pnl
-    FROM active_trades
+    FROM auto_trades
     WHERE status = 'closed' AND closed_at IS NOT NULL
     GROUP BY date(closed_at)
     ORDER BY date(closed_at) DESC
@@ -43,7 +43,7 @@ for r in rows:
     # Get individual trades for this day
     day_trades = conn.execute("""
         SELECT ticker, direction, pnl_pct, leverage, confidence
-        FROM active_trades
+        FROM auto_trades
         WHERE status='closed' AND date(closed_at) = ?
         ORDER BY pnl_pct DESC
     """, (d["trade_date"],)).fetchall()
@@ -54,8 +54,8 @@ for r in rows:
 
     # Exit condition distribution
     exit_rows = conn.execute("""
-        SELECT COALESCE(last_exit_condition, 'manual') as er, COUNT(*) as cnt
-        FROM active_trades
+        SELECT COALESCE(exit_reason, 'manual') as er, COUNT(*) as cnt
+        FROM auto_trades
         WHERE status='closed' AND date(closed_at) = ?
         GROUP BY er
     """, (d["trade_date"],)).fetchall()
@@ -63,8 +63,8 @@ for r in rows:
 
     # Avg hold duration
     hold_row = conn.execute("""
-        SELECT ROUND(AVG((julianday(closed_at) - julianday(created_at)) * 24), 1) as avg_h
-        FROM active_trades WHERE status='closed' AND date(closed_at) = ?
+        SELECT ROUND(AVG((julianday(closed_at) - julianday(opened_at)) * 24), 1) as avg_h
+        FROM auto_trades WHERE status='closed' AND date(closed_at) = ?
     """, (d["trade_date"],)).fetchone()
     avg_hold = hold_row['avg_h'] if hold_row and hold_row['avg_h'] else None
 
