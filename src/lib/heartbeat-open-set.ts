@@ -51,10 +51,24 @@ interface HeartbeatPayload {
 // 10s TTL mirrors the state route's equity cache so the live open-set the ACTIVE
 // list reads is as fresh as the header's open-count, and concurrent ticks from
 // both cards collapse to ONE upstream heartbeat fetch.
+const OPEN_SET_POLL_TTL_MS = 10_000;
 const cache = createSwrCache<HeartbeatOpenPosition[]>({
-  defaultTtl: 10_000,
+  defaultTtl: OPEN_SET_POLL_TTL_MS,
   concurrency: 2,
 });
+
+// B1 HEARTBEAT-FAILSAFE (2026-06-30): absolute staleness ceiling — fail SAFE
+// (to "I don't know"), never STALE (to "the last thing I saw"). SWR swallows a
+// failed background refresh and keeps serving the last-known set forever
+// (single-flight.ts) — the exact path that served a CLOSED row (101112) as an
+// open −17% HYPE card for hours (NRestarts=0 ⇒ the in-memory cache persisted).
+// Past this age since the last *successful* refresh, the getter returns null so
+// the caller falls through to the (closed-history-correct) replica instead of a
+// stale ghost. 6× the poll TTL = 60s: a 1–2 cycle hiccup still serves slightly-
+// stale (fine), a sustained outage expires to null. Complementary to the replica
+// cross-check eviction in trades/route.ts (which drops a closed id even while the
+// heartbeat is alive) — together they kill the ghost from either angle.
+const OPEN_SET_STALENESS_CEILING_MS = 6 * OPEN_SET_POLL_TTL_MS;
 
 // Returns the live open SET, or null when the heartbeat is unavailable so the
 // caller can FALL BACK to the replica set (never blank). An empty array is a
@@ -65,18 +79,30 @@ export async function fetchHeartbeatOpenSet(): Promise<
   HeartbeatOpenPosition[] | null
 > {
   try {
-    const { value } = await cache.swr("heartbeat-open-set", async () => {
+    const { value, ts } = await cache.swr("heartbeat-open-set", async () => {
       const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
         cache: "no-store",
         signal: AbortSignal.timeout(5000),
       });
-      if (!res.ok) throw new Error(`heartbeat ${res.status}`);
+      if (!res.ok) {
+        // B1: log every failed fetch — kill the silent path the incident left.
+        console.warn(
+          `[heartbeat-open-set] fetch failed: heartbeat HTTP ${res.status} — swr keeps the last-known set until the ceiling expires it`,
+        );
+        throw new Error(`heartbeat ${res.status}`);
+      }
       const hb = (await res.json()) as HeartbeatPayload;
       const raw = hb?.categories?.autotrader?.open_positions;
       // Absent/null ⇒ throw so swr keeps serving the last-known set (and a cold
       // miss surfaces as the catch below → null → replica fallback). A present
       // empty array is a legitimate "0 open" and passes through.
-      if (!Array.isArray(raw)) throw new Error("open_positions absent");
+      if (!Array.isArray(raw)) {
+        // B1: log every failed fetch — kill the silent path the incident left.
+        console.warn(
+          "[heartbeat-open-set] fetch failed: open_positions absent — swr keeps the last-known set until the ceiling expires it",
+        );
+        throw new Error("open_positions absent");
+      }
       const seen = new Set<number>();
       const positions: HeartbeatOpenPosition[] = [];
       for (const p of raw) {
@@ -104,10 +130,27 @@ export async function fetchHeartbeatOpenSet(): Promise<
       }
       return positions;
     });
+    // B1: enforce the absolute staleness ceiling. `ts` is the epoch-ms of the
+    // last *successful* refresh (single-flight writes the store only on success),
+    // so a swallowed-background-refresh stale serve carries an OLD ts. Past the
+    // ceiling, fail SAFE to null → caller (trades/route.ts) falls through to the
+    // replica set instead of rendering a stale ghost.
+    const age = Date.now() - ts;
+    if (age > OPEN_SET_STALENESS_CEILING_MS) {
+      console.warn(
+        `[heartbeat-open-set] EXPIRING stale set: age=${age}ms > ceiling=${OPEN_SET_STALENESS_CEILING_MS}ms ` +
+          "(last successful refresh too old) — returning null for replica fallback",
+      );
+      return null;
+    }
     return value;
-  } catch {
+  } catch (err) {
     // Heartbeat unreachable / cold-miss failure ⇒ null ⇒ caller keeps the
     // replica set (never invents an empty live answer that would blank the list).
+    // B1: log the cold-miss too so the failure never goes untraced.
+    console.warn(
+      `[heartbeat-open-set] cold-miss/unreachable: ${String(err)} — returning null for replica fallback`,
+    );
     return null;
   }
 }

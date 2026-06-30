@@ -179,8 +179,16 @@ export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
       // Single-flight collapses concurrent expired-hits to a single refresh; a
       // failed background refresh is swallowed so the stale value keeps serving
       // (no poison) until a later refresh succeeds.
-      void refresh(key, compute).catch(() => {
-        /* keep last good value; cold awaiters are the only ones that see errors */
+      void refresh(key, compute).catch((err) => {
+        // B1 HEARTBEAT-FAILSAFE (2026-06-30): kill the SILENT keep-stale path —
+        // the incident left no Hub trace. A swallowed background-refresh failure
+        // now logs the key, the error, and how old the kept value is. Behavior
+        // is unchanged (still keep last good, no poison); only the silence is gone.
+        const ageMs = clock() - entry.ts;
+        console.warn(
+          `[swr] background refresh failed for key="${key}": ${String(err)} — ` +
+            `keeping stale value (age=${ageMs}ms); cold awaiters are the only ones that see errors`,
+        );
       });
       return { value: entry.value, stale: true, ts: entry.ts };
     }

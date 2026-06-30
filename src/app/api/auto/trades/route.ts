@@ -63,6 +63,30 @@ interface OpenPositionRow {
 // limit hold independent entries. concurrency:2 per spec.
 const cache = createSwrCache<TradesResponse>({ defaultTtl: 15_000, concurrency: 2 });
 
+// B1 HEARTBEAT-FAILSAFE (2026-06-30): replica closed-history cross-check.
+interface ClosedIdsResponse {
+  closed_ids?: number[];
+}
+
+// Return the subset of `ids` the litestream replica explicitly marks
+// status='closed' (query_closed_ids.py, mode=ro). NEVER ids merely ABSENT from
+// the replica — absence ≠ closed, so a fast-syncing live position not yet
+// replicated (FARTCOIN #101066) is never evicted. Fails OPEN: any error → empty
+// set (evict nothing); the Phase-2 staleness ceiling in heartbeat-open-set.ts is
+// the complementary bound, so a replica hiccup can never blank the live list.
+async function fetchClosedIds(ids: number[]): Promise<Set<number>> {
+  if (ids.length === 0) return new Set();
+  try {
+    const raw = await runPython("query_closed_ids.py", [ids.join(",")], {
+      timeout: 5_000,
+    });
+    const parsed = safeJsonParse<ClosedIdsResponse>(raw, { closed_ids: [] });
+    return new Set((parsed.closed_ids ?? []).filter((n) => typeof n === "number"));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const typeParam = (url.searchParams.get("type") ?? "closed").toLowerCase();
@@ -127,9 +151,18 @@ export async function GET(req: NextRequest) {
             thin: true,
           };
         });
+        // B1 HEARTBEAT-FAILSAFE: replica cross-check eviction — drop any heartbeat
+        // "open" id the replica explicitly marks status='closed' (the −17% HYPE
+        // ghost, closed row 101112) so a stale/persistent-cache ghost can never
+        // render as an open card. ONE batched query over the candidate ids;
+        // absence ≠ closed, so a fast-syncing live position not yet replicated
+        // (FARTCOIN #101066) survives. Fails OPEN (evict nothing on any error).
+        const closedIds = await fetchClosedIds(merged.map((p) => p.id));
+        const surviving =
+          closedIds.size > 0 ? merged.filter((p) => !closedIds.has(p.id)) : merged;
         // Newest-first (id is monotonic with opened_at), then clamp to the limit.
-        merged.sort((a, b) => b.id - a.id);
-        const positions = merged.slice(0, limit);
+        surviving.sort((a, b) => b.id - a.id);
+        const positions = surviving.slice(0, limit);
         return { type: "open", count: positions.length, positions, live: true };
       });
       return NextResponse.json(value);
