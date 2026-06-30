@@ -230,9 +230,15 @@ def fetch_regimes(conn) -> list[dict]:
 def fetch_regime_exit_shadow(conn) -> dict:
     """Regime-aware exit shadow comparison (would-be vs actual) — exit_engine_shadow."""
     try:
-        total = conn.execute("SELECT COUNT(*) FROM exit_engine_shadow").fetchone()[0]
+        # Dedup by trade_id (B3-SHADOW-DEDUP): the bot appends one
+        # exit_engine_shadow row per ~30s monitor cycle for an open divergent
+        # trade, so a raw COUNT(*) counts one trade as N evaluations (the
+        # phantom-bleeder). Count DISTINCT trades, not per-cycle log rows.
+        total = conn.execute(
+            "SELECT COUNT(DISTINCT trade_id) FROM exit_engine_shadow"
+        ).fetchone()[0]
         divergent = conn.execute(
-            "SELECT COUNT(*) FROM exit_engine_shadow WHERE divergent=1"
+            "SELECT COUNT(DISTINCT trade_id) FROM exit_engine_shadow WHERE divergent=1"
         ).fetchone()[0]
         cur = conn.execute(
             """
@@ -240,6 +246,9 @@ def fetch_regime_exit_shadow(conn) -> dict:
                    old_exit_action, new_exit_action, old_stop_price,
                    new_stop_price, current_price, pnl_pct, divergent, created_at
             FROM exit_engine_shadow
+            -- One representative row per trade (latest cycle by id), so the
+            -- list shows distinct trades, not 8x per-cycle snapshots of one.
+            WHERE id IN (SELECT MAX(id) FROM exit_engine_shadow GROUP BY trade_id)
             ORDER BY id DESC
             LIMIT 20
             """
