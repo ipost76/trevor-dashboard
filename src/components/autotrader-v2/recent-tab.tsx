@@ -16,8 +16,8 @@ interface ClosedTrade {
   id: number;
   ticker: string;
   direction: "LONG" | "SHORT";
-  pnl_pct: number;
-  pnl_usd: number;
+  pnl_pct: number | null;
+  pnl_usd: number | null;
   hold_duration_minutes: number | null;
   closed_at: string;
   trade_mode: "live" | "paper";
@@ -33,6 +33,12 @@ interface ClosedTradesResponse {
 const SACRED_TICKERS: ReadonlyArray<string> = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 const DIRECTION_OPTIONS: ReadonlyArray<string> = ["ALL", "LONG", "SHORT"];
 const OUTCOME_OPTIONS: ReadonlyArray<string> = ["ALL", "PROFITABLE", "LOSING"];
+
+// B6-RECENT-GAPS: RECENT shows the most-recent closed-LIVE trades up to this cap
+// (raised 50 → 200, the route's existing clamp ceiling). With >200 closed-live
+// trades on record the cap is hit, so the UI surfaces a "list capped" notice —
+// a real older trade can't silently fall off the list with no sign.
+const RECENT_LIMIT = 200;
 
 function fmtHold(min: number | null | undefined): string {
   if (min == null || !Number.isFinite(min)) return "—";
@@ -79,7 +85,7 @@ export function RecentTab() {
     let cancelled = false;
     const fetchTrades = async () => {
       try {
-        const res = await fetch("/api/auto/trades?type=closed&limit=50", {
+        const res = await fetch(`/api/auto/trades?type=closed&limit=${RECENT_LIMIT}`, {
           cache: "no-store",
         });
         if (!res.ok || cancelled) return;
@@ -110,11 +116,15 @@ export function RecentTab() {
     return trades.filter((t) => {
       if (tickerFilter !== "ALL" && t.ticker !== tickerFilter) return false;
       if (directionFilter !== "ALL" && t.direction !== directionFilter) return false;
-      if (outcomeFilter === "PROFITABLE" && !(t.pnl_pct > 0)) return false;
-      if (outcomeFilter === "LOSING" && !(t.pnl_pct <= 0)) return false;
+      if (outcomeFilter === "PROFITABLE" && !(t.pnl_pct != null && t.pnl_pct > 0)) return false;
+      if (outcomeFilter === "LOSING" && !(t.pnl_pct != null && t.pnl_pct <= 0)) return false;
       return true;
     });
   }, [trades, tickerFilter, directionFilter, outcomeFilter]);
+
+  // B6-RECENT-GAPS: server returns at most RECENT_LIMIT closed rows. When the
+  // returned set hits that cap, real older closed trades are hidden — surface it.
+  const capped = (trades?.length ?? 0) >= RECENT_LIMIT;
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
@@ -153,6 +163,12 @@ export function RecentTab() {
             </span>
           </CardTitle>
         </CardHeader>
+
+        {trades && capped && (
+          <p className="mb-3 font-sans text-micro text-accent-gold">
+            List capped — showing {trades.length} most recent (older closed trades hidden).
+          </p>
+        )}
 
         {loading && <Skeleton className="h-32 w-full" />}
 
@@ -211,7 +227,15 @@ export function RecentTab() {
                     </span>
                   )}
                 </div>
-                <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
+                {t.pnl_pct != null ? (
+                  <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
+                ) : (
+                  // B6-RECENT-GAPS: native P&L not captured (e.g. external_close)
+                  // → "pending" pill, never a misleading 0.00%. Row stays visible.
+                  <Pill tone="neutral" size="sm" title="P&L not captured for this close">
+                    pending
+                  </Pill>
+                )}
               </li>
             ))}
           </ul>
