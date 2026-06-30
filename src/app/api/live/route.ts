@@ -1,8 +1,24 @@
 import { NextResponse } from "next/server";
 import { runPythonInline, runCommand } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
+import { fetchHeartbeatOpenSet } from "@/lib/heartbeat-open-set";
 
 export const dynamic = "force-dynamic";
+
+// B4 (2026-06-30): one open LIVE position as read from the replica auto_trades —
+// the enrichment detail merged behind the live heartbeat membership (NOT the
+// frozen active_trades). `id` is the merge key against the heartbeat open-set.
+interface LiveActiveRow {
+  id: number;
+  ticker: string;
+  direction: string;
+  confidence: number;
+  timestamp: string;
+  entry_price: number | null;
+  leverage: number;
+  stop_price: number | null;
+  target_price: number | null;
+}
 
 // In-memory cache (30s TTL — shorter for main dashboard polling route).
 // PERF-02 (2026-06-02): single-flight + SWR so a concurrent poller burst on this
@@ -88,10 +104,12 @@ try:
     result["training"] = {"trades": tt, "observations": to, "sentiment": ts}
 except: result["training"] = {"trades": 0, "observations": 0, "sentiment": 0}
 
-# Active trades (DB-persisted on TAKE/BUILDING)
+# Active trades — LIVE open positions from auto_trades (NOT the frozen
+# active_trades). The id is kept so live heartbeat membership can be merged
+# TS-side; trade_mode='live' excludes paper trades.
 try:
-    rows = conn.execute("SELECT ticker, direction, confidence, opened_at, entry_price, leverage, stop_price, target_price FROM active_trades WHERE status='open' ORDER BY opened_at DESC").fetchall()
-    result["active"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2] or 0), "timestamp": r[3] or "", "entry_price": r[4], "leverage": r[5] or 1, "stop_price": r[6], "target_price": r[7]} for r in rows]
+    rows = conn.execute("SELECT id, ticker, direction, confidence, opened_at, entry_price, leverage, stop_price, target_price FROM auto_trades WHERE status='open' AND trade_mode='live' ORDER BY opened_at DESC").fetchall()
+    result["active"] = [{"id": r[0], "ticker": r[1], "direction": r[2] or "?", "confidence": int(r[3] or 0), "timestamp": r[4] or "", "entry_price": r[5], "leverage": r[6] or 1, "stop_price": r[7], "target_price": r[8]} for r in rows]
 except: result["active"] = []
 
 # Cost tracking (today)
@@ -112,7 +130,47 @@ print(json.dumps(result))
       const decided = data.signals.wins + data.signals.losses;
       data.signals.winRate = decided > 0 ? Math.round((data.signals.wins / decided) * 100) : 0;
       data.recentSignals = (db.recent || []).map((s: Record<string, unknown>) => ({ ...s, outcome: null }));
-      data.activeScalps = db.active || [];
+
+      // Live-truth open-position MEMBERSHIP comes from the Observatory heartbeat
+      // (same source the AUTO CAPITAL header reads), enriched from the replica
+      // auto_trades rows by id. The frozen active_trades is never read for opens.
+      // A position live-but-not-yet-replicated renders as a thin card; heartbeat
+      // unreachable → the replica set (never blank), per the W-H-P4-HUB doctrine.
+      const replicaActive = (db.active || []) as LiveActiveRow[];
+      const toScalp = (r: LiveActiveRow) => ({
+        ticker: r.ticker,
+        direction: r.direction || "?",
+        confidence: r.confidence,
+        timestamp: r.timestamp || "",
+        entry_price: r.entry_price,
+        leverage: r.leverage ?? 1,
+        stop_price: r.stop_price,
+        target_price: r.target_price,
+      });
+      const liveSet = await fetchHeartbeatOpenSet();
+      if (liveSet) {
+        const byId = new Map<number, LiveActiveRow>(
+          replicaActive.map((r) => [r.id, r] as [number, LiveActiveRow]),
+        );
+        data.activeScalps = liveSet.map((h) => {
+          const r = byId.get(h.id);
+          return r
+            ? toScalp(r)
+            : {
+                ticker: h.ticker,
+                direction: h.direction,
+                confidence: 0,
+                timestamp: "",
+                entry_price: h.entry_price,
+                leverage: h.leverage,
+                stop_price: null,
+                target_price: null,
+              };
+        });
+      } else {
+        data.activeScalps = replicaActive.map(toScalp);
+      }
+
       data.watchlist = db.watchlist || [];
       data.trainingStats = { trades: db.training?.trades || 0, observations: db.training?.observations || 0, sentiment: db.training?.sentiment || 0, vectors: 0 };
     } catch { /* DB failed — graceful */ }
