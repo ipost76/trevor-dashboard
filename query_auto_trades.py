@@ -78,10 +78,21 @@ def fetch_closed(limit: int) -> dict:
                    hold_duration_minutes, closed_at, exit_reason, trade_mode
             FROM auto_trades
             WHERE status='closed' AND trade_mode='live'
+            GROUP BY id
             ORDER BY closed_at DESC
             LIMIT {limit}
             """
         )
+        # B6-RECENT-GAPS dedup guard: GROUP BY the `id` primary key so one
+        # logical trade renders as exactly one RECENT row. `auto_trades` has no
+        # `trade_id` column; `id` is the PK (one row per trade, partial fills are
+        # the `partial_pnl_realized` column on that row, NOT extra rows), so this
+        # is a defensive no-op today — proven row-identical to the ungrouped set
+        # at limit 50/200/full (1097) — that can never over-collapse or hide a
+        # real trade. Deliberately NOT keyed on hl_order_id/hl_exit_order_id:
+        # those carry NULLs (would collapse) and can be shared by genuinely
+        # distinct trades (would merge & hide one), violating "never drop a real
+        # closed trade".
         rows = _rows_to_dicts(cur)
     return {"type": "closed", "count": len(rows), "trades": rows}
 
