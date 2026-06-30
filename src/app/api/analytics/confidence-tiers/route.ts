@@ -24,7 +24,7 @@ total_signals = conn.execute("SELECT COUNT(*) FROM trade_insights").fetchone()[0
 # Closed trades with confidence
 trades = conn.execute("""
     SELECT id, ticker, direction, pnl_pct, confidence
-    FROM active_trades
+    FROM auto_trades
     WHERE status='closed' AND confidence IS NOT NULL
     ORDER BY id
 """).fetchall()
@@ -34,7 +34,7 @@ if not trades:
     conn.close()
     exit()
 
-# Tier definitions (confidence is 0-100 scale on active_trades)
+# Tier definitions (confidence is 0-100 scale on auto_trades)
 tier_defs = [
     (0, 45, "<45", "Low"),
     (45, 55, "45-54", "Medium"),
