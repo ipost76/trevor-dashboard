@@ -13,8 +13,11 @@ export const dynamic = "force-dynamic";
 //
 // Both ingredients already reach the Hub (no new VM probe for the freshness
 // half): LIVE = the Observatory heartbeat `categories.autotrader.open_count`;
-// REPLICA = `COUNT(*) FROM active_trades WHERE status='open'` over the local
-// litestream replica (the `/api/nav-badges` pattern). The replica file age is
+// REPLICA = open count from `auto_trades WHERE status='open' AND trade_mode='live'`
+// over the local litestream replica (B4, 2026-06-30 — the frozen active_trades is
+// insert-blocked since Wave E2, so it always read 0 and pinned the gauge at
+// max-drift; trade_mode='live' matches the heartbeat's live-only open_count so the
+// drift math stays live-vs-replica, not phantom). The replica file age is
 // `os.stat(realpath(trevor.db)).st_mtime` (trevor.db is a symlink → the
 // continuously-restored replica), mirroring `query_shadow_registry._replica_age`.
 //
@@ -33,7 +36,7 @@ try:
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     cur = conn.cursor()
     rows = cur.execute(
-        "SELECT id, ticker, direction FROM active_trades WHERE status='open'"
+        "SELECT id, ticker, direction FROM auto_trades WHERE status='open' AND trade_mode='live'"
     ).fetchall()
     conn.close()
     out["replica_count"] = len(rows)
