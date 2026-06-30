@@ -15,7 +15,7 @@ rows = conn.execute("""
          COUNT(*) as trades,
          ROUND(SUM(pnl_pct), 2) as daily_pnl,
          SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as wins
-  FROM active_trades
+  FROM auto_trades
   WHERE status='closed' AND closed_at IS NOT NULL
   GROUP BY date(closed_at)
   ORDER BY date(closed_at) ASC
