@@ -152,6 +152,19 @@ const equityCache = createSwrCache<HeartbeatEquity>({ defaultTtl: 10_000, concur
 // normally-refreshing value is never flagged, while a genuinely stalled heartbeat is.
 const EQUITY_STALE_AGE_MS = 60_000;
 
+// B1 HEADER-CEILING (2026-07-01): absolute staleness ceiling for the header COUNT
+// (open_count) + deployed (open_exposure_usd) — a HARDER bound ON TOP of the 60s
+// `equity_stale` age flag above. The equity cache is SWR keep-stale: when the
+// background heartbeat refresh fails, single-flight.ts writes the store only on
+// success, so the last-known value keeps serving with an OLD ts. The 60s flag
+// only BADGES that (the count is still served) → a frozen heartbeat count could
+// render INDEFINITELY. 3× the stale-age = 180s (heartbeat dead ~18× the 10s
+// poll): past it the count is nulled so the caller falls back to the self-
+// refreshing Python replica instead of a confidently-wrong ghost. Mirrors
+// OPEN_SET_STALENESS_CEILING_MS (6× TTL) in src/lib/heartbeat-open-set.ts, which
+// closed the same silent-keep-stale flaw for the ACTIVE list.
+const EQUITY_OPEN_COUNT_STALENESS_CEILING_MS = 3 * EQUITY_STALE_AGE_MS;
+
 type EquitySource = "real-hl" | "stale" | "unavailable";
 interface RealHlEquity {
   value: number | null; // real-HL accountValue; null when never observed
@@ -236,15 +249,32 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
     // the WALL-CLOCK AGE of the served value instead: fresh in steady state (ts stays within
     // ~15s), and only genuinely stale when the heartbeat actually stops updating for >60s —
     // in which case we keep showing the last-known number, correctly flagged stale.
-    const ageStale = Date.now() - ts > EQUITY_STALE_AGE_MS;
+    const age = Date.now() - ts;
+    const ageStale = age > EQUITY_STALE_AGE_MS;
+    // B1 HEADER-CEILING: past the absolute ceiling since the last *successful*
+    // refresh, fail SAFE — null the header COUNT (open_count) + deployed
+    // (open_exposure_usd) so the GET handler's `?? value.*` coalesces to the
+    // self-refreshing Python replica instead of a frozen-heartbeat ghost. Scope
+    // is the count ONLY: the equity $ / unrealized keep the 60s age flag (they
+    // float slowly and are already flagged, W-H-P2-HUB). `openCount:null` is the
+    // pre-existing cold-miss shape, so no consumer change is needed.
+    const countExpired = age > EQUITY_OPEN_COUNT_STALENESS_CEILING_MS;
+    if (countExpired) {
+      // Kill the silent path — log every ceiling expiry (mirrors the
+      // heartbeat-open-set / single-flight failed-refresh warns).
+      console.warn(
+        `[auto-state] EXPIRING stale header count: age=${age}ms > ceiling=${EQUITY_OPEN_COUNT_STALENESS_CEILING_MS}ms ` +
+          "(last successful heartbeat refresh too old) — nulling open_count/deployed for replica fallback",
+      );
+    }
     return {
       value: value.equity,
       unrealized: value.unrealized,
       source: ageStale ? "stale" : "real-hl",
       stale: ageStale,
       ts,
-      openCount: value.openCount,
-      openExposure: value.openExposure,
+      openCount: countExpired ? null : value.openCount,
+      openExposure: countExpired ? null : value.openExposure,
     };
   } catch {
     // Cold (never observed) AND upstream failed/absent. NEVER substitute the
