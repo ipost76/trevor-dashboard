@@ -4,6 +4,7 @@ import { CollapsibleSection, Pill } from "@/components/ui";
 import { HealthRollup } from "./health-rollup";
 import { AiFindingsPanel } from "./ai-findings-panel";
 import { KillswitchControlCard } from "./killswitch-control-card";
+import { WedgeRateTile } from "./wedge-rate-tile";
 import { DataFreshnessCard } from "./data-freshness-card";
 import { ReconcileHealthCard } from "./reconcile-health-card";
 import { ShadowLabCard } from "./shadow-lab-card";
@@ -70,6 +71,10 @@ export function HealthSection() {
       <HealthRollup />
       <AiFindingsPanel />
       <KillswitchControlCard />
+      {/* Wedge-Rate [B2]: loop-freeze regression signal — TOP-LEVEL + visible
+          (NOT in the collapsed Data Integrity group): the at-a-glance tile Ghost
+          watches each gated FREEZE fix against. */}
+      <WedgeRateTile />
       {/* B8: lower-card region — Data Integrity group (collapsed by default) */}
       <CollapsibleSection
         title="Data Integrity"
