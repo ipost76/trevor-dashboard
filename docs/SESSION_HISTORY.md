@@ -4232,7 +4232,7 @@ src/components/scout/types.ts         # added 5 new endpoint response types
 
 ## 2026-05-10 — Password Rotation + Header Change-Password Button
 
-Rotated `DASHBOARD_PASS` in `.env.local` (`yZBHrSk7FGAEIqkmPTi75Pz9kCi_TrNz` → new value, NOT committed — perms 600). Wired the orphaned `ChangePasswordModal` (dormant since B2, 2026-04-29) into the current `header.tsx`. Fixed a latent field-name bug in the modal that meant the change-password POST never worked end-to-end even from the legacy header.
+Rotated `DASHBOARD_PASS` in `.env.local` (`[REDACTED]` → new value, NOT committed — perms 600). Wired the orphaned `ChangePasswordModal` (dormant since B2, 2026-04-29) into the current `header.tsx`. Fixed a latent field-name bug in the modal that meant the change-password POST never worked end-to-end even from the legacy header.
 
 ### Changes
 
@@ -4254,7 +4254,7 @@ The prompt opening claimed the route expects `{action:"change_password", current
 | `sudo systemctl restart trevor-dashboard` | active (running), PID 633430, "TREVOR Hub ready" within 2s |
 | Curl new password login | LOGIN OK |
 | Curl old password login | OLD REJECTED |
-| Curl change-pw endpoint round-trip (Popcorn → Popcorn) | CHANGE-PW ENDPOINT OK — proves field names match end-to-end |
+| Curl change-pw endpoint round-trip ([REDACTED] → [REDACTED]) | CHANGE-PW ENDPOINT OK — proves field names match end-to-end |
 | `.env.local` perms | `-rw-------` (600) |
 | Sacred files 9/9 (bot side) | byte-identical MD5 to Phase 0 baseline (none touched — pure Hub change) |
 | Auto-close canary `grep -rE "auto.close\|auto_close\|autoClose" discord_bot.py` | 5 hits, all pre-existing legitimate `auto_close_time` orphan-handler correction-window references (per "Recurring residuals" doc) — not a regression |
