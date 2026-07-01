@@ -6,8 +6,10 @@ RM-07 P00 (2026-05-28): capital_cap_usd kept at 0.0 (vestigial — cap removed).
 New margin_mode field returns "isolated" (sourced from auto_trader.config).
 
 READ-ONLY. Returns the config knobs D1's ConfigCard renders + the per-ticker
-thresholds (live mirror of /home/trevor/trevor/ticker_thresholds.py via runtime
-import — no hardcoded drift).
+thresholds (live mirror of the VM-only /home/trevor/trevor/ticker_thresholds.py
++ auto_trader.config.MARGIN_MODE, re-sourced over the read-only `ssh vm` pipe —
+those modules do not exist on the Hub box, so a local import silently returned
+empty/default; B2-WATCHLIST-RESOURCE, mirroring the RM-MEM-A3 helpers).
 
 JSON output:
   {
@@ -24,7 +26,9 @@ JSON output:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -70,30 +74,93 @@ def _empty_payload(error: str | None = None) -> dict:
     return out
 
 
-def _margin_mode() -> str:
-    """Runtime import of auto_trader.config.MARGIN_MODE — default 'isolated'."""
-    try:
-        sys.path.insert(0, "/home/trevor/trevor")
-        from auto_trader import config as _atcfg  # type: ignore[import-not-found]
-        return str(getattr(_atcfg, "MARGIN_MODE", "isolated")).lower()
-    except Exception:
-        return "isolated"
+# --- VM re-source (RM-MEM-A3 pattern) ------------------------------------------
+# ticker_thresholds.py + auto_trader.config live ONLY on the VM. This Hub box has
+# just the trevor.db symlink, so a local `import` throws and silently degrades to
+# empty thresholds / default margin. Re-source both in ONE read-only `ssh vm`
+# round-trip (mirrors query_memory_daily.py). ssh must run as the DB-owner `trevor`
+# via `sudo -n` so the bot venv + VM-only modules resolve.
+SSH_BASE = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "vm"]
+_REMOTE_CMD = ["sudo", "-n", "-u", "trevor", "/home/trevor/trevor/venv/bin/python3", "-"]
+
+# Fixed, pure-stdlib program executed ON THE VM. No user input reaches it (it is a
+# constant piped via python's stdin `-`), so nothing touches the remote shell.
+_REMOTE_PROGRAM = r'''
+import sys, json
+sys.path.insert(0, "/home/trevor/trevor")
+out = {"enabled": False, "thresholds": {}, "margin_mode": "isolated"}
+try:
+    import ticker_thresholds as _tt
+    out["enabled"] = bool(getattr(_tt, "PER_TICKER_THRESHOLDS_ENABLED", False))
+    raw = getattr(_tt, "TICKER_THRESHOLDS", {}) or {}
+    out["thresholds"] = {k: v for k, v in raw.items() if isinstance(v, dict)}
+except Exception as e:
+    out["tt_error"] = f"{type(e).__name__}: {e}"
+try:
+    from auto_trader import config as _atcfg
+    out["margin_mode"] = str(getattr(_atcfg, "MARGIN_MODE", "isolated")).lower()
+except Exception as e:
+    out["cfg_error"] = f"{type(e).__name__}: {e}"
+print(json.dumps(out))
+'''
 
 
-def _per_ticker_payload() -> tuple[bool, list[dict]]:
-    """Runtime import from /home/trevor/trevor/ticker_thresholds.py.
+def _fetch_vm_config() -> dict | None:
+    """ONE read-only `ssh vm` round-trip re-sourcing the VM-only bot modules.
 
-    Mirrors query_auto_per_ticker_thresholds.py exactly — single source of
-    truth for the actual confidence numbers.
+    Returns the parsed dict on success, or None on any ssh/parse failure — logged
+    to stderr, never swallowed silently. 10s subprocess timeout sits below the
+    route's 12s runPython budget so the helper self-bounds first. HOME is reset to
+    /home/ghost because runPython sets HOME=/home/trevor, and ssh needs ghost's
+    ~/.ssh (the `vm` alias + GCE key).
     """
     try:
-        sys.path.insert(0, "/home/trevor/trevor")
-        import ticker_thresholds as tt  # type: ignore[import-not-found]
-    except Exception:
+        proc = subprocess.run(
+            SSH_BASE + _REMOTE_CMD,
+            input=_REMOTE_PROGRAM,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "HOME": "/home/ghost"},
+        )
+    except subprocess.TimeoutExpired:
+        sys.stderr.write("query_auto_config: ssh vm timeout re-sourcing ticker_thresholds/margin_mode\n")
+        return None
+    except Exception as exc:  # pragma: no cover
+        sys.stderr.write(f"query_auto_config: ssh vm error: {type(exc).__name__}: {exc}\n")
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        sys.stderr.write(
+            f"query_auto_config: ssh vm failed (rc={proc.returncode}): "
+            f"{(proc.stderr or 'ssh failed').strip()[:200]}\n"
+        )
+        return None
+    try:
+        return json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        sys.stderr.write("query_auto_config: ssh vm returned unparseable output\n")
+        return None
+
+
+def _margin_mode(vm: dict | None) -> str:
+    """MARGIN_MODE re-sourced from the VM (auto_trader.config) — default 'isolated'."""
+    if not vm:
+        return "isolated"
+    return str(vm.get("margin_mode") or "isolated").lower()
+
+
+def _per_ticker_payload(vm: dict | None) -> tuple[bool, list[dict]]:
+    """Per-ticker thresholds re-sourced from the VM (ticker_thresholds.py) via the
+    single _fetch_vm_config() ssh call, with the Hub-side TIER_MAP overlay applied.
+
+    On a missing/failed VM fetch returns (False, []) — the graceful empty state
+    (the panel renders "Per-ticker thresholds unavailable", never crashes).
+    """
+    if not vm:
         return False, []
 
-    enabled = bool(getattr(tt, "PER_TICKER_THRESHOLDS_ENABLED", False))
-    raw = getattr(tt, "TICKER_THRESHOLDS", {}) or {}
+    enabled = bool(vm.get("enabled", False))
+    raw = vm.get("thresholds", {}) or {}
     out: list[dict] = []
     for ticker, levels in raw.items():
         if not isinstance(levels, dict):
@@ -132,7 +199,11 @@ def main() -> int:
             ).fetchall()
         cfg = {r["key"]: r["value"] for r in cfg_rows}
 
-        enabled, thresholds = _per_ticker_payload()
+        # ONE ssh vm round-trip feeds BOTH the thresholds + margin_mode (never
+        # raises → won't trip the DB except; graceful defaults on failure). DB
+        # knobs above are already captured, so they always populate regardless.
+        vm = _fetch_vm_config()
+        enabled, thresholds = _per_ticker_payload(vm)
 
         def _f(key: str, default: float) -> float:
             try:
@@ -154,7 +225,7 @@ def main() -> int:
 
         out = {
             "capital_cap_usd": 0.0,
-            "margin_mode": _margin_mode(),
+            "margin_mode": _margin_mode(vm),
             "live_per_trade_usd": _f("LIVE_PER_TRADE_USD", 10.0),
             "confidence_floor": _i("AGGRESSIVE_THRESHOLD", 35),
             "max_leverage": _i("LIVE_LEVERAGE_DEFAULT", 5),
