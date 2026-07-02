@@ -297,6 +297,24 @@ def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
+def _cutover_epoch(conn: sqlite3.Connection) -> str:
+    """V2 cutover epoch (B3): UTC 'YYYY-MM-DD HH:MM:SS' floor for every
+    historical (closed-trade) read. Reads the SAME `auto_config` key B2 set
+    (`AUTO_CUTOVER_EPOCH`). FAIL-CLOSED: a missing/unreadable/unparseable key
+    returns now(UTC) — show fresh, never dump pre-cutover history back. Old
+    rows stay archived in `auto_trades`; lower/drop the key to un-hide them.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM auto_config WHERE key='AUTO_CUTOVER_EPOCH'"
+        ).fetchone()
+        raw = str(row[0]).strip() if row is not None else ""
+        datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")  # validate or fail-closed
+        return raw
+    except Exception:
+        return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def get_equity_at(conn: sqlite3.Connection, window_start_ts: str | None) -> float | None:
     """Realized-basis account equity at the START of a window (WA-P1 PCT-D1/D2).
 
@@ -394,11 +412,17 @@ def main() -> int:
             ).fetchall()
             cfg = {r["key"]: r["value"] for r in cfg_rows}
 
+            # V2 cutover epoch (B3): both HISTORICAL reads below (closed_rows +
+            # total_count_row) are floored at the epoch. closed_at is a UTC
+            # 'YYYY-MM-DD HH:MM:SS' string, so string >= is chronological.
+            epoch = _cutover_epoch(conn)
+
             # REALIZED source: every closed LIVE trade (closed_at UTC + pnl_usd).
             # Bucketed in Python on ET-calendar boundaries. Paper trades excluded.
             closed_rows = conn.execute(
                 "SELECT closed_at, pnl_usd, partial_pnl_realized FROM auto_trades "
-                "WHERE trade_mode='live' AND status='closed'"
+                "WHERE trade_mode='live' AND status='closed' AND closed_at >= ?",
+                (epoch,),
             ).fetchall()
 
             # OPEN exposure = committed notional of currently-open positions
@@ -409,7 +433,9 @@ def main() -> int:
             ).fetchone()
 
             total_count_row = conn.execute(
-                "SELECT COUNT(*) AS n FROM auto_trades WHERE status='closed'"
+                "SELECT COUNT(*) AS n FROM auto_trades WHERE status='closed' "
+                "AND closed_at >= ?",
+                (epoch,),
             ).fetchone()
 
             # WA-P1 (PCT-D1/D2): start-of-window realized-basis equity per window,

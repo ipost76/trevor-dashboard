@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB = "/home/trevor/trevor/trevor.db"
@@ -46,6 +47,24 @@ DB = "/home/trevor/trevor/trevor.db"
 
 def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
+
+
+def _cutover_epoch(conn: sqlite3.Connection) -> str:
+    """V2 cutover epoch (B3): UTC 'YYYY-MM-DD HH:MM:SS' floor for the closed
+    (historical) list. Reads the SAME `auto_config` key B2 set
+    (`AUTO_CUTOVER_EPOCH`). FAIL-CLOSED: a missing/unreadable/unparseable key
+    returns now(UTC) — show fresh, never dump pre-cutover history back. Old
+    rows stay archived in `auto_trades`; lower/drop the key to un-hide them.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM auto_config WHERE key='AUTO_CUTOVER_EPOCH'"
+        ).fetchone()
+        raw = str(row[0]).strip() if row is not None else ""
+        datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")  # validate or fail-closed
+        return raw
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _rows_to_dicts(cursor) -> list[dict]:
@@ -72,16 +91,20 @@ def fetch_open(limit: int) -> dict:
 
 def fetch_closed(limit: int) -> dict:
     with _connect_ro() as conn:
+        # V2 cutover epoch (B3): closed_at is a UTC 'YYYY-MM-DD HH:MM:SS'
+        # string, so string >= is chronological.
+        epoch = _cutover_epoch(conn)
         cur = conn.execute(
             f"""
             SELECT id, ticker, direction, pnl_pct, pnl_usd,
                    hold_duration_minutes, closed_at, exit_reason, trade_mode
             FROM auto_trades
-            WHERE status='closed' AND trade_mode='live'
+            WHERE status='closed' AND trade_mode='live' AND closed_at >= ?
             GROUP BY id
             ORDER BY closed_at DESC
             LIMIT {limit}
-            """
+            """,
+            (epoch,),
         )
         # B6-RECENT-GAPS dedup guard: GROUP BY the `id` primary key so one
         # logical trade renders as exactly one RECENT row. `auto_trades` has no
