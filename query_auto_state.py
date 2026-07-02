@@ -371,6 +371,9 @@ def main() -> int:
         "realized": {"today": 0.0, "yesterday": 0.0, "week": 0.0, "month": 0.0, "all": 0.0},
         "realized_pct": {"today": None, "yesterday": None, "week": None, "month": None, "all": None},
         "realized_base": {"today": None, "yesterday": None, "week": None, "month": None, "all": None},
+        # C2 (2026-07-02): account value at AUTO_CUTOVER_EPOCH — route.ts's fixed
+        # realized-% denominator. None → the route renders every % as "—".
+        "cutover_base_usd": None,
         "realized_count": {"today": 0, "yesterday": 0, "week": 0, "month": 0, "all": 0},
         "realized_unknown_count": 0,
         "open_exposure_usd": 0.0,
@@ -416,6 +419,15 @@ def main() -> int:
             # total_count_row) are floored at the epoch. closed_at is a UTC
             # 'YYYY-MM-DD HH:MM:SS' string, so string >= is chronological.
             epoch = _cutover_epoch(conn)
+
+            # C2 (2026-07-02): account value AT the cutover epoch — the fixed
+            # denominator route.ts divides every realized window by (replaces
+            # the BASE-B2 lifetime-net-deposits base, which died with the V2
+            # wallet migration). equity_snapshots is append-only and the epoch
+            # is fixed, so this nearest-at-or-before read returns the same
+            # figure every request — a fixed base with zero stored state.
+            # None (empty table / read error) → route renders "—" (fail-open).
+            cutover_base = get_equity_at(conn, epoch)
 
             # REALIZED source: every closed LIVE trade (closed_at UTC + pnl_usd).
             # Bucketed in Python on ET-calendar boundaries. Paper trades excluded.
@@ -526,6 +538,7 @@ def main() -> int:
             "realized": realized,
             "realized_pct": realized_pct,
             "realized_base": realized_base,
+            "cutover_base_usd": cutover_base,  # C2: fixed cutover-epoch base
             "realized_count": win["realized_count"],
             "realized_unknown_count": win["realized_unknown_count"],
             "open_exposure_usd": round(float(open_row["notional"] or 0.0), 4),

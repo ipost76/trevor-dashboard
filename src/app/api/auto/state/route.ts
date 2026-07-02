@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
 import { createSwrCache } from "@/lib/single-flight";
-import { getLifetimeNetDeposits } from "@/lib/hl-deposits";
 
 // GET /api/auto/state — consolidated AUTO state.
 //
@@ -57,6 +56,10 @@ interface AutoStateResponse {
   realized_pct: NullableWindows;
   // WA-P1: realized-basis account equity at each window's START (the % denominator).
   realized_base: NullableWindows;
+  // C2 (2026-07-02): account value at AUTO_CUTOVER_EPOCH (equity_snapshots,
+  // realized basis, read by query_auto_state.py) — the ONE fixed base every
+  // realized window's % divides by. null = base unavailable → % renders "—".
+  cutover_base_usd: number | null;
   realized_count: { today: number; yesterday: number; week: number; month: number; all: number; custom?: number };
   realized_unknown_count: number;
   open_exposure_usd: number;
@@ -95,6 +98,7 @@ const FALLBACK: AutoStateResponse = {
   realized: { ...ZERO_WINDOWS },
   realized_pct: { ...NULL_WINDOWS },
   realized_base: { ...NULL_WINDOWS },
+  cutover_base_usd: null,
   realized_count: { today: 0, yesterday: 0, week: 0, month: 0, all: 0 },
   realized_unknown_count: 0,
   open_exposure_usd: 0,
@@ -316,7 +320,7 @@ export async function GET(request: Request) {
       : null;
 
   try {
-    const [state, equity, lifetimeDeposits] = await Promise.all([
+    const [state, equity] = await Promise.all([
       cache.swr(custom ? `auto-state:${custom.start}:${custom.end}` : "auto-state", async () => {
         // Python still supplies realized windows / counts / exposure / unrealized
         // / flags. Its own equity is DISCARDED below (see EQT-A3). When `custom` is
@@ -326,27 +330,30 @@ export async function GET(request: Request) {
         return safeJsonParse<AutoStateResponse>(raw, FALLBACK);
       }),
       resolveRealHlEquity(),
-      getLifetimeNetDeposits(),
     ]);
 
     const value = state.value;
     const available = equity.value !== null;
     const realHlEquity = equity.value ?? 0;
 
-    // BASE-B2 (2026-06-20): repoint the realized-% base to ONE fixed figure =
-    // lifetime HL NET DEPOSITS (all capital in − out, ever; src/lib/hl-deposits.ts),
-    // replacing WA-P1's per-window start-of-window equity. The old per-window base
-    // shifted window-to-window and could exceed −100% (impossible vs real capital);
-    // a single fixed base makes equal dollar P&L read as equal %. The Python's
-    // `realized` numerator is untouched (denominator-only change). When the base is
-    // unavailable (HL unreachable / no address), `lifetimeDeposits` is null → every
-    // window's % stays null → renders "—" (fail-open from BASE-B1/B3) — NEVER a
-    // wrong number off a stored proxy ($50 / $70.91). `equity_usd`/`equity` still
-    // mirror real HL (the live account-value line is correct as-is — EQT-A3 intact).
+    // BASE-B2 (2026-06-20) → C2 (2026-07-02): the realized-% base stays ONE
+    // fixed figure for every window (equal dollar P&L reads as equal %), but
+    // the figure is RESEEDED for the V2 cutover: it is now the ACCOUNT VALUE
+    // AT AUTO_CUTOVER_EPOCH — `cutover_base_usd`, read by query_auto_state.py
+    // from the equity_snapshots row at-or-before the epoch (realized basis,
+    // $21.63 at reseed). The old base (lifetime HL net deposits via
+    // hl-deposits.ts) is retired for this card: post-migration it divided
+    // fresh V2 trades by the OLD drained wallet's deposit history. There is
+    // deliberately NO fallback to it — a wrong base is worse than no base
+    // (BASE-B1 doctrine). Base unavailable (null) → every window's % stays
+    // null → renders "—" (fail-open). The Python's `realized` numerator is
+    // untouched (denominator-only change, B3 owns the epoch-floored
+    // numerator). `equity_usd`/`equity` still mirror real HL (EQT-A3 intact).
     const rebasedPct: NullableWindows = { ...NULL_WINDOWS };
     const rebasedBase: NullableWindows = { ...NULL_WINDOWS };
-    if (lifetimeDeposits !== null && lifetimeDeposits > 0) {
-      const base = lifetimeDeposits;
+    const cutoverBase = value.cutover_base_usd;
+    if (typeof cutoverBase === "number" && cutoverBase > 0) {
+      const base = cutoverBase;
       const realized = value.realized;
       (Object.keys(realized) as (keyof RealizedWindows)[]).forEach((k) => {
         const v = realized[k];
@@ -378,8 +385,8 @@ export async function GET(request: Request) {
       open_count: equity.openCount ?? value.open_count,
       open_positions_count: equity.openCount ?? value.open_positions_count,
       open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
-      // BASE-B2: OVERRIDE realized_pct + realized_base onto the fixed
-      // lifetime-net-deposits base (rebased above) — the Python's snapshot-based
+      // BASE-B2/C2: OVERRIDE realized_pct + realized_base onto the fixed
+      // cutover-epoch base (rebased above) — the Python's snapshot-based
       // values from `...value` are intentionally replaced. The legacy
       // `pnl_today_pct` tracks the same rebased today value.
       realized_pct: rebasedPct,
