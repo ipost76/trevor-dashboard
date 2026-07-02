@@ -102,6 +102,9 @@ Every report, audit, or document deliverable ALWAYS delivers to BOTH **Discord #
 - **NEVER** credential-scout. The webhook is already in `.env.local`. Just call the sender.
 - If delivery **FAILS**: report loudly and STOP. Do NOT fall back to a local download. (`scripts/deliver_report.py` already validates the file exists, fails loud + non-zero on every failure path — non-200, missing webhook, timeout, manifest-append fail, bad args — and has no silent local-only fallback. It is the proven, byte-stable entry point; do not reinvent it.)
 
+### Rule — FUNNEL EDGE-HEALTH WATCH IS THE PUBLIC-URL TRUTH (FUNNEL-B1, 2026-07-01)
+`trevor-funnel-watch.timer` (15 min) runs `scripts/funnel_edge_watch.py`: an EXTERNAL probe of `https://trevorhub-wsl.tail2bf7a3.ts.net` via DoH resolution so it traverses Tailscale's public edge — a box self-test or MagicDNS fetch does NOT prove the public URL is up (the Jun 30 edge death stayed self-test-green). State: `data/funnel-edge-status.json`; alerts #downloads via `HUB_DOWNLOADS_WEBHOOK_URL` on state change only (🚨 after 2 consecutive fails / ✅ recovery). When diagnosing "Hub unreachable," read this state file FIRST; if DEAD, the revive recipe is in CLAUDE.md FUNNEL-B1. Don't add a second public-URL checker, don't demote the probe to a self-test, don't make it alert-per-run (anti-flap is deliberate).
+
 ### Investigation-First Discipline (Immutable)
 
 Every CC session that fixes / diagnoses / debugs / investigates must follow:

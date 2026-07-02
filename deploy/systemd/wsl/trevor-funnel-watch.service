@@ -1,0 +1,25 @@
+[Unit]
+# External health probe of the PUBLIC Tailscale Funnel edge (FUNNEL-B1). Resolves
+# the Hub hostname via Google DoH so the probe traverses the real public edge —
+# the box resolver would MagicDNS to the tailnet IP and self-test, which stayed
+# green through the Jun 30 silent edge-death (recon A3). Alerts the #downloads
+# webhook on state change only; state in data/funnel-edge-status.json. Driven by
+# trevor-funnel-watch.timer.
+Description=TREVOR Hub Funnel edge-health watch (one-shot external probe)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ghost
+# The watch reads HUB_DOWNLOADS_WEBHOOK_URL from /home/ghost/projects/trevor-dashboard/.env.local.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+ExecStart=/usr/bin/python3 /home/ghost/projects/trevor-dashboard/scripts/funnel_edge_watch.py
+TimeoutStartSec=2min
+Nice=10
+
+[Install]
+# Not enabled directly; the timer drives it. (Present for manual `systemctl start` too.)
+WantedBy=multi-user.target

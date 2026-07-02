@@ -1,0 +1,15 @@
+[Unit]
+# 15-min driver for trevor-funnel-watch.service (FUNNEL-B1 edge-health-watch).
+# Catches a silent Funnel edge-death within ~30 min (2 consecutive fails) via a
+# Discord 🚨 instead of a dead phone.
+Description=15-min Funnel edge-health watch for the public TREVOR Hub URL
+
+[Timer]
+Unit=trevor-funnel-watch.service
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
