@@ -56,13 +56,6 @@ interface AutoStateResponse {
   realized_pct: NullableWindows;
   // WA-P1: realized-basis account equity at each window's START (the % denominator).
   realized_base: NullableWindows;
-  // PCT-DENOM-FIX3 (2026-07-03): the POST-cutover starting capital (~$69.74, the
-  // first funded reading after the migration deposit landed; equity_snapshots
-  // realized basis, computed by query_auto_state.py via jump-detection) — the base
-  // every epoch-floored window (1W/1M/ALL) divides by. NOT the $21.63 mid-migration
-  // seed, NOT the $70.91 old-wallet MIN. null = base unavailable → % renders "—".
-  // Flows through untouched via `...value` (the route does not override it).
-  cutover_base_usd: number | null;
   realized_count: { today: number; yesterday: number; week: number; month: number; all: number; custom?: number };
   realized_unknown_count: number;
   open_exposure_usd: number;
@@ -101,7 +94,6 @@ const FALLBACK: AutoStateResponse = {
   realized: { ...ZERO_WINDOWS },
   realized_pct: { ...NULL_WINDOWS },
   realized_base: { ...NULL_WINDOWS },
-  cutover_base_usd: null,
   realized_count: { today: 0, yesterday: 0, week: 0, month: 0, all: 0 },
   realized_unknown_count: 0,
   open_exposure_usd: 0,
@@ -371,7 +363,6 @@ export async function GET(request: Request) {
       open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
       // PCT-DENOM-FIX B1: realized_pct / realized_base / pnl_today_pct pass
       // through from `...value` (the Python's per-window values) — no override.
-      // `cutover_base_usd` also flows through in `...value` for the ALL base.
       equity_available: available,
       equity_stale: equity.stale,
       equity_source: equity.source,
