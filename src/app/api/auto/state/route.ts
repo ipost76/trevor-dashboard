@@ -336,35 +336,16 @@ export async function GET(request: Request) {
     const available = equity.value !== null;
     const realHlEquity = equity.value ?? 0;
 
-    // BASE-B2 (2026-06-20) → C2 (2026-07-02): the realized-% base stays ONE
-    // fixed figure for every window (equal dollar P&L reads as equal %), but
-    // the figure is RESEEDED for the V2 cutover: it is now the ACCOUNT VALUE
-    // AT AUTO_CUTOVER_EPOCH — `cutover_base_usd`, read by query_auto_state.py
-    // from the equity_snapshots row at-or-before the epoch (realized basis,
-    // $21.63 at reseed). The old base (lifetime HL net deposits via
-    // hl-deposits.ts) is retired for this card: post-migration it divided
-    // fresh V2 trades by the OLD drained wallet's deposit history. There is
-    // deliberately NO fallback to it — a wrong base is worse than no base
-    // (BASE-B1 doctrine). Base unavailable (null) → every window's % stays
-    // null → renders "—" (fail-open). The Python's `realized` numerator is
-    // untouched (denominator-only change, B3 owns the epoch-floored
-    // numerator). `equity_usd`/`equity` still mirror real HL (EQT-A3 intact).
-    const rebasedPct: NullableWindows = { ...NULL_WINDOWS };
-    const rebasedBase: NullableWindows = { ...NULL_WINDOWS };
-    const cutoverBase = value.cutover_base_usd;
-    if (typeof cutoverBase === "number" && cutoverBase > 0) {
-      const base = cutoverBase;
-      const realized = value.realized;
-      (Object.keys(realized) as (keyof RealizedWindows)[]).forEach((k) => {
-        const v = realized[k];
-        if (typeof v === "number") {
-          rebasedBase[k] = base;
-          // match the Python 4-dp rounding the old realized_pct used.
-          rebasedPct[k] = Math.round((v / base) * 100 * 1e4) / 1e4;
-        }
-      });
-    }
-
+    // PCT-DENOM-FIX B1 (2026-07-03): the per-window realized-% is now computed
+    // entirely by query_auto_state.py — each window divides its realized $ by the
+    // account equity at that window's START (floored at the cutover epoch), and
+    // ALL divides by the cutover-epoch base. The route no longer rebases: the
+    // old BASE-B2/C2 override that forced ONE fixed cutover base onto EVERY
+    // window is removed. The Python's `realized_pct` / `realized_base` /
+    // `pnl_today_pct` flow through untouched via `...value` below. Fail-open is
+    // preserved by the Python (per-window null base → null %) + the FALLBACK
+    // object (NULL_WINDOWS on a parse failure) → the card renders "—".
+    // `equity_usd`/`equity` still mirror real HL (EQT-A3 intact).
     return NextResponse.json({
       ...value,
       ts: state.ts,
@@ -385,13 +366,9 @@ export async function GET(request: Request) {
       open_count: equity.openCount ?? value.open_count,
       open_positions_count: equity.openCount ?? value.open_positions_count,
       open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
-      // BASE-B2/C2: OVERRIDE realized_pct + realized_base onto the fixed
-      // cutover-epoch base (rebased above) — the Python's snapshot-based
-      // values from `...value` are intentionally replaced. The legacy
-      // `pnl_today_pct` tracks the same rebased today value.
-      realized_pct: rebasedPct,
-      realized_base: rebasedBase,
-      pnl_today_pct: rebasedPct.today ?? 0,
+      // PCT-DENOM-FIX B1: realized_pct / realized_base / pnl_today_pct pass
+      // through from `...value` (the Python's per-window values) — no override.
+      // `cutover_base_usd` also flows through in `...value` for the ALL base.
       equity_available: available,
       equity_stale: equity.stale,
       equity_source: equity.source,
