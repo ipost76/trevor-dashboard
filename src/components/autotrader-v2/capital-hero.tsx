@@ -22,7 +22,8 @@ import { TrendingUp } from "lucide-react";
 // labeled as floating with open positions.
 
 // WA-P2: "custom" is an arbitrary calendar date range fed through the same
-// realized-P&L path as the presets (BASE-B2: % base = lifetime net deposits).
+// realized-P&L path as the presets (PCT-DENOM-FIX B1: % base = account value at
+// the window's start, floored at the cutover epoch).
 type WindowKey = "today" | "yesterday" | "week" | "month" | "all" | "custom";
 
 interface RealizedWindows {
@@ -34,9 +35,10 @@ interface RealizedWindows {
   custom?: number;
 }
 
-// BASE-B2 (2026-06-20): each window's % is computed against ONE fixed base =
-// lifetime HL net deposits (was WA-P1's per-window start-of-window equity). A
-// window with no usable base (HL unreachable) is `null` → rendered "—".
+// PCT-DENOM-FIX B1 (2026-07-03): each window's % divides its realized $ by the
+// account value at that window's START, floored at the cutover epoch; ALL
+// divides by the account value at the cutover epoch. A window with no usable
+// base (empty snapshots / read error) is `null` → rendered "—".
 interface NullableWindows {
   today: number | null;
   yesterday: number | null;
@@ -251,10 +253,10 @@ export function CapitalHero() {
                 decimals={2}
                 showSign
               />
-              {/* BASE-B2: % of lifetime net deposits (one fixed base for every
-                  window — equal dollar P&L reads as equal %, and it can't exceed
-                  −100% of real capital). A window with no usable base (HL ledger
-                  unreachable) renders "—", never a garbage number. */}
+              {/* PCT-DENOM-FIX B1: % of the account value at the window's start
+                  (floored at the cutover epoch); ALL = account value at the
+                  cutover epoch. A window with no usable base (empty snapshots /
+                  read error) renders "—", never a garbage number. */}
               {headlinePct != null ? (
                 <MoneyText
                   value={headlinePct}
@@ -266,7 +268,7 @@ export function CapitalHero() {
               ) : (
                 <span
                   className="font-mono text-body tabular-nums text-fg-muted"
-                  title="lifetime net-deposits base unavailable"
+                  title="window-start account value unavailable"
                 >
                   —
                 </span>
