@@ -450,23 +450,28 @@ def main() -> int:
                 (epoch,),
             ).fetchone()
 
-            # WA-P1 (PCT-D1/D2): start-of-window realized-basis equity per window,
-            # read inside the SAME mode=ro connection. Each window's % divides its
-            # realized P&L by the account equity at that window's START (not the
-            # current live equity), so it's a true return over the window's span.
-            # ALL anchors to the earliest snapshot ts (account's earliest known
-            # equity). None for any window whose base is missing → UI renders "—".
+            # WA-P1 (PCT-D1/D2) + PCT-DENOM-FIX B1 (2026-07-03): start-of-window
+            # realized-basis equity per window, read inside the SAME mode=ro
+            # connection. Each window's % divides its realized P&L by the account
+            # equity at that window's START (not the current live equity), so it's
+            # a true return over the window's span. Every window start is FLOORED
+            # at the cutover epoch (max(start, epoch)) so the denominator matches
+            # the numerator — which is already epoch-floored (closed_rows WHERE
+            # closed_at >= epoch). A window opening before the cutover (1M today,
+            # an old CUSTOM span) clamps up to the epoch and uses the cutover base,
+            # keeping numerator + denominator on the same window with the base
+            # always defined. ALL anchors DIRECTLY to the epoch (was the earliest
+            # snapshot ts = the drained OLD-wallet ~$70.91 — the BASE bug the
+            # route override was masking). None for any window whose base is
+            # missing → UI renders "—".
             now_utc = datetime.now(UTC)
             starts = _et_window_starts(now_utc)
-            earliest_ts = conn.execute(
-                "SELECT MIN(ts) FROM equity_snapshots"
-            ).fetchone()[0]
             base_starts = {
-                "today": starts["today"],
-                "yesterday": starts["yesterday"],
-                "week": starts["week"],
-                "month": starts["month"],
-                "all": earliest_ts,
+                "today": max(starts["today"], epoch),
+                "yesterday": max(starts["yesterday"], epoch),
+                "week": max(starts["week"], epoch),
+                "month": max(starts["month"], epoch),
+                "all": epoch,
             }
             realized_base = {
                 k: get_equity_at(conn, ts) for k, ts in base_starts.items()
@@ -478,8 +483,11 @@ def main() -> int:
             # is read by the SAME get_equity_at (A-P1's denominator) inside this SAME
             # mode=ro connection — zero new denominator math.
             custom_span = _parse_custom_args(sys.argv[1:])
+            # PCT-DENOM-FIX B1: floor the custom span's start at the cutover epoch
+            # too, so a range reaching before the cutover uses the cutover base
+            # (matches the epoch-floored numerator).
             custom_base = (
-                get_equity_at(conn, custom_span[0]) if custom_span else None
+                get_equity_at(conn, max(custom_span[0], epoch)) if custom_span else None
             )
 
         win = compute_windows(
