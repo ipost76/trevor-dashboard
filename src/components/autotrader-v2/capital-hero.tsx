@@ -253,9 +253,11 @@ export function CapitalHero() {
                 decimals={2}
                 showSign
               />
-              {/* PCT-DENOM-FIX B1: % of the account value at the window's start
-                  (floored at the cutover epoch); ALL = account value at the
-                  cutover epoch. A window with no usable base (empty snapshots /
+              {/* PCT-DENOM-FIX3: % of the account value at the window's start;
+                  windows predating the cutover (1W/1M/ALL) floor to the POST-cutover
+                  starting capital (~$69.74, the first funded post-cutover equity —
+                  NOT the $21.63 mid-migration seed); today/yesterday use their own
+                  start-of-day equity. A window with no usable base (empty snapshots /
                   read error) renders "—", never a garbage number. */}
               {headlinePct != null ? (
                 <MoneyText
@@ -268,7 +270,7 @@ export function CapitalHero() {
               ) : (
                 <span
                   className="font-mono text-body tabular-nums text-fg-muted"
-                  title="window-start account value unavailable"
+                  title="window-start account value unavailable (post-cutover starting capital / start-of-day equity)"
                 >
                   —
                 </span>

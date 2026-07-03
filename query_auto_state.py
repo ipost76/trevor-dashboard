@@ -354,6 +354,44 @@ def get_equity_at(conn: sqlite3.Connection, window_start_ts: str | None) -> floa
         return None
 
 
+def _cutover_starting_capital(conn: sqlite3.Connection, epoch: str) -> float | None:
+    """POST-cutover starting capital (PCT-DENOM-FIX3, 2026-07-03) — the base every
+    epoch-floored window (1W/1M/ALL) divides by.
+
+    `AUTO_CUTOVER_EPOCH` marks the START of the V2 migration, but the account stayed
+    mid-drain (~$21) for ~3.5h AFTER it, until the funding deposit landed and equity
+    jumped to ~$69.74. `get_equity_at(epoch)` returns the at-or-BEFORE-epoch snapshot
+    = the ~$21.63 MID-MIGRATION SEED, which is NOT the account's real starting capital
+    for the post-cutover run.
+
+    Jump-detection: return the first snapshot AT-OR-AFTER the epoch whose realized-basis
+    value is >= 2x the at-or-before-epoch seed (the funding deposit is a clean ~3.3x jump
+    from the drain level → first match = the first funded reading, ~$69.74). Self-calibrating
+    (no hardcoded ts or dollar threshold), deterministic over immutable history, and
+    FAIL-SAFE: falls back to the epoch seed if no jump exists / the table is empty (never
+    crashes, never null-poisons).
+
+    NOT get_equity_at(epoch) (=$21.63 mid-migration seed). NOT MIN(ts) (=$70.91 old-wallet
+    earliest snapshot — the latent BASE bug the prior fix killed; do NOT resurrect it).
+    Read-only: reuses the caller's mode=ro connection, parameterized, error-handled.
+    """
+    seed = get_equity_at(conn, epoch)
+    if seed is None:
+        return None  # empty table → caller renders "—" (fail-open)
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(realized_equity, equity) FROM equity_snapshots "
+            "WHERE ts >= ? AND COALESCE(realized_equity, equity) >= ? "
+            "ORDER BY ts ASC LIMIT 1",
+            (epoch, seed * 2.0),
+        ).fetchone()
+        if row is not None and row[0] is not None:
+            return float(row[0])  # first funded reading after the deposit jump
+    except Exception:
+        pass
+    return seed  # fail-safe: no funding jump found → prior (seed) behavior
+
+
 def _per_ticker_enabled() -> bool:
     """Runtime import — no hardcoded drift. Matches query_auto_per_ticker_thresholds.py."""
     try:
@@ -420,14 +458,15 @@ def main() -> int:
             # 'YYYY-MM-DD HH:MM:SS' string, so string >= is chronological.
             epoch = _cutover_epoch(conn)
 
-            # C2 (2026-07-02): account value AT the cutover epoch — the fixed
-            # denominator route.ts divides every realized window by (replaces
-            # the BASE-B2 lifetime-net-deposits base, which died with the V2
-            # wallet migration). equity_snapshots is append-only and the epoch
-            # is fixed, so this nearest-at-or-before read returns the same
-            # figure every request — a fixed base with zero stored state.
-            # None (empty table / read error) → route renders "—" (fail-open).
-            cutover_base = get_equity_at(conn, epoch)
+            # PCT-DENOM-FIX3 (2026-07-03): the POST-cutover STARTING CAPITAL — the
+            # fixed base every epoch-floored window (1W/1M/ALL) divides by. NOT the
+            # at-or-before-epoch snapshot (=$21.63 mid-migration seed, the bug), NOT
+            # MIN(ts) (=$70.91 old-wallet earliest, the latent bug the prior fix
+            # killed) — it's the first FUNDED reading after the migration deposit
+            # landed (~$69.74), found by jump-detection (>=2x the epoch seed). Append-
+            # only snapshots + immutable history ⇒ the same figure every request, zero
+            # stored state. None (empty table) → route renders "—" (fail-open).
+            cutover_base = _cutover_starting_capital(conn, epoch)
 
             # REALIZED source: every closed LIVE trade (closed_at UTC + pnl_usd).
             # Bucketed in Python on ET-calendar boundaries. Paper trades excluded.
@@ -450,20 +489,21 @@ def main() -> int:
                 (epoch,),
             ).fetchone()
 
-            # WA-P1 (PCT-D1/D2) + PCT-DENOM-FIX B1 (2026-07-03): start-of-window
+            # WA-P1 (PCT-D1/D2) + PCT-DENOM-FIX3 (2026-07-03): start-of-window
             # realized-basis equity per window, read inside the SAME mode=ro
             # connection. Each window's % divides its realized P&L by the account
             # equity at that window's START (not the current live equity), so it's
             # a true return over the window's span. Every window start is FLOORED
             # at the cutover epoch (max(start, epoch)) so the denominator matches
             # the numerator — which is already epoch-floored (closed_rows WHERE
-            # closed_at >= epoch). A window opening before the cutover (1M today,
-            # an old CUSTOM span) clamps up to the epoch and uses the cutover base,
-            # keeping numerator + denominator on the same window with the base
-            # always defined. ALL anchors DIRECTLY to the epoch (was the earliest
-            # snapshot ts = the drained OLD-wallet ~$70.91 — the BASE bug the
-            # route override was masking). None for any window whose base is
-            # missing → UI renders "—".
+            # closed_at >= epoch).
+            #   · A window whose floored start == the epoch (1W/1M/ALL, an old
+            #     CUSTOM span) uses the POST-cutover STARTING CAPITAL (cutover_base,
+            #     ~$69.74 — the first funded reading) — NOT get_equity_at(epoch)
+            #     (=$21.63 mid-migration seed, the bug PCT-DENOM-FIX3 fixes).
+            #   · A window whose start is POST-epoch (today/yesterday) keeps its OWN
+            #     real start-of-day equity via get_equity_at — untouched.
+            # None for any window whose base is missing → UI renders "—".
             now_utc = datetime.now(UTC)
             starts = _et_window_starts(now_utc)
             base_starts = {
@@ -474,7 +514,8 @@ def main() -> int:
                 "all": epoch,
             }
             realized_base = {
-                k: get_equity_at(conn, ts) for k, ts in base_starts.items()
+                k: (cutover_base if ts == epoch else get_equity_at(conn, ts))
+                for k, ts in base_starts.items()
             }
 
             # WA-P2 (2026-06-12): optional custom date-range window. The two picked
@@ -483,12 +524,17 @@ def main() -> int:
             # is read by the SAME get_equity_at (A-P1's denominator) inside this SAME
             # mode=ro connection — zero new denominator math.
             custom_span = _parse_custom_args(sys.argv[1:])
-            # PCT-DENOM-FIX B1: floor the custom span's start at the cutover epoch
-            # too, so a range reaching before the cutover uses the cutover base
-            # (matches the epoch-floored numerator).
-            custom_base = (
-                get_equity_at(conn, max(custom_span[0], epoch)) if custom_span else None
-            )
+            # PCT-DENOM-FIX3: floor the custom span's start at the cutover epoch too
+            # — a range reaching before the cutover clamps to the epoch and uses the
+            # POST-cutover starting capital (cutover_base, ~$69.74); a fully-post-epoch
+            # range keeps its own start-of-window equity. Matches the epoch-floored
+            # numerator.
+            custom_base = None
+            if custom_span:
+                cstart = max(custom_span[0], epoch)
+                custom_base = (
+                    cutover_base if cstart == epoch else get_equity_at(conn, cstart)
+                )
 
         win = compute_windows(
             (
@@ -546,7 +592,7 @@ def main() -> int:
             "realized": realized,
             "realized_pct": realized_pct,
             "realized_base": realized_base,
-            "cutover_base_usd": cutover_base,  # C2: fixed cutover-epoch base
+            "cutover_base_usd": cutover_base,  # PCT-DENOM-FIX3: post-cutover starting capital (~$69.74)
             "realized_count": win["realized_count"],
             "realized_unknown_count": win["realized_unknown_count"],
             "open_exposure_usd": round(float(open_row["notional"] or 0.0), 4),
