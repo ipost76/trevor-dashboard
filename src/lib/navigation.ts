@@ -27,14 +27,13 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
-  Crosshair,
   Brain,
   BookOpen,
   Database,
   Activity,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "servant" | "intel" | "docs" | "memory" | "health";
+export type ZoneId = "auto" | "intel" | "docs" | "memory" | "health";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -73,21 +72,6 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "activity", label: "Activity" },
     ],
     defaultSubTab: "dashboard",
-  },
-  {
-    // SERVANT (Edge-Hunter, B5) — Ghost reads the edge-hunter's ranked findings
-    // and acts on them: download the rolling .md, reset once addressed. A new
-    // single-view bottom-nav zone BETWEEN auto and intel, styled to match DAILY
-    // EDGE. Reads servant_findings (handled=0) from the litestream replica
-    // READ-ONLY; the reset round-trips to the VM (the engine owns the write).
-    // Reuses the unused "violet" accent → refined plum (accentTextClass /
-    // accentGlowClass already handle it, so no new switch case is needed).
-    id: "servant",
-    href: "/servant",
-    label: "Servant",
-    shortLabel: "Servant",
-    icon: Crosshair,
-    accent: "violet",
   },
   {
     id: "intel",
