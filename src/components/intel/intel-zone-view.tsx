@@ -2,13 +2,12 @@
 import * as React from "react";
 import { ShadowOverview } from "./shadow-overview";
 import { ShadowRankSection } from "./shadow-rank-section";
-import { ShadowCompareSection } from "./shadow-compare-section";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
 import { DailyEdgeSection } from "./daily-edge-section";
 
 /**
- * /intel zone view — Shadow / Lessons / Journal / Promote.
+ * /intel zone view — Shadow / Impact / Lessons / Journal / Daily Edge.
  *
  * Wave D2 moved Lessons / Journal out to /docs; a 2026-05-19 follow-up brought
  * them back to /intel (Downloads stays on /docs as the sole surface, now with
@@ -45,8 +44,10 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
     case "impact":
       // E1 $-Rank Hub Intel View — every shadow sorted by its $ impact.
       return <ShadowRankSection />;
-    case "promote":
-      return <ShadowCompareSection />;
+    // RM-DECOM B5 (2026-07-08): the "Promote" tab (<ShadowCompareSection>, the
+    // "Promote Readiness" panel) was removed — it presented a single-component
+    // Wilson-LB approximation as a promotion verdict, and no promote action
+    // exists. A stale ?tab=promote deep link now falls through to Shadow.
     case "lessons":
       return <LessonsSection />;
     case "journal":

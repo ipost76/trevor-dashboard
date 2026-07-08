@@ -5,35 +5,28 @@ import { ReadinessBadge } from "@/components/ui/compact-shadow-card";
 import type { ShadowRegistryTable } from "./shadow-overview";
 
 /**
- * PromotionLeaderboard — the headline of the shadow page.
+ * PromotionLeaderboard — the "top divergent shadows" headline of the shadow page.
  *
- * Ranks the best/nearest-ready candidates off the LIVE readiness data
- * (`promotion` + `divergence_pct` from the c38b39b payload — no new
- * computed field). Caller passes a pre-ranked, pre-sliced top-N slice;
- * this just renders it tight (one line per entry on a phone): rank ·
- * name · readiness badge · the one or two numbers that justify the rank
- * (n divergent + %-divergence).
+ * Ranks shadows by divergence off the LIVE payload (`promotion` +
+ * `divergence_pct` — no new computed field). Caller passes a pre-ranked,
+ * pre-sliced top-N slice; this renders it tight (one line per entry on a
+ * phone): rank · name · divergence badge · n divergent + %-divergence.
  *
- * Honest header: when nothing is gate-ready it reads "0 gate-ready ·
- * nearest candidates:" and still lists the nearest-ranked — never empty,
- * never fabricated. `readyCount` is the live count of ACTIVE ready
- * shadows (drives the header text only).
+ * RM-DECOM B5 (2026-07-08): relabeled from a "promotion / gate-ready"
+ * leaderboard to an honest divergence ranking. The `promotion === "ready"`
+ * badge is a single-component Wilson-LB significance flag, NOT the real
+ * 7-component promotion gate, and no promote action exists — so this surface
+ * no longer claims "gate-ready" and the readyCount header was dropped. The
+ * component name is kept internal to avoid churn across the shadow surfaces.
  */
 export interface PromotionLeaderboardProps {
-  /** Pre-ranked (ready → accruing, then %-div desc), pre-sliced to top N. */
+  /** Pre-ranked (significant divergence first, then %-div desc), sliced to top N. */
   candidates: ShadowRegistryTable[];
-  /** Live count of ACTIVE gate-ready shadows (for the honest header). */
-  readyCount: number;
 }
 
-export function PromotionLeaderboard({ candidates, readyCount }: PromotionLeaderboardProps) {
-  // No divergence/readiness signal anywhere → nothing honest to rank.
+export function PromotionLeaderboard({ candidates }: PromotionLeaderboardProps) {
+  // No divergence signal anywhere → nothing to rank.
   if (candidates.length === 0) return null;
-
-  const header =
-    readyCount > 0
-      ? `${readyCount} gate-ready · top candidates`
-      : "0 gate-ready · nearest candidates";
 
   return (
     <section className="card-elevated rounded-md p-3">
@@ -42,10 +35,10 @@ export function PromotionLeaderboard({ candidates, readyCount }: PromotionLeader
           🎯
         </span>
         <h2 className="font-sans text-caption font-semibold tracking-tight text-fg-primary">
-          Promotion Leaderboard
+          Top Divergent Shadows
         </h2>
-        <Pill intent={readyCount > 0 ? "active" : "warn"} size="sm">
-          {header}
+        <Pill tone="neutral" size="sm">
+          ranked by divergence
         </Pill>
       </header>
 

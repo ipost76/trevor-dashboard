@@ -109,7 +109,9 @@ export function ShadowLabCard() {
   const list = shadows ?? [];
   const total = list.length;
   const activeN = list.filter((s) => s.status === "ACTIVE").length;
-  const readyN = list.filter((s) => s.promotion === "ready").length;
+  // RM-DECOM B5: count of shadows with a statistically significant divergence
+  // (Wilson-LB>0) — NOT "promotable" (the real 7-component gate is separate).
+  const divergingN = list.filter((s) => s.promotion === "ready").length;
   const obsTotal = list.reduce((a, s) => a + (s.obs_total || 0), 0);
 
   // Group registered shadows by category for the CollapsibleSections.
@@ -124,7 +126,9 @@ export function ShadowLabCard() {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [list]);
 
-  const borderClass = readyN > 0 ? "border-l-accent-mint" : "border-l-border-subtle";
+  // RM-DECOM B5: neutral border — a mint "readiness" edge telegraphed a promotion
+  // verdict this card does not have. The honest divergence count lives in the tile.
+  const borderClass = "border-l-border-subtle";
 
   return (
     <Card padding="md" className={cn("border-l-4", borderClass)}>
@@ -164,10 +168,10 @@ export function ShadowLabCard() {
               size="sm"
             />
             <MetricTile
-              label="Ready"
-              value={readyN}
-              sub="promotable"
-              tone={readyN > 0 ? "cyan" : "neutral"}
+              label="Diverging"
+              value={divergingN}
+              sub="signif."
+              tone={divergingN > 0 ? "cyan" : "neutral"}
               size="sm"
             />
             <MetricTile

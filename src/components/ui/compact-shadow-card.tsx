@@ -48,11 +48,14 @@ function fmtNum(n: number): string {
 }
 
 /**
- * Readiness badge — the ONLY thing on a collapsed row (and reused in the
- * leaderboard). Four states off the existing payload, all on A4 tokens:
- *   ready (gate-clear, mint) · accruing N/30 (building sample, gold) ·
- *   n/a (no divergence signal, neutral) · dormant (0-row / retired, dim).
- * Dormant status wins over promotion (a dormant table is never "ready").
+ * Divergence badge — the ONLY thing on a collapsed row (and reused in the
+ * leaderboard). Four honest states off the existing payload, all on A4 tokens:
+ *   diverges (n≥30 AND the Wilson lower bound of the divergence rate excludes 0
+ *   = a statistically SIGNIFICANT divergence from live — NOT a promotion verdict;
+ *   the real 7-component promotion gate is separate, RM-DECOM B5; mint) ·
+ *   N/30 (building sample toward n≥30, gold) · n/a (no divergence signal,
+ *   neutral) · dormant (0-row / retired, dim). Dormant status wins (a dormant
+ *   table never shows a divergence signal).
  */
 export function ReadinessBadge({
   status,
@@ -75,7 +78,10 @@ export function ReadinessBadge({
     );
   }
   if (promotion === "ready") {
-    return <Pill intent="active" size="sm">ready</Pill>;
+    // RM-DECOM B5: was "ready" (mint) — the display lie (single-component
+    // Wilson-LB ≠ the 7-component promotion gate). Honest: the shadow's
+    // divergence from live is statistically significant.
+    return <Pill intent="active" size="sm">diverges</Pill>;
   }
   if (promotion === "accruing") {
     return <Pill intent="warn" size="sm">{`${promotionN ?? 0}/30`}</Pill>;

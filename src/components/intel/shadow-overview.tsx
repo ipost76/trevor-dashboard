@@ -208,7 +208,6 @@ export function ShadowOverview() {
     .sort(bySignal);
   const leaderboardTables = ranked.slice(0, LEADERBOARD_N);
   const denseSignal = ranked.slice(LEADERBOARD_N);
-  const readyCount = ranked.filter((t) => t.promotion === "ready").length;
 
   // Hidden behind the toggle: active-no-signal (na) + dormant + 0-row, together.
   // STALE is excluded — it has its own prominent alarm section above.
@@ -241,7 +240,7 @@ export function ShadowOverview() {
         </span>
         <span className="text-fg-faint">·</span>
         <span>
-          {registry?.total ?? tables.length} shadows · {readyCount} gate-ready
+          {registry?.total ?? tables.length} shadows
           {staleCount > 0 ? (
             <span className="text-accent-red"> · {staleCount} STALE</span>
           ) : null}
@@ -268,8 +267,8 @@ export function ShadowOverview() {
             </section>
           )}
 
-          {/* ── Zone 1: leaderboard (the headline) ───────────────────────── */}
-          <PromotionLeaderboard candidates={leaderboardTables} readyCount={readyCount} />
+          {/* ── Zone 1: top divergent shadows (the headline) ─────────────── */}
+          <PromotionLeaderboard candidates={leaderboardTables} />
 
           {/* ── Hero feature cards (kept — distinct from the dense list) ──── */}
           <ShadowScoringHero
