@@ -44,13 +44,23 @@ export async function GET() {
     );
     return NextResponse.json(value);
   } catch (error) {
-    if (error instanceof ObservatoryStatusError) {
-      return NextResponse.json({ error: error.message }, { status: 502 });
-    }
-    return NextResponse.json(
-      { error: "Observatory unreachable", details: String(error) },
-      { status: 503 },
-    );
+    // RM-DECOM B5 (2026-07-08): the Observatory is being decommissioned (B3 tears
+    // down monitor-center + the :8443 heartbeat). A dead upstream used to surface
+    // as 502/503, which rendered a red "Observatory unreachable" ERROR card. Now
+    // the failure path returns a 200 with a `retired` empty shape (NO
+    // `overall_status`/`categories`) so consumers can render a calm neutral state
+    // instead of an error. The success path above is UNCHANGED — while the
+    // Observatory is still alive it proxies real heartbeat data; only a genuine
+    // outage falls here. Consumers discriminate the retired shape by the ABSENCE
+    // of `overall_status` (a real heartbeat always carries it):
+    //   • heartbeat-view.tsx  → neutral "heartbeat retired" card (not the warn one)
+    //   • health-rollup.tsx    → hbAvailable=false → UNKNOWN (never a false green)
+    //   • reconcile-health-card → categories absent → its existing "pending" state
+    const reason =
+      error instanceof ObservatoryStatusError
+        ? error.message
+        : `Observatory unreachable: ${String(error)}`;
+    return NextResponse.json({ observatory: "retired", reason }, { status: 200 });
   }
 }
 

@@ -48,6 +48,15 @@ const OBSERVATORY_HEARTBEAT_URL =
 // cadence would false-OFFLINE between beats (the very bug we're fixing).
 const HEARTBEAT_STALE_MS = 3 * 60 * 60 * 1000;
 
+// RM-DECOM B5 (2026-07-08): the bot-running fallback when the Observatory is
+// decommissioned (B3). A replica newer than this ⇒ the VM litestream/restore
+// pipeline is alive, so the bot box is up — don't cry a false OFFLINE just
+// because the Observatory heartbeat is gone. The restore timer runs ~15min (full
+// restore ~8-14min ⇒ effective freshness ~20-30min); 60min is well above that
+// variance, so exceeding it means even the restore pipeline has stopped → a
+// legitimate OFFLINE. Only consulted when the heartbeat probe is 'unavailable'.
+const REPLICA_ALIVE_MAX_S = 60 * 60;
+
 interface HeartbeatServiceItem {
   name?: string;
   active?: boolean;
@@ -58,25 +67,30 @@ interface StatusHeartbeat {
   categories?: { services?: { items?: HeartbeatServiceItem[] } };
 }
 
-// Fresh heartbeat + the trevor.service entry active → running:true. Unreachable /
-// non-200 / timeout / stale (>3h) / missing-or-inactive entry → running:false (honest
-// OFFLINE — the Hub genuinely can't confirm the bot). Never keys off overall_status
-// (a separate, independently-flapping health axis). Catches internally → never throws.
-async function resolveBotRunning(
-  serviceName: string,
-): Promise<{ running: boolean; pid: number }> {
+// RM-DECOM B5 (2026-07-08): heartbeat probe with three DEFINITE-vs-INDETERMINATE
+// verdicts, so the bot-running signal doesn't false-OFFLINE once B3 kills the
+// Observatory. Never keys off overall_status. Catches internally → never throws.
+//   • 'active'      — heartbeat fresh + trevor.service entry active → definitely up.
+//   • 'inactive'    — heartbeat fresh + entry INACTIVE → definitely down (a REAL
+//                     bot death; the caller must still surface OFFLINE, NOT mask it).
+//   • 'unavailable' — heartbeat unreachable / non-200 / timeout / stale, OR the
+//                     entry is absent → the Hub can't confirm via Observatory; the
+//                     caller falls back to replica freshness instead of OFFLINE.
+type BotProbe = { state: "active" | "inactive" | "unavailable"; pid: number };
+
+async function probeBotViaHeartbeat(serviceName: string): Promise<BotProbe> {
   try {
     const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return { running: false, pid: 0 };
+    if (!res.ok) return { state: "unavailable", pid: 0 };
     const hb = (await res.json()) as StatusHeartbeat;
 
     // Freshness: the snapshot must be within the cadence-derived staleness window.
     const ts = hb?.timestamp ? Date.parse(hb.timestamp) : NaN;
     if (!Number.isFinite(ts) || Date.now() - ts > HEARTBEAT_STALE_MS) {
-      return { running: false, pid: 0 };
+      return { state: "unavailable", pid: 0 };
     }
 
     // Bot/service field: the trevor.service entry's `active` flag mirrors the VM's
@@ -86,11 +100,16 @@ async function resolveBotRunning(
     const item = (hb?.categories?.services?.items ?? []).find(
       (i) => (i?.name ?? "").replace(/\.service$/, "") === want,
     );
-    if (!item || item.active !== true) return { running: false, pid: 0 };
-
-    return { running: true, pid: parseInt(item.pid ?? "", 10) || 0 };
+    // Missing entry ⇒ Observatory can't report the bot ⇒ unavailable (fall back).
+    // A PRESENT entry is a definite verdict — a real death here must still show
+    // OFFLINE, so do NOT mask it with the replica fallback.
+    if (!item) return { state: "unavailable", pid: 0 };
+    if (item.active === true) {
+      return { state: "active", pid: parseInt(item.pid ?? "", 10) || 0 };
+    }
+    return { state: "inactive", pid: 0 };
   } catch {
-    return { running: false, pid: 0 };
+    return { state: "unavailable", pid: 0 };
   }
 }
 
@@ -98,25 +117,22 @@ async function computeStatus(): Promise<Record<string, unknown>> {
   const trevorService = process.env.TREVOR_SERVICE_NAME || "trevor.service";
   const dbPath = process.env.TREVOR_DB_PATH || "/home/trevor/trevor/trevor.db";
 
-  let trevorPid = 0;
-  let trevorRunning = false;
   let signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
   let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
+  let replicaAgeSeconds: number | null = null;
 
-  // Derive running from the Observatory heartbeat the Hub already proxies (W-F-P3) —
-  // the bot runs on the VM, so the old LOCAL `systemctl show trevor` resolved
-  // running:false permanently. resolveBotRunning() reads the heartbeat's
-  // services entry; any failure/staleness → { running:false, pid:0 } (honest OFFLINE).
-  const bot = await resolveBotRunning(trevorService);
-  trevorPid = bot.pid;
-  trevorRunning = bot.running;
+  // RM-DECOM B5: probe the bot via the heartbeat (fresh + trevor.service active).
+  // Post-B3 the Observatory is decommissioned → 'unavailable' → the replica-
+  // freshness fallback below decides, so the header doesn't show a false OFFLINE.
+  const probe = await probeBotViaHeartbeat(trevorService);
 
     // Query DB via Python — the Hub has no Node SQLite binding, so every DB read
     // goes through the Python bridge (QUAL-06 2026-06-03: corrected a stale comment
     // that claimed the sqlite3 CLI wasn't installed — it is; that was never the reason).
     try {
       const pyScript = `
-import sqlite3, json
+import sqlite3, json, os
+from datetime import datetime, timezone
 conn = sqlite3.connect("file:${dbPath}?mode=ro", uri=True)
 result = {}
 
@@ -132,6 +148,13 @@ try:
     result["recent"] = [{"ticker": r[0], "direction": r[1] or "?", "confidence": int(r[2]*100) if r[2] and r[2] <= 1 else int(r[2] or 0), "timestamp": r[3] or ""} for r in rows]
 except: result["recent"] = []
 
+# RM-DECOM B5: replica file age — the bot-running fallback signal once the
+# Observatory heartbeat is decommissioned (a fresh replica ⇒ VM pipeline alive).
+try:
+    st = os.stat(os.path.realpath("${dbPath}"))
+    result["replica_age_seconds"] = int(datetime.now(timezone.utc).timestamp() - st.st_mtime)
+except: result["replica_age_seconds"] = None
+
 conn.close()
 print(json.dumps(result))
 `;
@@ -139,11 +162,40 @@ print(json.dumps(result))
       const dbData = JSON.parse(pyResult);
       signalStats.total = dbData.total || 0;
       recentSignals = dbData.recent || [];
+      if (typeof dbData.replica_age_seconds === "number") {
+        replicaAgeSeconds = dbData.replica_age_seconds;
+      }
     } catch { /* DB query failed — graceful */ }
+
+  // RM-DECOM B5: decide running. 'active'/'inactive' are DEFINITE heartbeat
+  // verdicts (a real bot death still surfaces OFFLINE). 'unavailable' (Observatory
+  // decommissioned) falls back to REPLICA FRESHNESS: a replica newer than
+  // REPLICA_ALIVE_MAX_S ⇒ the VM litestream/restore pipeline is alive, so don't
+  // false-OFFLINE just because the Observatory is gone. A genuinely stale replica
+  // (whole pipeline dead) legitimately reports OFFLINE.
+  let trevorRunning: boolean;
+  const trevorPid = probe.pid;
+  let runningSource: "heartbeat" | "replica-fresh" | "replica-stale";
+  if (probe.state === "active") {
+    trevorRunning = true;
+    runningSource = "heartbeat";
+  } else if (probe.state === "inactive") {
+    trevorRunning = false;
+    runningSource = "heartbeat";
+  } else {
+    const fresh =
+      replicaAgeSeconds !== null && replicaAgeSeconds < REPLICA_ALIVE_MAX_S;
+    trevorRunning = fresh;
+    runningSource = fresh ? "replica-fresh" : "replica-stale";
+  }
 
   const responseData = {
     ok: true,
-    trevor: { running: trevorRunning, pid: trevorPid },
+    // `source` is additive (honesty): heartbeat = confirmed; replica-fresh =
+    // inferred from a live restore pipeline once the Observatory is gone;
+    // replica-stale = the pipeline itself looks dead. Consumers read only
+    // `running`/`pid` (header, status-bar) — the new field is non-breaking.
+    trevor: { running: trevorRunning, pid: trevorPid, source: runningSource },
     signals: signalStats,
     recentSignals,
     timestamp: new Date().toISOString(),

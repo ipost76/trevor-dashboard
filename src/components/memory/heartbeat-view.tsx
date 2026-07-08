@@ -261,6 +261,10 @@ export function HeartbeatView() {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // RM-DECOM B5: the /api/heartbeat proxy returns a 200 `{observatory:'retired'}`
+  // empty shape (no overall_status) once the Observatory is decommissioned —
+  // render a calm neutral card, never the red "unreachable" error card.
+  const [retired, setRetired] = React.useState(false);
   const [lastUpdated, setLastUpdated] = React.useState<number | null>(null);
   const [now, setNow] = React.useState<number>(Date.now());
 
@@ -276,9 +280,15 @@ export function HeartbeatView() {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setError(body.error ?? `HTTP ${res.status}`);
       } else {
-        const json = (await res.json()) as HeartbeatData;
-        setData(json);
-        setLastUpdated(Date.now());
+        const json = (await res.json()) as HeartbeatData & { observatory?: string };
+        // RM-DECOM B5: retired shape (no live heartbeat) → neutral card, not data.
+        if (json.observatory === "retired") {
+          setRetired(true);
+        } else {
+          setRetired(false);
+          setData(json);
+          setLastUpdated(Date.now());
+        }
       }
     } catch (e) {
       setError(String(e));
@@ -310,6 +320,22 @@ export function HeartbeatView() {
         </div>
         <Skeleton className="h-40 w-full" />
       </div>
+    );
+  }
+
+  // RM-DECOM B5: Observatory decommissioned → the heartbeat proxy returned the
+  // `retired` shape. Show a calm neutral card (no retry — the source is retiring;
+  // the 60s poll self-recovers if this was a transient blip pre-decommission).
+  // Trade/account numbers stay live via the replica on the other health cards.
+  if (retired) {
+    return (
+      <Card padding="md" className="card-base">
+        <EmptyState
+          icon={<HeartPulse size={32} className="text-fg-muted" />}
+          title="Observatory heartbeat retired"
+          body="Live heartbeat telemetry is offline (Observatory decommissioned — RM-DECOM). Trade data, closed history and account numbers remain live via the replica on the other cards."
+        />
+      </Card>
     );
   }
 

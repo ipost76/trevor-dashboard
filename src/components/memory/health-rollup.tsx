@@ -76,8 +76,14 @@ export function HealthRollup() {
     // health; never fall back to a false green (handled in the render below).
     if (hbRes.status === "fulfilled" && hbRes.value.ok) {
       try {
-        setHb((await hbRes.value.json()) as HeartbeatShape);
-        setHbAvailable(true);
+        const json = (await hbRes.value.json()) as HeartbeatShape;
+        setHb(json);
+        // RM-DECOM B5: the /api/heartbeat proxy now returns a 200
+        // `{observatory:'retired'}` empty shape (no overall_status) when the
+        // Observatory is decommissioned. A retired/empty heartbeat CANNOT confirm
+        // health, so treat it as unavailable → the render shows an honest UNKNOWN,
+        // never a false green off a missing overall_status.
+        setHbAvailable(typeof json.overall_status === "string");
       } catch {
         setHbAvailable(false);
       }
