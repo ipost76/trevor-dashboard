@@ -231,9 +231,12 @@ export function RecentTab() {
                   <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
                 ) : (
                   // B6-RECENT-GAPS: native P&L not captured (e.g. external_close)
-                  // → "pending" pill, never a misleading 0.00%. Row stays visible.
-                  <Pill tone="neutral" size="sm" title="P&L not captured for this close">
-                    pending
+                  // → labeled "no P&L", never a misleading 0.00%. Row stays visible.
+                  // RM-RED-2 M10: label is "no P&L" (not "pending") — the trade IS
+                  // closed; only its captured P&L is missing. "pending" mis-read as a
+                  // stuck/open position and seeded a false orphan premise.
+                  <Pill tone="neutral" size="sm" title="Closed — native P&L not captured">
+                    no P&L
                   </Pill>
                 )}
               </li>
