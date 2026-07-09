@@ -1,13 +1,11 @@
 "use client";
 import * as React from "react";
 import { ShadowOverview } from "./shadow-overview";
-import { ShadowRankSection } from "./shadow-rank-section";
 import { LessonsSection } from "@/components/docs/lessons-section";
 import { JournalSection } from "@/components/docs/journal-section";
-import { DailyEdgeSection } from "./daily-edge-section";
 
 /**
- * /intel zone view — Shadow / Impact / Lessons / Journal / Daily Edge.
+ * /intel zone view — Shadow / Lessons / Journal.
  *
  * Wave D2 moved Lessons / Journal out to /docs; a 2026-05-19 follow-up brought
  * them back to /intel (Downloads stays on /docs as the sole surface, now with
@@ -41,21 +39,19 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
   switch (subtab) {
     case "shadow":
       return <ShadowOverview />;
-    case "impact":
-      // E1 $-Rank Hub Intel View — every shadow sorted by its $ impact.
-      return <ShadowRankSection />;
-    // RM-DECOM B5 (2026-07-08): the "Promote" tab (<ShadowCompareSection>, the
-    // "Promote Readiness" panel) was removed — it presented a single-component
-    // Wilson-LB approximation as a promotion verdict, and no promote action
-    // exists. A stale ?tab=promote deep link now falls through to Shadow.
+    // RM-DECOM B5 (2026-07-08): the "Promote" tab was removed (a single-component
+    // Wilson-LB approximation presented as a promotion verdict; no promote action
+    // exists). H1 (2026-07-09): the "Impact" ($-rank, <ShadowRankSection>) and
+    // "Daily Edge" (<DailyEdgeSection>) tabs were removed — they were the display
+    // layer of the promotion/edge apparatus RM-DECOM decommissioned; Ghost now
+    // drives all edge/tweak analysis through CC recon. Their component files are
+    // deleted; IMPACT's shared /api/shadow/registry route stays (SHADOW + Health
+    // depend on it). A stale ?tab=promote|impact|daily-edge deep link falls
+    // through to Shadow.
     case "lessons":
       return <LessonsSection />;
     case "journal":
       return <JournalSection />;
-    case "daily-edge":
-      // DAILY EDGE (B2) — LAST Intel sub-tab; reads /api/daily-edge (engine JSON
-      // in data/) and displays today's one-tweak recommendation. Read-only.
-      return <DailyEdgeSection />;
     default:
       return <ShadowOverview />;
   }

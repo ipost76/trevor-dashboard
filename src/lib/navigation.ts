@@ -80,12 +80,13 @@ export const ZONES: ReadonlyArray<Zone> = [
     shortLabel: "Intel",
     icon: Brain,
     accent: "magenta",
+    // H1 (2026-07-09): the "Impact" ($-rank) + "Daily Edge" tabs were removed —
+    // they were the display layer of the promotion/edge apparatus RM-DECOM
+    // decommissioned; Ghost now drives all edge/tweak analysis through CC recon.
     subTabs: [
       { key: "shadow", label: "Shadow" },
-      { key: "impact", label: "Impact" },
       { key: "lessons", label: "Lessons" },
       { key: "journal", label: "Journal" },
-      { key: "daily-edge", label: "Daily Edge" },
     ],
     defaultSubTab: "shadow",
   },
