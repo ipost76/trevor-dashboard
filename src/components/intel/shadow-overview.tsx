@@ -1,16 +1,26 @@
 "use client";
 import * as React from "react";
-import { EmptyState, Skeleton } from "@/components/ui";
-import { CompactShadowCard } from "@/components/ui/compact-shadow-card";
+import { EmptyState, Skeleton, Pill } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ShadowScoringHero, type IntelShadowState } from "./shadow-scoring-hero";
-import { PartialShadowCard } from "@/components/autotrader-v2/partial-shadow-card";
-import { PromotionLeaderboard } from "./promotion-leaderboard";
 
 type RegistryStatus = "ACTIVE" | "DORMANT" | "BROKEN" | "STALE";
 type FunctionGroup = "Entry" | "Exit" | "Scoring" | "Risk" | "Data" | "Other";
 type Promotion = "ready" | "accruing" | "na";
 
+// H1 (2026-07-09) SHADOW slim: this tab is now a LIGHT inventory — "what shadows
+// exist + are they alive" (name + function + a plain ACTIVE/DORMANT/STALE/BROKEN
+// status pill + latest-write age). The deep analytical surfaces were CUT (the
+// PromotionLeaderboard, the ShadowScoringHero readiness metrics, the
+// PartialShadowCard footprint numbers, the per-card AggregateSummaryLine
+// WR/μ/range/would-fire %, the divergence/promotion-verdict expand). Ghost drives
+// all deep edge/tweak analysis through CC recon now — the Hub keeps only the
+// glance. The registry read (/api/shadow/registry) is UNCHANGED — this is a
+// display trim, not a data cut.
+//
+// The full ShadowRegistryTable shape is preserved and EXPORTED because the
+// now-orphaned-but-on-disk promotion-leaderboard.tsx + shadow-scoring-hero.tsx
+// still `import type { ShadowRegistryTable }` from here (H1 left those files on
+// disk per repo convention; the project type-checks them). Do not trim it.
 export interface ShadowRegistryTable {
   table_name: string;
   display: string;
@@ -32,8 +42,8 @@ export interface ShadowRegistryTable {
   divergence_pct: number | null;
   promotion: Promotion;
   promotion_n: number | null;
-  // HUB-C2 realized-outcome aggregates (read-only over existing columns). null
-  // when the table has no realized-outcome column (Group C → count-only / n/a).
+  // HUB-C2 realized-outcome aggregates (kept in the shape for the orphaned
+  // type-importers; no longer rendered on this slim tab).
   outcome_col: string | null;
   outcome_linked_n: number | null;
   outcome_mean_pnl: number | null;
@@ -45,26 +55,11 @@ export interface ShadowRegistryTable {
 
 interface ShadowRegistryResponse {
   tables: ShadowRegistryTable[];
-  by_function: Record<string, string[]>;
-  by_status: Record<string, number>;
   total: number;
-  promotion_ready: number;
   stale_count?: number;
-  stale_days: number;
-  promotion_min_n: number;
   replica_age_seconds: number | null;
-  replica_mtime: string | null;
   error?: string;
 }
-
-interface IntelShadowResponse {
-  shadow?: IntelShadowState;
-  error?: string;
-}
-
-const HERO_TABLE = "shadow_scoring";
-// Phone-friendly leaderboard size — the headline "show me your best" view.
-const LEADERBOARD_N = 6;
 
 function fmtReplicaAge(sec: number | null): string {
   if (sec === null || sec === undefined || !Number.isFinite(sec)) return "unknown";
@@ -90,97 +85,74 @@ function fmtAge(iso: string | null | undefined): string {
   return `${Math.floor(ageSec / 86400)}d ago`;
 }
 
-function fmtDur(sec: number | null | undefined): string {
-  if (sec === null || sec === undefined || !Number.isFinite(sec)) return "—";
-  if (sec < 3600) return `${Math.round(sec / 60)}m`;
-  if (sec < 86400) return `${(sec / 3600).toFixed(1)}h`;
-  return `${(sec / 86400).toFixed(1)}d`;
-}
-
-function adaptCard(t: ShadowRegistryTable) {
-  const cardStatus: "active" | "dormant" | "stale" =
-    t.status === "ACTIVE" ? "active" : t.status === "STALE" ? "stale" : "dormant";
-  return {
-    name: t.display,
-    tableName: t.table_name,
-    totalRows: t.rows,
-    rows48h: t.rows_48h,
-    latestAge: fmtAge(t.latest_write),
-    status: cardStatus,
-    function: t.function,
-    divergentN: t.divergent_n,
-    divergencePct: t.divergence_pct,
-    divergenceCol: t.divergence_col,
-    promotion: t.promotion,
-    promotionN: t.promotion_n,
-    retired: t.retired,
-    // Realized-outcome aggregates (null ⇒ Group C ⇒ "n/a — no per-trade outcome")
-    outcomeCol: t.outcome_col,
-    outcomeLinkedN: t.outcome_linked_n,
-    outcomeMeanPnl: t.outcome_mean_pnl,
-    outcomeMinPnl: t.outcome_min_pnl,
-    outcomeMaxPnl: t.outcome_max_pnl,
-    outcomeWinRate: t.outcome_win_rate,
-    extraMetrics:
-      t.status === "STALE"
-        ? {
-            "silent for": fmtDur(t.silence_sec),
-            "expected cadence": `~${fmtDur(t.median_gap_sec)}`,
-            "stale after": `~${fmtDur(t.stale_threshold_sec)}`,
-            ...(t.error ? { error: t.error } : {}),
-          }
-        : t.error
-          ? { error: t.error }
-          : undefined,
-  };
-}
-
-const promoRank = (p: Promotion): number => (p === "ready" ? 0 : p === "accruing" ? 1 : 2);
-
-// Default dense list + leaderboard ranking: ready → accruing, then
-// divergence strength (%div desc), then recency (48h desc).
-function bySignal(a: ShadowRegistryTable, b: ShadowRegistryTable): number {
-  const r = promoRank(a.promotion) - promoRank(b.promotion);
-  if (r !== 0) return r;
-  const pd = (b.divergence_pct ?? 0) - (a.divergence_pct ?? 0);
-  if (pd !== 0) return pd;
-  return (b.rows_48h ?? 0) - (a.rows_48h ?? 0);
-}
-
-// Hidden set ordering: active-but-no-signal (na) first, then dormant/0-row,
-// each by activity (48h desc, then total rows desc).
-function byHidden(a: ShadowRegistryTable, b: ShadowRegistryTable): number {
-  const sa = a.status === "ACTIVE" ? 0 : 1;
-  const sb = b.status === "ACTIVE" ? 0 : 1;
-  if (sa !== sb) return sa - sb;
-  return (b.rows_48h ?? 0) - (a.rows_48h ?? 0) || (b.rows ?? 0) - (a.rows ?? 0);
+// One light row: dot + name (+ retired marker) + "function · latest-write age"
+// + a plain status pill. No deep stats — identity + alive-ness only.
+function ShadowRow({ t }: { t: ShadowRegistryTable }) {
+  const { status } = t;
+  const dot =
+    status === "ACTIVE"
+      ? "bg-accent-mint-strong"
+      : status === "STALE" || status === "BROKEN"
+        ? "bg-accent-red"
+        : "bg-fg-faint";
+  const pill =
+    status === "ACTIVE" ? (
+      <Pill intent="active" size="sm">ACTIVE</Pill>
+    ) : status === "STALE" ? (
+      <Pill intent="error" size="sm">STALE</Pill>
+    ) : status === "BROKEN" ? (
+      <Pill intent="error" size="sm">BROKEN</Pill>
+    ) : (
+      <Pill tone="neutral" size="sm" className="text-fg-faint">DORMANT</Pill>
+    );
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-md border px-3 py-2 transition-colors duration-fast",
+        status === "STALE" || status === "BROKEN"
+          ? "border-accent-red/40 bg-bg-card"
+          : status === "ACTIVE"
+            ? "border-border-subtle bg-bg-card"
+            : "border-border-subtle bg-bg-card opacity-75",
+      )}
+    >
+      <span aria-hidden className={cn("mt-1 h-2 w-2 shrink-0 self-start rounded-pill", dot)} />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2 text-caption">
+          <span className="truncate font-sans font-semibold text-fg-primary">{t.display}</span>
+          {t.retired && (
+            <span className="shrink-0 font-sans text-micro uppercase tracking-wider text-fg-faint">
+              retired
+            </span>
+          )}
+        </div>
+        <span className="font-sans text-micro text-fg-muted">
+          {t.function} · {fmtAge(t.latest_write)}
+        </span>
+      </div>
+      <span className="mt-0.5 shrink-0 self-start">{pill}</span>
+    </div>
+  );
 }
 
 export function ShadowOverview() {
   const [registry, setRegistry] = React.useState<ShadowRegistryResponse | null>(null);
-  const [intel, setIntel] = React.useState<IntelShadowResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [showHidden, setShowHidden] = React.useState(false);
+  const [showDormant, setShowDormant] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
-
     const load = async () => {
       try {
-        const [registryRes, intelRes] = await Promise.all([
-          fetch("/api/shadow/registry", { cache: "no-store" }),
-          fetch("/api/intel/shadow", { cache: "no-store" }),
-        ]);
+        const res = await fetch("/api/shadow/registry", { cache: "no-store" });
         if (cancelled) return;
-        if (registryRes.ok) setRegistry(await registryRes.json());
-        if (intelRes.ok) setIntel(await intelRes.json());
+        if (res.ok) setRegistry(await res.json());
       } catch {
         // network errors swallow; keep last-good snapshot
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-
     load();
     const id = window.setInterval(load, 60_000);
     return () => {
@@ -190,36 +162,19 @@ export function ShadowOverview() {
   }, []);
 
   const tables = registry?.tables ?? [];
-  const heroTable = tables.find((t) => t.table_name === HERO_TABLE) ?? null;
-  // Hero owns shadow_scoring — strip it from every list (its surface is the hero).
-  const tablesExHero = tables.filter((t) => t.table_name !== HERO_TABLE);
+  const byName = (a: ShadowRegistryTable, b: ShadowRegistryTable) =>
+    a.display.localeCompare(b.display);
 
-  // STALE alarm (B2): registered expected_active but silent beyond its own write
-  // cadence. Pulled to the TOP — never buried in the hidden toggle below.
-  const staleTables = tablesExHero
-    .filter((t) => t.status === "STALE")
+  // Alarms first: registered-active writers that went silent (STALE) or never
+  // wrote (BROKEN) — the "are they alive?" problems, most-silent first.
+  const alarms = tables
+    .filter((t) => t.status === "STALE" || t.status === "BROKEN")
     .sort((a, b) => (b.silence_sec ?? 0) - (a.silence_sec ?? 0));
-  const staleCount = registry?.stale_count ?? staleTables.length;
-
-  // Signal-carriers = ACTIVE shadows with a real divergence/readiness signal,
-  // ranked. The top N become the leaderboard; the rest are the dense default list.
-  const ranked = tablesExHero
-    .filter((t) => t.status === "ACTIVE" && t.promotion !== "na")
-    .sort(bySignal);
-  const leaderboardTables = ranked.slice(0, LEADERBOARD_N);
-  const denseSignal = ranked.slice(LEADERBOARD_N);
-
-  // Hidden behind the toggle: active-no-signal (na) + dormant + 0-row, together.
-  // STALE is excluded — it has its own prominent alarm section above.
-  const hidden = tablesExHero
-    .filter((t) => t.status !== "STALE" && (t.status !== "ACTIVE" || t.promotion === "na"))
-    .sort(byHidden);
+  const active = tables.filter((t) => t.status === "ACTIVE").sort(byName);
+  const dormant = tables.filter((t) => t.status === "DORMANT").sort(byName);
 
   const replicaAge = registry?.replica_age_seconds ?? null;
-
-  const renderRow = (t: ShadowRegistryTable) => (
-    <CompactShadowCard key={t.table_name} {...adaptCard(t)} />
-  );
+  const alarmCount = alarms.length;
 
   if (registry?.error) {
     return (
@@ -231,8 +186,7 @@ export function ShadowOverview() {
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
-      {/* Replica freshness — the WSL litestream replica refreshes every ~15 min,
-          so a glance knows the divergent counts may lag. */}
+      {/* Replica freshness — the WSL litestream replica refreshes every ~15 min. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-cyan-soft" />
@@ -241,80 +195,77 @@ export function ShadowOverview() {
         <span className="text-fg-faint">·</span>
         <span>
           {registry?.total ?? tables.length} shadows
-          {staleCount > 0 ? (
-            <span className="text-accent-red"> · {staleCount} STALE</span>
+          {alarmCount > 0 ? (
+            <span className="text-accent-red"> · {alarmCount} need attention</span>
           ) : null}
         </span>
       </div>
 
+      {/* Honest framing of the slimmed view. */}
+      <p className="font-sans text-micro leading-relaxed text-fg-muted">
+        A light inventory — what shadows exist and whether they&apos;re alive. Deep per-shadow
+        stats ($-rank, divergence, win-rate) now live in CC recon, not the Hub.
+      </p>
+
       {loading && tables.length === 0 ? (
         <Skeleton className="h-48 w-full" />
+      ) : tables.length === 0 ? (
+        <EmptyState title="No shadows" body="The registry returned no shadow tables." />
       ) : (
         <div className="space-y-4">
-          {/* ── STALE alarm (B2): registered active but gone silent ──────── */}
-          {staleTables.length > 0 && (
+          {/* ── Alarms: registered active but not writing ────────────────── */}
+          {alarms.length > 0 && (
             <section className="space-y-1.5 rounded-md border border-accent-red/40 bg-accent-red/5 p-3">
               <h3 className="flex items-center gap-2 font-sans text-caption font-semibold text-accent-red">
                 <span aria-hidden>⚠</span>
-                {staleTables.length} STALE — registered active but silent beyond cadence
+                {alarms.length} need attention — registered active but not writing
               </h3>
               <p className="font-sans text-micro leading-relaxed text-fg-muted">
-                These shadows are expected to be writing but have gone quiet well
-                beyond their own historical write cadence — they still have rows,
-                just old ones. Check each writer (tap a row for silence vs cadence).
+                STALE = has rows but silent well beyond its own write cadence; BROKEN = expected
+                to write but has zero rows. Check the writer.
               </p>
-              <div className="space-y-1.5">{staleTables.map(renderRow)}</div>
+              <div className="space-y-1.5">
+                {alarms.map((t) => (
+                  <ShadowRow key={t.table_name} t={t} />
+                ))}
+              </div>
             </section>
           )}
 
-          {/* ── Zone 1: top divergent shadows (the headline) ─────────────── */}
-          <PromotionLeaderboard candidates={leaderboardTables} />
-
-          {/* ── Hero feature cards (kept — distinct from the dense list) ──── */}
-          <ShadowScoringHero
-            registry={heroTable}
-            intel={intel?.shadow ?? null}
-            loading={loading && !registry}
-          />
-          <PartialShadowCard />
-
-          {/* ── Zone 2: dense collapsed rows (active ready + accruing) ────── */}
+          {/* ── Active (alive) ───────────────────────────────────────────── */}
           <section className="space-y-1.5">
             <h3 className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-              Active signal · tap a row for detail
+              Active ({active.length})
             </h3>
-            {denseSignal.length > 0 ? (
-              denseSignal.map(renderRow)
-            ) : ranked.length === 0 ? (
-              <EmptyState
-                title="No active signal"
-                body="No ready/accruing shadows right now — everything is behind the toggle below."
-              />
+            {active.length > 0 ? (
+              active.map((t) => <ShadowRow key={t.table_name} t={t} />)
             ) : (
-              <p className="font-sans text-micro text-fg-faint">
-                All ready/accruing shadows are in the leaderboard above.
-              </p>
+              <p className="font-sans text-micro text-fg-faint">No active shadows.</p>
             )}
           </section>
 
-          {/* ── Zone 3: dormant / na hidden behind a toggle (default off) ─── */}
-          {hidden.length > 0 && (
+          {/* ── Dormant behind a toggle (default off) ────────────────────── */}
+          {dormant.length > 0 && (
             <section className="space-y-1.5">
               <button
                 type="button"
-                aria-expanded={showHidden}
-                onClick={() => setShowHidden((x) => !x)}
+                aria-expanded={showDormant}
+                onClick={() => setShowDormant((x) => !x)}
                 className={cn(
                   "tap-target flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2",
                   "border-border-subtle bg-bg-card font-sans text-caption text-fg-muted",
                   "transition-colors duration-fast hover:border-accent-cyan-soft/40",
                 )}
               >
-                {showHidden
-                  ? "Hide dormant / no-signal"
-                  : `Show dormant / no-signal (${hidden.length})`}
+                {showDormant ? "Hide dormant" : `Show dormant (${dormant.length})`}
               </button>
-              {showHidden && <div className="space-y-1.5">{hidden.map(renderRow)}</div>}
+              {showDormant && (
+                <div className="space-y-1.5">
+                  {dormant.map((t) => (
+                    <ShadowRow key={t.table_name} t={t} />
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </div>
