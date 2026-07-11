@@ -55,6 +55,63 @@ interface MemoryIntelResponse {
   error?: string;
 }
 
+// ── plain-English labels (RM-HUB-POLISH-B2 — display-only, hide codes/jargon) ──
+const LOOP_NAME_PLAIN: Record<string, string> = {
+  calibrator: "Confidence tuning",
+  b1_entry_consult: "Entry learning",
+  b2_exit_consult: "Exit learning",
+  c1b_feature_fix: "Feature fix",
+};
+const STAGE_PLAIN: Record<string, string> = {
+  live: "Active",
+  probation: "On trial",
+  shadow: "Testing",
+};
+const CRITERIA_PLAIN: Record<string, string> = {
+  "c1_n_obs>=75": "Enough data gathered",
+  "c2_span>=7d": "Needs 7 days of data",
+  "c3_2windows_agree": "Holds up across two time periods",
+  "c4_ripple_no_red_flag": "No sign it hurts exits",
+};
+const HUMAN_DECIDES_NOTE =
+  "Nothing changes automatically — a human reviews and decides.";
+
+function plainLoopName(raw: string): string {
+  return LOOP_NAME_PLAIN[raw] ?? raw.replace(/_/g, " ");
+}
+function plainStage(raw: string): string {
+  return STAGE_PLAIN[raw] ?? raw;
+}
+function plainCriteria(raw: string): string {
+  return CRITERIA_PLAIN[raw] ?? raw;
+}
+
+// Plain one-line status per loop, derived from the fields the route already sends
+// (no query_loop_health.py change). Keeps the calibrator's freshness age.
+function plainSummary(loop: LoopHealth, c1b: C1bCard | null): string {
+  if (loop.loop_name === "c1b_feature_fix" && c1b?.present) {
+    const parts = [
+      "Gathering data",
+      `${c1b.criteria_met} of ${c1b.criteria_total} checks passed`,
+    ];
+    if (!c1b.time_met) parts.push("needs 7 days of data");
+    return parts.join(" · ");
+  }
+  if (loop.stage === "live" && loop.verdict === "GREEN") {
+    const m = loop.summary.match(/age\s+([\d.]+)\s*([smhd])/i);
+    if (m) {
+      const n = parseFloat(m[1]);
+      const num = Number.isInteger(n) ? String(n) : n.toFixed(1);
+      return `Running normally · refreshed ${num}${m[2]} ago`;
+    }
+    return "Running normally";
+  }
+  if (loop.verdict === "RED" || loop.verdict === "YELLOW") {
+    return `Hasn't proven it helps yet (${loop.pass_streak ?? 0} of 2 checks in a row)`;
+  }
+  return "Gathering data";
+}
+
 const VERDICT_DOT: Record<string, string> = {
   GREEN: "bg-accent-mint-strong",
   RED: "bg-accent-red",
@@ -77,7 +134,7 @@ function fmtAge(sec: number | null): string {
 }
 
 // ── one status row per loop ──────────────────────────────────────────────────
-function LoopRow({ loop }: { loop: LoopHealth }) {
+function LoopRow({ loop, c1b }: { loop: LoopHealth; c1b: C1bCard | null }) {
   return (
     <div className="flex items-center gap-3 rounded-md border border-border-subtle bg-bg-card px-3 py-2.5">
       <span
@@ -88,13 +145,13 @@ function LoopRow({ loop }: { loop: LoopHealth }) {
         )}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate font-mono text-caption font-semibold text-fg-primary">
-          {loop.loop_name}
+        <span className="truncate font-sans text-caption font-semibold text-fg-primary">
+          {plainLoopName(loop.loop_name)}
         </span>
-        <span className="text-micro text-fg-muted">{loop.summary}</span>
+        <span className="text-micro text-fg-muted">{plainSummary(loop, c1b)}</span>
       </div>
       <Pill tone={STAGE_TONE[loop.stage] ?? "neutral"} size="sm">
-        {loop.stage}
+        {plainStage(loop.stage)}
       </Pill>
     </div>
   );
@@ -124,7 +181,7 @@ function AxisBar({
           {cur ?? "—"}
           <span className="text-fg-dim"> / {bar ?? "—"}</span>
           <span className={cn("ml-2", met ? "text-accent-mint-strong" : "text-accent-amber")}>
-            {met ? "met ✓" : "accruing"}
+            {met ? "✓" : "gathering"}
           </span>
         </span>
       </div>
@@ -142,19 +199,19 @@ function C1bReadiness({ c1b }: { c1b: C1bCard }) {
   return (
     <Card padding="sm" className="border-border-strong">
       <CardHeader>
-        <CardTitle>C1b Feature-Fix · Readiness</CardTitle>
+        <CardTitle>Feature fix — gathering data to prove it&apos;s safe</CardTitle>
         <Pill intent={c1b.ready_for_review ? "active" : "warn"} size="sm">
-          {c1b.ready_for_review ? "ready for review" : "accruing"}
+          {c1b.ready_for_review ? "Ready for review" : "Gathering data"}
         </Pill>
       </CardHeader>
 
       <div className="flex flex-col gap-3">
-        <AxisBar label="observations" cur={c1b.n_obs} bar={c1b.n_bar} met={c1b.count_met} />
-        <AxisBar label="span (days)" cur={c1b.span_days} bar={c1b.span_bar} met={c1b.time_met} />
+        <AxisBar label="Data gathered" cur={c1b.n_obs} bar={c1b.n_bar} met={c1b.count_met} />
+        <AxisBar label="Days of data" cur={c1b.span_days} bar={c1b.span_bar} met={c1b.time_met} />
 
         <div className="flex flex-col gap-1 border-t border-border-subtle pt-2.5">
           <span className="text-micro uppercase tracking-wider text-fg-muted">
-            criteria · {c1b.criteria_met}/{c1b.criteria_total}
+            Checks · {c1b.criteria_met} of {c1b.criteria_total} passed
           </span>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {Object.entries(c1b.criteria).map(([name, ok]) => (
@@ -162,15 +219,13 @@ function C1bReadiness({ c1b }: { c1b: C1bCard }) {
                 <span className={ok ? "text-accent-mint-strong" : "text-accent-amber"}>
                   {ok ? "✓" : "○"}
                 </span>
-                <span className="font-mono text-fg-muted">{name}</span>
+                <span className="font-sans text-fg-muted">{plainCriteria(name)}</span>
               </span>
             ))}
           </div>
         </div>
 
-        {c1b.note && (
-          <p className="text-micro leading-relaxed text-fg-dim">{c1b.note}</p>
-        )}
+        <p className="text-micro leading-relaxed text-fg-dim">{HUMAN_DECIDES_NOTE}</p>
       </div>
     </Card>
   );
@@ -183,7 +238,7 @@ function Rollup({ data }: { data: MemoryIntelResponse }) {
   return (
     <Card padding="sm">
       <CardHeader>
-        <CardTitle>Memory &amp; Intelligence</CardTitle>
+        <CardTitle>Learning brain</CardTitle>
         <span className="text-micro text-fg-muted">updated {fmtAge(data.replica_age_seconds)}</span>
       </CardHeader>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -196,7 +251,7 @@ function Rollup({ data }: { data: MemoryIntelResponse }) {
           {(["live", "probation", "shadow"] as const).map((stage) =>
             s[stage] ? (
               <Pill key={stage} tone={STAGE_TONE[stage]} size="sm">
-                {s[stage]} {stage}
+                {s[stage]} {plainStage(stage).toLowerCase()}
               </Pill>
             ) : null,
           )}
@@ -254,11 +309,11 @@ export function MemoryIntelSection() {
     return (
       <div className="p-4 md:p-6 lg:px-8">
         <EmptyState
-          title={data?.error ? "Loop health unavailable" : "No learning loops registered"}
+          title={data?.error ? "Learning brain unavailable" : "No learning loops yet"}
           body={
             data?.error
-              ? `Could not read loop_health: ${data.error}`
-              : "The loop_health table has no rows yet — the brain has no active learning loops to report."
+              ? `Couldn't load the learning loops right now: ${data.error}`
+              : "The learning brain has no active loops to report yet."
           }
         />
       </div>
@@ -273,11 +328,11 @@ export function MemoryIntelSection() {
 
       <section className="space-y-1.5">
         <h3 className="px-0.5 text-micro uppercase tracking-wider text-fg-muted">
-          Loops ({data.loops.length})
+          Learning loops ({data.loops.length})
         </h3>
         <div className="space-y-1.5">
           {data.loops.map((loop) => (
-            <LoopRow key={loop.loop_name} loop={loop} />
+            <LoopRow key={loop.loop_name} loop={loop} c1b={data.c1b} />
           ))}
         </div>
       </section>

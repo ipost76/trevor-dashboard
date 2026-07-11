@@ -61,6 +61,13 @@ interface ShadowRegistryResponse {
   error?: string;
 }
 
+// Strip trailing internal code suffixes — (S3-Pxx)/(P06)/(HMM+DS)/(A-F)/(Guard+Gate)
+// (RM-HUB-POLISH-B2, display-only). Proven safe: every base name is unique after
+// stripping, so no two shadows collapse into an ambiguous name.
+function plainName(display: string): string {
+  return display.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
 function fmtReplicaAge(sec: number | null): string {
   if (sec === null || sec === undefined || !Number.isFinite(sec)) return "unknown";
   if (sec < 60) return `${Math.floor(sec)}s ago`;
@@ -93,24 +100,24 @@ function ShadowRow({ t }: { t: ShadowRegistryTable }) {
     status === "ACTIVE"
       ? "bg-accent-mint-strong"
       : status === "STALE" || status === "BROKEN"
-        ? "bg-accent-red"
+        ? "bg-accent-gold"
         : "bg-fg-faint";
   const pill =
     status === "ACTIVE" ? (
-      <Pill intent="active" size="sm">ACTIVE</Pill>
+      <Pill intent="active" size="sm">Running normally</Pill>
     ) : status === "STALE" ? (
-      <Pill intent="error" size="sm">STALE</Pill>
+      <Pill intent="warn" size="sm">Hasn&apos;t updated lately</Pill>
     ) : status === "BROKEN" ? (
-      <Pill intent="error" size="sm">BROKEN</Pill>
+      <Pill intent="warn" size="sm">Not recording</Pill>
     ) : (
-      <Pill tone="neutral" size="sm" className="text-fg-faint">DORMANT</Pill>
+      <Pill tone="neutral" size="sm" className="text-fg-faint">Inactive</Pill>
     );
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-md border px-3 py-2 transition-colors duration-fast",
         status === "STALE" || status === "BROKEN"
-          ? "border-accent-red/40 bg-bg-card"
+          ? "border-accent-gold/40 bg-bg-card"
           : status === "ACTIVE"
             ? "border-border-subtle bg-bg-card"
             : "border-border-subtle bg-bg-card opacity-75",
@@ -119,7 +126,7 @@ function ShadowRow({ t }: { t: ShadowRegistryTable }) {
       <span aria-hidden className={cn("mt-1 h-2 w-2 shrink-0 self-start rounded-pill", dot)} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-2 text-caption">
-          <span className="truncate font-sans font-semibold text-fg-primary">{t.display}</span>
+          <span className="truncate font-sans font-semibold text-fg-primary">{plainName(t.display)}</span>
           {t.retired && (
             <span className="shrink-0 font-sans text-micro uppercase tracking-wider text-fg-faint">
               retired
@@ -179,7 +186,7 @@ export function ShadowOverview() {
   if (registry?.error) {
     return (
       <div className="p-4 md:p-6 lg:px-8">
-        <EmptyState title="Failed" body={registry.error} />
+        <EmptyState title="Couldn't load" body={registry.error} />
       </div>
     );
   }
@@ -194,35 +201,37 @@ export function ShadowOverview() {
         </span>
         <span className="text-fg-faint">·</span>
         <span>
-          {registry?.total ?? tables.length} shadows
+          {registry?.total ?? tables.length} background tests
           {alarmCount > 0 ? (
-            <span className="text-accent-red"> · {alarmCount} need attention</span>
-          ) : null}
+            <span className="text-accent-gold"> · {alarmCount} worth a look</span>
+          ) : (
+            <span> · all running normally</span>
+          )}
         </span>
       </div>
 
       {/* Honest framing of the slimmed view. */}
       <p className="font-sans text-micro leading-relaxed text-fg-muted">
-        A light inventory — what shadows exist and whether they&apos;re alive. Deep per-shadow
-        stats ($-rank, divergence, win-rate) now live in CC recon, not the Hub.
+        A quick list of every background test and whether it&apos;s still running.
+        Detailed stats are done elsewhere.
       </p>
 
       {loading && tables.length === 0 ? (
         <Skeleton className="h-48 w-full" />
       ) : tables.length === 0 ? (
-        <EmptyState title="No shadows" body="The registry returned no shadow tables." />
+        <EmptyState title="No background tests" body="No background tests found." />
       ) : (
         <div className="space-y-4">
           {/* ── Alarms: registered active but not writing ────────────────── */}
           {alarms.length > 0 && (
-            <section className="space-y-1.5 rounded-md border border-accent-red/40 bg-accent-red/5 p-3">
-              <h3 className="flex items-center gap-2 font-sans text-caption font-semibold text-accent-red">
+            <section className="space-y-1.5 rounded-md border border-accent-gold/40 bg-accent-gold/5 p-3">
+              <h3 className="flex items-center gap-2 font-sans text-caption font-semibold text-accent-gold">
                 <span aria-hidden>⚠</span>
-                {alarms.length} need attention — registered active but not writing
+                {alarms.length} worth a look — should be running but hasn&apos;t updated
               </h3>
               <p className="font-sans text-micro leading-relaxed text-fg-muted">
-                STALE = has rows but silent well beyond its own write cadence; BROKEN = expected
-                to write but has zero rows. Check the writer.
+                &ldquo;Hasn&apos;t updated lately&rdquo; doesn&apos;t always mean broken — a quick
+                check on the source will tell.
               </p>
               <div className="space-y-1.5">
                 {alarms.map((t) => (
@@ -235,12 +244,12 @@ export function ShadowOverview() {
           {/* ── Active (alive) ───────────────────────────────────────────── */}
           <section className="space-y-1.5">
             <h3 className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-              Active ({active.length})
+              Running normally ({active.length})
             </h3>
             {active.length > 0 ? (
               active.map((t) => <ShadowRow key={t.table_name} t={t} />)
             ) : (
-              <p className="font-sans text-micro text-fg-faint">No active shadows.</p>
+              <p className="font-sans text-micro text-fg-faint">Nothing running right now.</p>
             )}
           </section>
 
@@ -257,7 +266,7 @@ export function ShadowOverview() {
                   "transition-colors duration-fast hover:border-accent-cyan-soft/40",
                 )}
               >
-                {showDormant ? "Hide dormant" : `Show dormant (${dormant.length})`}
+                {showDormant ? "Hide inactive" : `Show inactive (${dormant.length})`}
               </button>
               {showDormant && (
                 <div className="space-y-1.5">
