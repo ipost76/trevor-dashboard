@@ -1,8 +1,6 @@
 "use client";
 import * as React from "react";
 import { ShadowOverview } from "./shadow-overview";
-import { LessonsSection } from "@/components/docs/lessons-section";
-import { JournalSection } from "@/components/docs/journal-section";
 
 /**
  * /intel zone view — Shadow / Lessons / Journal.
@@ -48,10 +46,6 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
     // deleted; IMPACT's shared /api/shadow/registry route stays (SHADOW + Health
     // depend on it). A stale ?tab=promote|impact|daily-edge deep link falls
     // through to Shadow.
-    case "lessons":
-      return <LessonsSection />;
-    case "journal":
-      return <JournalSection />;
     default:
       return <ShadowOverview />;
   }
