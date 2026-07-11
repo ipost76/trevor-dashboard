@@ -9,9 +9,7 @@ import {
   FilterChips,
   BottomSheet,
   HapticButton,
-  LiveValue,
 } from "@/components/ui";
-import { useLiveTerminal } from "@/lib/live-terminal";
 import { TrendingUp } from "lucide-react";
 
 // RM-PNL P01 (2026-05-29): Auto Capital = REALIZED-only headline.
@@ -67,6 +65,17 @@ interface AutoState {
   data_available: boolean;
 }
 
+// RM-HUB-POLISH B1: the subset of /api/auto/trades?type=open fields the
+// client-side floating recompute needs (both synced and thin heartbeat cards
+// carry these). Marks come from /api/prices.
+interface OpenPos {
+  ticker: string;
+  direction: string;
+  entry_price: number;
+  leverage: number;
+  notional_usd: number;
+}
+
 const WINDOWS: ReadonlyArray<{ key: WindowKey; label: string }> = [
   { key: "today", label: "Today" },
   { key: "yesterday", label: "Yest" },
@@ -95,6 +104,12 @@ function fmtDay(iso: string): string {
     day: "numeric",
   });
 }
+
+// RM-HUB-POLISH B1: signed-USD glance formatter (U+2212 minus), matching the
+// prior RM-PNL secondary-line convention. `$0.00` for exactly zero.
+function fmtUsd(n: number): string {
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
+}
 const LABEL_TO_KEY: Record<string, WindowKey> = Object.fromEntries(
   WINDOWS.map((w) => [w.label, w.key]),
 ) as Record<string, WindowKey>;
@@ -107,11 +122,13 @@ export function CapitalHero() {
   // Default window = Today.
   const [windowLabel, setWindowLabel] = React.useState<string>("Today");
 
-  // B6 (RM-LIVE): flash-on-refresh flag, default OFF (NEXT_PUBLIC_LIVE_TERMINAL).
-  // OFF → render the existing JSX verbatim (byte-identical to B0). ON → route the
-  // equity figure through <LiveValue> so it flashes mint/red when the existing
-  // ~15s /api/auto/state refresh changes it. NO new data, NO WS, NO faster poll.
-  const live = useLiveTerminal();
+  // RM-HUB-POLISH B1 (2026-07-11): aggregate FLOATING P&L, computed client-side
+  // from live open positions + marks — independent of the retired Observatory
+  // heartbeat (whose death made the old `data.unrealized_usd` read $0.00 for any
+  // real floating amount). Three honest states: a real number (open positions
+  // priced), 0 (genuinely nothing open), or null → "—" (open positions exist but
+  // the trades/prices fetch is unavailable). NEVER a hardcoded 0 / fake balance.
+  const [floating, setFloating] = React.useState<number | null>(null);
 
   // WA-P2: custom date-range state. `customStart/customEnd` are the APPLIED range
   // (drive the API fetch); `draftStart/draftEnd` are the in-sheet picker values
@@ -156,6 +173,87 @@ export function CapitalHero() {
     };
   }, [stateUrl]);
 
+  // RM-HUB-POLISH B1: recompute aggregate FLOATING $ from live data, heartbeat-
+  // independent. Reads the SAME routes the ACTIVE card uses: /api/auto/trades
+  // ?type=open (positions carry entry/leverage/notional/direction) + /api/prices
+  // (marks). Dollar form of computeRoe (active-position-card.tsx:94-102):
+  //   floating$ = Σ (directional/entry) × leverage × notional_usd
+  // notional_usd is MARGIN, so the ×leverage factor is REQUIRED (verified against
+  // the replica: pnl_pct == computeRoe exactly; notional == margin, not size).
+  // Any un-priceable position, an errored trades payload, or a failed fetch →
+  // null ("—"); zero open positions → 0 ($0.00, genuinely nothing floating).
+  React.useEffect(() => {
+    let cancelled = false;
+    const computeFloating = async () => {
+      try {
+        const tRes = await fetch("/api/auto/trades?type=open&limit=50", {
+          cache: "no-store",
+        });
+        if (cancelled) return;
+        if (!tRes.ok) return void setFloating(null);
+        const tj = (await tRes.json()) as {
+          positions?: OpenPos[];
+          error?: string;
+        };
+        if (cancelled) return;
+        // An errored trades response returns {positions:[], error} at HTTP 200 —
+        // treat as unavailable ("—"), NOT as a genuine zero-open $0.00.
+        if (tj.error) return void setFloating(null);
+        const positions = tj.positions ?? [];
+        if (positions.length === 0) return void setFloating(0);
+
+        const tickers = [
+          ...new Set(positions.map((p) => p.ticker).filter(Boolean)),
+        ];
+        const pRes = await fetch(`/api/prices?tickers=${tickers.join(",")}`, {
+          cache: "no-store",
+        });
+        if (cancelled) return;
+        if (!pRes.ok) return void setFloating(null);
+        const pj = (await pRes.json()) as {
+          prices?: Record<string, { price?: number }>;
+        };
+        if (cancelled) return;
+        const marks: Record<string, number> = {};
+        for (const [t, v] of Object.entries(pj.prices ?? {})) {
+          const px = v?.price;
+          if (typeof px === "number" && Number.isFinite(px) && px > 0) {
+            marks[t] = px;
+          }
+        }
+
+        let sum = 0;
+        for (const p of positions) {
+          const mark = marks[p.ticker];
+          // Any position we can't price (missing/zero mark, or missing
+          // entry/notional) → the aggregate is incomplete → honest "—", never a
+          // partial sum and never a fabricated 0.
+          if (
+            typeof mark !== "number" ||
+            !p.entry_price ||
+            typeof p.notional_usd !== "number"
+          ) {
+            return void setFloating(null);
+          }
+          const lev = p.leverage || 1;
+          const directional =
+            p.direction === "LONG" ? mark - p.entry_price : p.entry_price - mark;
+          sum += (directional / p.entry_price) * lev * p.notional_usd;
+        }
+        if (!cancelled) setFloating(sum);
+      } catch {
+        // Fetch/parse failure → honest "—" (never a stale or fabricated number).
+        if (!cancelled) setFloating(null);
+      }
+    };
+    computeFloating();
+    const id = setInterval(computeFloating, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
   // WA-P2 validation: both dates set, end ≥ start, neither in the future. String
   // compare on YYYY-MM-DD is chronologically correct. Apply stays disabled until
   // this holds; single-day (start === end) is allowed.
@@ -190,8 +288,6 @@ export function CapitalHero() {
   const realized = data?.realized ?? ZERO;
   const realizedPct = data?.realized_pct ?? ZERO;
   const realizedCount = data?.realized_count ?? ZERO;
-  const equity = data?.equity_usd ?? data?.equity ?? 0;
-  const unrealized = data?.unrealized_usd ?? 0;
   const openExposure = data?.open_exposure_usd ?? 0;
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
@@ -203,23 +299,10 @@ export function CapitalHero() {
   const headlinePct = realizedPct[win] ?? null;
   const headlineCount = realizedCount[win] ?? 0;
 
-  // Flat greyed text for unrealized — deliberately NOT green/red, so it never
-  // reads as part of the booked number. Plain muted mono with an explicit sign.
-  const unrealStr = `${unrealized > 0 ? "+" : unrealized < 0 ? "−" : ""}$${Math.abs(
-    unrealized,
-  ).toFixed(2)}`;
-
-  // EQT-A3 (2026-06-07): the account-value line MIRRORS real HL — show HL's
-  // accountValue AS-IS (no de-float). It's sourced server-side from the
-  // Observatory heartbeat (`account_value_usd`, Wave A1), so the prior EQT-D1
-  // `equity - unrealized` de-float is gone (Ghost: "everything mirrors real HL").
-  // When the real-HL value is briefly unreachable the API serves the last-known
-  // figure flagged `equity_stale`; when it has never been observed
-  // (`equity_available:false`, e.g. A1 not yet live) we render "—" rather than a
-  // virtual/DB number. The unrealized split stays on the sub-line below.
-  const equityAvailable = data?.equity_available ?? false;
-  const equityStale = data?.equity_stale ?? false;
-  const liveEquity = equity;
+  // RM-HUB-POLISH B1: total session P&L = window realized + live floating. Null
+  // (→ "—") whenever floating is unavailable — a total can't be honestly summed
+  // from an unknown floating.
+  const total = floating === null ? null : headlinePnl + floating;
 
   return (
     <Card padding="lg" className="card-elevated space-y-4">
@@ -296,31 +379,40 @@ export function CapitalHero() {
             ariaLabel="Realized P&L time window"
           />
 
-          {/* ── Greyed secondary block: honest cash + floating glance (2 lines) ── */}
+          {/* ── Real-P&L trio (RM-HUB-POLISH B1): realized (window-tied) + live ──
+              floating + total. Replaces the retired-heartbeat equity "—" line —
+              the Hub has no HL creds so an account value can't be known; real P&L
+              can (floating computed client-side, see effect above). Floating/Total
+              render "—" when floating is unavailable — never a fabricated $0.00. */}
           <div className="space-y-1.5 border-t border-border-subtle pt-3">
-            <div className="flex flex-wrap items-baseline gap-2">
-              {/* B6: equity flashes mint/red when the existing 15s refresh changes
-                  it (ON); the value/formatter are unchanged — same liveEquity,
-                  same `$x.xx`, `—` when unavailable. OFF renders the prior span
-                  verbatim. Resting <LiveValue> is text-fg-primary, matching. */}
-              {live ? (
-                <LiveValue
-                  value={equityAvailable ? liveEquity : null}
-                  format={(n) => `$${n.toFixed(2)}`}
-                  className="text-h3 font-bold"
-                />
-              ) : (
-                <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
-                  {equityAvailable ? `$${liveEquity.toFixed(2)}` : "—"}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-0.5">
+                <span className="block font-sans text-micro uppercase tracking-wider text-fg-muted">
+                  Realized
                 </span>
-              )}
-              <span className="font-sans text-micro text-fg-muted">live account</span>
-              {equityStale && (
-                <span className="font-sans text-micro text-accent-gold">· stale</span>
-              )}
+                <span className="font-mono text-body font-bold tabular-nums text-fg-primary">
+                  {fmtUsd(headlinePnl)}
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                <span className="block font-sans text-micro uppercase tracking-wider text-fg-muted">
+                  Floating
+                </span>
+                <span className="font-mono text-body font-bold tabular-nums text-fg-primary">
+                  {floating === null ? "—" : fmtUsd(floating)}
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                <span className="block font-sans text-micro uppercase tracking-wider text-fg-muted">
+                  Total
+                </span>
+                <span className="font-mono text-body font-bold tabular-nums text-fg-primary">
+                  {total === null ? "—" : fmtUsd(total)}
+                </span>
+              </div>
             </div>
             <div className="font-mono text-caption tabular-nums text-fg-muted">
-              {unrealStr} floating · {openCount} open · ${openExposure.toFixed(2)} deployed
+              {openCount} open · ${openExposure.toFixed(2)} deployed
             </div>
           </div>
 
