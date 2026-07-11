@@ -52,5 +52,5 @@ export default async function MemoryPage({ searchParams }: MemoryPageProps) {
   const { tab } = await searchParams;
   const useNew = await isHubRedesignMemoryOn();
   if (!useNew) return <MemoryDisabled />;
-  return <MemoryZoneView subtab={tab ?? "brain"} />;
+  return <MemoryZoneView subtab={tab ?? "intel"} />;
 }

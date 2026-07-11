@@ -98,7 +98,9 @@ EXPLICIT_CATEGORY: dict[str, str] = {
     "ALO_ENTRY_ENABLED":                 "Execution",
     "TICKER_DISCOVERY":                  "Execution",
     "HUB_BRAIN_EDIT_ENABLED":            "Execution",
-    "HUB_AGGRESSIVE_TOGGLE_ENABLED":     "Execution",
+    # HUB_AGGRESSIVE_TOGGLE_ENABLED removed from the control-panel category map
+    # (RM-HUB-INTEL B2, 2026-07-11) — the aggressive Hub UI + route were deleted;
+    # the auto_config row is preserved and tombstoned (=false), not dropped.
     "HUB_AUTOTRADER_TOGGLE_ENABLED":     "Execution",
     "HUB_CONFIRM_CYCLES_TOGGLE_ENABLED": "Execution",
     "HUB_LIVE_PARTIALS_TOGGLE_ENABLED":  "Execution",

@@ -97,19 +97,20 @@ export const ZONES: ReadonlyArray<Zone> = [
     accent: "amber",
   },
   {
+    // RM-HUB-INTEL B2 (2026-07-11): the 4 raw MEMORY sub-tabs (Brain / Memory /
+    // ChromaDB / Aggressive) + their sections were stripped and replaced by a
+    // single quick-glance "Memory & Intelligence" loop_health dashboard. Now a
+    // single-view zone — `<ZoneSubTabs />` auto-hides (no subTabs), exactly like
+    // the /docs zone. The Aggressive Hub surface (section + /api/memory/aggressive
+    // route + query_aggressive.py / set_aggressive.py helpers) was removed here
+    // too; the aggressive_mode DB tables/columns are preserved and
+    // HUB_AGGRESSIVE_TOGGLE_ENABLED is tombstoned (=false), never dropped.
     id: "memory",
     href: "/memory",
     label: "Memory",
     shortLabel: "Memory",
     icon: Database,
     accent: "cyan",
-    subTabs: [
-      { key: "brain", label: "Brain" },
-      { key: "memory", label: "Memory" },
-      { key: "chromadb", label: "ChromaDB" },
-      { key: "aggressive", label: "Aggressive" },
-    ],
-    defaultSubTab: "brain",
   },
   {
     // B4: Health home — the promoted <HealthSection> view (single-view zone).
