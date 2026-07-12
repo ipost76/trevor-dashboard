@@ -78,6 +78,16 @@ UTC = timezone.utc
 # never a divide-by-zero).
 EQUITY_BASE_FLOOR = 1.0
 
+# RM-EQUITY-RESTORE B1 (2026-07-11): staleness ceiling for the LIVE account-value
+# display. The bot writes auto_config.LIVE_ACCOUNT_VALUE_USD every ~5-min monitor
+# cycle (reusing the drift-check's already-fetched HL equity — display-only, NOT a
+# new HL call), but the Hub reads a ~20-min tailsync replica, so a HEALTHY value is
+# routinely 25-30 min old (writer gap + replica sync lag). 2700s (~2× replica
+# cadence + writer cadence + grace) blanks the card to "—" only when the writer OR
+# the sync is genuinely dead ≥45 min — it never false-blanks a healthy pipeline. A
+# tighter gate (e.g. 900s) would render "—" most of the time on a healthy system.
+LIVE_ACCOUNT_VALUE_STALE_S = 2700
+
 
 def _fetch_hl() -> dict | None:
     """Read live HL state in ONE round-trip — UNIFIED balance + unrealized PnL.
@@ -402,6 +412,44 @@ def _per_ticker_enabled() -> bool:
         return False
 
 
+def _live_account_value(
+    conn: sqlite3.Connection, now_utc: datetime
+) -> tuple[float | None, int | None, bool]:
+    """The TRUE live account value (total $ on Hyperliquid), read from
+    auto_config.LIVE_ACCOUNT_VALUE_USD (RM-EQUITY-RESTORE B1).
+
+    DISPLAY-ONLY, read-only. The bot already fetched this equity in its ~5-min
+    monitor drift-check and writes it to auto_config every cycle — this NEVER
+    calls Hyperliquid and NEVER writes. Returns (value, age_seconds, stale).
+
+    Freshness is gauged from the row's `updated_at` (UTC 'YYYY-MM-DD HH:MM:SS'):
+    older than LIVE_ACCOUNT_VALUE_STALE_S (2700s ≈ 45min — sized for the ~20-min
+    tailsync replica + ~5-min writer cadence) → stale=True, so the UI renders "—"
+    rather than a frozen number as current. A missing / unparseable-timestamp /
+    unreadable row → stale=True. There is NO secondary backstop: a stale
+    equity_snapshots value would be even older (hourly), so honest "—" wins over a
+    staler number presented as live.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value, updated_at FROM auto_config "
+            "WHERE key='LIVE_ACCOUNT_VALUE_USD'"
+        ).fetchone()
+        if row is None or row[0] is None:
+            return (None, None, True)
+        value = float(row[0])
+        raw_ts = str(row[1]).strip() if row[1] is not None else ""
+        try:
+            updated = datetime.strptime(raw_ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+        except (ValueError, TypeError):
+            # Value present but no parseable timestamp → can't prove freshness → "—".
+            return (value, None, True)
+        age = int((now_utc - updated).total_seconds())
+        return (value, age, age > LIVE_ACCOUNT_VALUE_STALE_S)
+    except Exception:
+        return (None, None, True)
+
+
 def main() -> int:
     out = {
         # --- realized-only P&L model (RM-PNL P01) ---
@@ -417,6 +465,11 @@ def main() -> int:
         "open_exposure_usd": 0.0,
         "unrealized_usd": 0.0,
         "open_count": 0,
+        # RM-EQUITY-RESTORE B1: true live account value (auto_config
+        # LIVE_ACCOUNT_VALUE_USD). Fail-safe default → stale → UI renders "—".
+        "live_account_value_usd": None,
+        "live_account_value_age_s": None,
+        "live_account_value_stale": True,
         # --- legacy / shared fields (back-compat) ---
         "capital_usd": 0.0,
         "live_capital_usd": 0.0,
@@ -505,6 +558,11 @@ def main() -> int:
             #     real start-of-day equity via get_equity_at — untouched.
             # None for any window whose base is missing → UI renders "—".
             now_utc = datetime.now(UTC)
+
+            # RM-EQUITY-RESTORE B1: true live account value + freshness, read from
+            # the SAME mode=ro connection (display-only, no HL call, never writes).
+            live_av, live_av_age, live_av_stale = _live_account_value(conn, now_utc)
+
             starts = _et_window_starts(now_utc)
             base_starts = {
                 "today": max(starts["today"], epoch),
@@ -598,6 +656,12 @@ def main() -> int:
             "open_exposure_usd": round(float(open_row["notional"] or 0.0), 4),
             "unrealized_usd": unrealized,
             "open_count": open_count,
+            # RM-EQUITY-RESTORE B1: true live account value + freshness (real $ or,
+            # when stale/missing, stale=True → the UI renders "—", never a frozen
+            # number). Additive; flows through the route's `...value` spread.
+            "live_account_value_usd": live_av,
+            "live_account_value_age_s": live_av_age,
+            "live_account_value_stale": live_av_stale,
             # --- legacy / shared back-compat ---
             "capital_usd": 0.0,             # vestigial; no starting-capital concept
             "live_capital_usd": 0.0,        # vestigial; collapses Hub "of $X cap" line

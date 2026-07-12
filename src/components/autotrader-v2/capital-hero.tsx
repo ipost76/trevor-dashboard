@@ -55,6 +55,13 @@ interface AutoState {
   open_exposure_usd: number;
   unrealized_usd: number;
   open_count: number;
+  // RM-EQUITY-RESTORE B1: true live account value (the bot writes it to
+  // auto_config.LIVE_ACCOUNT_VALUE_USD every ~5-min cycle). Real $ or null; the
+  // server-side `stale` flag (threshold 2700s ≈ 45min, sized for the ~20-min
+  // tailsync replica + ~5-min writer cadence) gates the render → "—" when stale.
+  live_account_value_usd?: number | null;
+  live_account_value_age_s?: number | null;
+  live_account_value_stale?: boolean;
   // EQT-A3: real-HL equity sourcing flags (set by /api/auto/state).
   equity_available?: boolean;
   equity_stale?: boolean;
@@ -304,6 +311,17 @@ export function CapitalHero() {
   // from an unknown floating.
   const total = floating === null ? null : headlinePnl + floating;
 
+  // RM-EQUITY-RESTORE B1: the TRUE live account value (total $ on Hyperliquid).
+  // Real $ only when present AND fresh — the server-side stale flag (threshold
+  // 2700s ≈ 45min, accounts for the ~20-min tailsync replica + ~5-min writer
+  // cadence) is authoritative. Otherwise null → "—". Never a fabricated or frozen
+  // number (default-stale on a missing field via the `?? true`).
+  const liveAccountValue =
+    data?.live_account_value_usd != null &&
+    !(data?.live_account_value_stale ?? true)
+      ? data.live_account_value_usd
+      : null;
+
   return (
     <Card padding="lg" className="card-elevated space-y-4">
       <div className="flex items-center justify-between">
@@ -378,6 +396,31 @@ export function CapitalHero() {
             onChange={handleWindowChange}
             ariaLabel="Realized P&L time window"
           />
+
+          {/* ── Account value (RM-EQUITY-RESTORE B1) — the TRUE live balance: the ──
+              total $ on Hyperliquid, sourced from auto_config.LIVE_ACCOUNT_VALUE_USD
+              (the bot writes it every ~5-min cycle; the Hub reads it from the
+              replica — NO HL call). Real $ or "—" when stale (>45min) / missing —
+              never a fabricated number, never a frozen value presented as live.
+              Separate from the realized/floating/total P&L trio below. */}
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              Account value{" "}
+              <span className="text-fg-faint">· live HL balance</span>
+            </span>
+            {liveAccountValue === null ? (
+              <span
+                className="font-mono text-h3 font-bold tabular-nums text-fg-muted"
+                title="live account value unavailable — writer/sync stale (>45min) or unset"
+              >
+                —
+              </span>
+            ) : (
+              <span className="font-mono text-h3 font-bold tabular-nums text-fg-primary">
+                ${liveAccountValue.toFixed(2)}
+              </span>
+            )}
+          </div>
 
           {/* ── Real-P&L trio (RM-HUB-POLISH B1): realized (window-tied) + live ──
               floating + total. Replaces the retired-heartbeat equity "—" line —
