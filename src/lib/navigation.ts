@@ -85,6 +85,7 @@ export const ZONES: ReadonlyArray<Zone> = [
     // decommissioned; Ghost now drives all edge/tweak analysis through CC recon.
     subTabs: [
       { key: "shadow", label: "Shadow" },
+      { key: "promotions", label: "Promotions" },
     ],
     defaultSubTab: "shadow",
   },

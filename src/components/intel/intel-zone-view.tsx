@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { ShadowOverview } from "./shadow-overview";
+import { PromotionsList } from "./promotions-list";
 
 /**
  * /intel zone view — Shadow / Lessons / Journal.
@@ -37,6 +38,12 @@ export function IntelZoneView({ subtab }: IntelZoneViewProps) {
   switch (subtab) {
     case "shadow":
       return <ShadowOverview />;
+    // RM-SHADOW-PROMOTE B2 (2026-07-12): the "Promotions" tab — a glance list of
+    // shadows the nightly readiness gate flagged (READY / IN PROGRESS), reading
+    // /api/shadow/promotions (query_promotion_ready.py, replica mode=ro). Display
+    // only; empty until B1's off-loop VM job populates promotion_ready.
+    case "promotions":
+      return <PromotionsList />;
     // RM-DECOM B5 (2026-07-08): the "Promote" tab was removed (a single-component
     // Wilson-LB approximation presented as a promotion verdict; no promote action
     // exists). H1 (2026-07-09): the "Impact" ($-rank, <ShadowRankSection>) and
