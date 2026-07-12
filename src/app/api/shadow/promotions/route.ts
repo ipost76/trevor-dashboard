@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
 
-// GET /api/shadow/promotions — PROMOTIONS subtab backend (RM-SHADOW-PROMOTE B2).
+// GET /api/shadow/promotions — PROMOTIONS subtab backend (RM-SHADOW-PROMOTE B2/B4).
 //
-// Returns the at-a-glance readiness list: shadows the nightly readiness gate
-// (built C1, populated by B1's off-loop VM job) flagged 'ready' or 'in_progress'.
-// 'removed' rows are filtered out of the active view (kept in the DB as history).
+// Ghost's two-sided worklist: shadows B3's nightly gate SURFACED — promote
+// candidates (state='ready') + cull candidates (state='removed'). Accruing
+// shadows (the auto-stamped in_progress flood) are filtered out at the source
+// (query_promotion_ready.py: WHERE surfaced=1, else state IN ('ready','removed')).
 //
-// READ-ONLY. The Hub displays only — every state transition is B1's job. The
-// query is fail-soft: an empty/missing table returns [] (never 500), so the
-// subtab renders its "nothing ready yet" empty-state when B1 hasn't run yet.
+// READ-ONLY. The Hub displays only — every state transition + the surfaced flag
+// is B3's VM job. Fail-soft: an empty/missing table (or missing surfaced column
+// pre-B3) returns [] (never 500), so the subtab renders its friendly empty-state.
 //
 // Auth: middleware-enforced cookie session.
 
@@ -19,11 +20,12 @@ export const dynamic = "force-dynamic";
 interface Promotion {
   shadow_name: string;
   description: string | null;
-  state: "ready" | "in_progress";
+  state: "ready" | "in_progress" | "removed";
   n_distinct: number | null;
   expectancy_usd: number | null;
   verdict_summary: string | null;
   first_ready_at: string | null;
+  updated_at: string | null;
 }
 
 interface PromotionsResponse {
