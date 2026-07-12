@@ -76,8 +76,8 @@ export const ZONES: ReadonlyArray<Zone> = [
   {
     id: "intel",
     href: "/intel",
-    label: "Intelligence",
-    shortLabel: "Intel",
+    label: "Shadows",
+    shortLabel: "SHADOWS",
     icon: Brain,
     accent: "magenta",
     // H1 (2026-07-09): the "Impact" ($-rank) + "Daily Edge" tabs were removed —
