@@ -105,7 +105,7 @@ OVERRIDE: dict[str, dict] = {
     # distance) are NOT here — they never landed in the live DB (committed on disk,
     # awaiting the deferred trevor.service restart) and auto-surface once present.
     "correlation_cluster_shadow":     dict(display="Correlation Cluster Cap",    function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=True),
-    "aggressive_mode_entry_shadow":   dict(display="Aggressive Mode Entry",      function="Entry",   ts_col="created_at",      ts_kind="iso",  expected_active=True),
+    "aggressive_mode_entry_shadow":   dict(display="Aggressive Mode Entry",      function="Entry",   ts_col="created_at",      ts_kind="iso",  expected_active=False),
     "winner_cell_upweight_shadow":    dict(display="Winner-Cell Upweight",       function="Scoring", ts_col="created_at",      ts_kind="iso",  expected_active=False),
     "sizing_v2_multi_strategy_shadow":dict(display="Sizing V2 Multi-Strategy",   function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=False),
     "perfect_setup_trade_summary_shadow": dict(display="Perfect-Setup Trade Summary", function="Scoring", ts_col="ts",        ts_kind="iso",  expected_active=False),  # B2: one-shot analytical snapshot — dormant by design, not STALE (clears the false "worth a look" alarm)
