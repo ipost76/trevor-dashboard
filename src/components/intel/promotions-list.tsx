@@ -116,11 +116,28 @@ function PromoteRow({ p }: { p: Promotion }) {
 }
 
 // A cull-side row: red framing + name + reason tag + desc + metrics + the WHY
-// detail (from verdict_summary) so Ghost knows what he's culling.
+// detail (from verdict_summary), plus a CC-driven dismiss control.
 function RemoveRow({ p }: { p: Promotion }) {
   const bits = metricBits(p);
   const { tag, detail } = parseRemoveReason(p.verdict_summary);
   const intent = reasonIntent(tag);
+  const [copied, setCopied] = React.useState(false);
+
+  // Dismiss is CC-DRIVEN — the Hub is READ-ONLY to the VM `trevor.db` (there is
+  // no sanctioned gateway op for promotion_ready). Tapping copies the shadow
+  // ref; a CC prompt sets acknowledged=1 (via `ssh vm`), which drops the row
+  // from this worklist on the next replica sync while the permanent tombstone
+  // stays in shadow_history.db. This button NEVER writes the DB.
+  const markHandled = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(p.shadow_name);
+    } catch {
+      // clipboard blocked (denied / non-secure ctx) — the visible name is the fallback
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2500);
+  }, [p.shadow_name]);
+
   return (
     <div className="flex items-start gap-3 rounded-md border border-accent-red/40 bg-bg-card px-3 py-2 transition-colors duration-fast">
       <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-pill bg-accent-red" />
@@ -150,9 +167,22 @@ function RemoveRow({ p }: { p: Promotion }) {
           </span>
         )}
       </div>
-      <span className="mt-0.5 shrink-0">
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
         <Pill intent="error" size="sm">REMOVE</Pill>
-      </span>
+        <button
+          type="button"
+          onClick={markHandled}
+          title="Copies the shadow ref. The Hub is read-only — dismiss it from this list via a CC prompt (sets acknowledged=1); the permanent tombstone stays in the ledger."
+          className={cn(
+            "rounded border px-2 py-1 font-sans text-micro transition-colors duration-fast",
+            copied
+              ? "border-accent-mint-strong/40 text-accent-mint-strong"
+              : "border-border-subtle text-fg-muted hover:border-accent-red/40 hover:text-accent-red/90",
+          )}
+        >
+          {copied ? "✓ ref copied" : "Mark handled via CC"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -293,6 +323,11 @@ export function PromotionsList() {
                 intent="error"
                 colorClass="text-accent-red"
               />
+              <p className="font-sans text-micro leading-relaxed text-fg-muted">
+                Actionable worklist. &ldquo;Mark handled via CC&rdquo; copies the shadow ref — a
+                CC prompt sets acknowledged=1 and it leaves this list (permanent tombstone kept
+                in the ledger). The Hub never writes the DB.
+              </p>
               <div className="space-y-1.5">
                 {removed.map((p) => (
                   <RemoveRow key={p.shadow_name} p={p} />

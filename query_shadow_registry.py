@@ -108,7 +108,7 @@ OVERRIDE: dict[str, dict] = {
     "aggressive_mode_entry_shadow":   dict(display="Aggressive Mode Entry",      function="Entry",   ts_col="created_at",      ts_kind="iso",  expected_active=True),
     "winner_cell_upweight_shadow":    dict(display="Winner-Cell Upweight",       function="Scoring", ts_col="created_at",      ts_kind="iso",  expected_active=False),
     "sizing_v2_multi_strategy_shadow":dict(display="Sizing V2 Multi-Strategy",   function="Risk",    ts_col="created_at",      ts_kind="iso",  expected_active=False),
-    "perfect_setup_trade_summary_shadow": dict(display="Perfect-Setup Trade Summary", function="Scoring", ts_col="ts",        ts_kind="iso",  expected_active=True),
+    "perfect_setup_trade_summary_shadow": dict(display="Perfect-Setup Trade Summary", function="Scoring", ts_col="ts",        ts_kind="iso",  expected_active=False),  # B2: one-shot analytical snapshot — dormant by design, not STALE (clears the false "worth a look" alarm)
 }
 
 # Non-"shadow"-named adjuncts to fold into the enumeration (LIKE '%shadow%' misses them).
