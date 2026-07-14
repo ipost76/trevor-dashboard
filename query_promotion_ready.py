@@ -13,6 +13,13 @@ FILTER = the surfaced set; `surfaced` is the single display authority (B4):
 The column is detected at query time; a manual in_progress only appears once
 B3/Ghost sets its surfaced=1.
 
+DISMISS (B2, RM-SHADOW-CULL): acknowledged rows are dropped —
+`… AND (acknowledged=0 OR acknowledged IS NULL)` when the `acknowledged` column
+exists (column-detected, fail-soft like `surfaced`). A handled removal Ghost
+marks acknowledged=1 (CC-driven `ssh vm` write; the Hub never writes the DB)
+leaves the active REMOVE worklist while its permanent tombstone stays in
+shadow_history.db. Absent column (pre-replication) → no filter → all rows show.
+
 Fields surfaced (a glanceable subset of the C1 schema — deep stats live on
 /health, shadow inventory on the Shadow tab):
   shadow_name · description · state · n_distinct · expectancy_usd ·
@@ -108,6 +115,18 @@ def _read_promotions(conn: sqlite3.Connection) -> list[dict]:
     else:
         # Pre-B3: hardcoded literal states (no user input) — accruing dropped.
         where = "state IN ('ready', 'removed')"
+
+    # B2 (RM-SHADOW-CULL): drop acknowledged rows so the REMOVE list is an
+    # actionable worklist, not a growing archive. Ghost marks a handled removal
+    # acknowledged=1 (CC-driven `ssh vm` write — the Hub stays read-only) and it
+    # leaves the active worklist while its tombstone stays in shadow_history.db.
+    # Column-detected + fail-soft (mirrors the `surfaced` guard): absent on the
+    # WSL replica during the ~20-min tailsync gap after the VM ALTER → no filter
+    # appended → every surfaced row still shows (treated as acknowledged=0),
+    # never a 500. The dismiss control is REMOVE-only, so only state='removed'
+    # rows ever carry acknowledged=1 in practice.
+    if _has_column(conn, "promotion_ready", "acknowledged"):
+        where += " AND (acknowledged = 0 OR acknowledged IS NULL)"
 
     # ready → in_progress(manual) → removed; within each, most-recently-flagged
     # first. Removed/in_progress rows carry no first_ready_at, so COALESCE onto
