@@ -10,10 +10,22 @@
 
 > Current-state operating layout (post-migration). TREVOR runs on **two boxes / two Termius tabs**. Some older dated entries below predate the migration and describe the Hub co-residing with the bot on the VM — those are historical records, not the current layout.
 
-- **This box = TrevorHub (the "WSL Hub").** Ghost's PC — `ghost@Ghost`, hostname `Ghost`, tailnet `100.125.247.52`. **One machine, two names:** also reachable as **`trevorhub-wsl`** via Tailscale MagicDNS (same box). Runs the **Hub dashboard** (Next.js 15) at `/home/ghost/projects/trevor-dashboard`. This is Ghost's default cockpit — monitoring, audits, recon, dashboard work.
+- **This box = TrevorHub (the "WSL Hub").** Ghost's PC — `ghost@Ghost`, hostname `Ghost`. **One physical PC, but TWO tailnet nodes** (each runs its own tailscaled; verified RECON-INFRA_HEALTH-010, 2026-07-14): the WSL distro is node **`trevorhub-wsl` / `100.113.60.59` / linux** (SSH user `ghost`; the Hub + the public Funnel live here), and the Windows host is node **`ghost` / `100.79.103.74` / windows** (Windows OpenSSH on `:22` + the netsh portproxy). (The old "tailnet 100.125.247.52 / same box, two names" line was stale pre-migration.) Runs the **Hub dashboard** (Next.js 15) at `/home/ghost/projects/trevor-dashboard`. This is Ghost's default cockpit — monitoring, audits, recon, dashboard work.
 - **The other box = the VM.** `trevor@trevor-prime`, **GCP e2-standard-2** (8 GB RAM, 2 vCPU), tailnet `100.93.113.117`, domain **`trevor-prime.com`**. Runs the **live bot** (`trevor.service`), the exit engine, signals, and the live **`trevor.db`**. All bot code lives here — bot repo `/home/trevor/trevor`, branch `main`.
 - **The pipe (`ssh vm`).** From this WSL tab, **`ssh vm`** reaches the VM (login user `ghost`, passwordless sudo, trevor-group). Use it **read-only** — "run a command on the VM, read the result": audits, status, recon. **NOT** for editing VM files over the pipe; bot-file edits run in the **VM tab** directly.
 - **The live `trevor.db` lives on the VM — never on this PC.** Network SQLite = corruption + latency risk. Dashboard reads reach it through the **gateway/pipe**, not a local DB copy.
+
+---
+
+## WSL Hub Access & Keepalive
+
+> Current-state. Load-bearing infra that went silently dead for 34 days before anyone noticed (RECON-INFRA_HEALTH-010 / HUB-BOOT-03, 2026-07-14).
+
+- **The distro must be pinned UP or the whole Hub goes dark.** A WSL2 distro is reaped ~30s after its last *attached* `wsl.exe` client exits (`.wslconfig vmIdleTimeout=-1` keeps the shared utility VM, but NOT an individual distro). When `TrevorHub` Stops, its `tailscaled` + `sshd` + dashboard go with it — the public Funnel loses its backend (`ERR_SSL_PROTOCOL_ERROR`) and both SSH paths die. One cause, all symptoms.
+- **Keepalive mechanism (Windows host, NOT in this repo):** Windows Task Scheduler task **`WSL-Keepalive`** → `C:\Users\ipost\.wsl-ssh\wsl-keepalive-launch.ps1`, a supervisor holding one blocking `wsl.exe` client per distro (apify/RhondaDev/TrevorHub/Terrence), restarting any that drops (30s loop). **Self-heals without a reboot** (B1, 2026-07-14): a **periodic 5-min TimeTrigger** relaunches a dead supervisor; `MultipleInstancesPolicy=Parallel` + a `Global\WSLKeepaliveSupervisor` mutex make “is a supervisor alive?” an OS fact (no zombie can lock out a relaunch); `RestartCount=3`; it appends to `wsl-keepalive.log`. Runs as InteractiveToken (relies on autologon). If the Hub is dark, from the Windows tab: `Start-ScheduledTask -TaskName WSL-Keepalive`.
+- **Correct SSH target for the WSL tab:** **`ghost@100.113.60.59:2232`** (the distro's own tailnet IP, direct — preferred). Also works: **`ghost@100.79.103.74:2232`** via the Windows netsh portproxy, but that path depends on a **hardcoded WSL NAT IP** (`172.27.110.9` today) that drifts on every distro restart — the `WSL SSH Portproxy Refresh` task re-tracks it. **NOT `:22`** on either node (distro `:22` is closed; Windows `:22` is a *different* OpenSSH server, user `ipost`).
+- **Public path:** `https://trevorhub-wsl.tail2bf7a3.ts.net` → Tailscale **Funnel public ingress `209.177.145.97`** → the distro's `tailscaled` → `http://127.0.0.1:3000` (HTTP 307). Only the linux node has Funnel capability. On distro start, `tailscaled` takes ~2.5 min to re-stabilize the Funnel (a resolv.conf/DNS-trample race).
+- **⚠️ OPEN exposure gap (no owner yet — recon rec #2):** there is **no off-box monitor**. The only Funnel watchdog (`trevor-funnel-watch.timer`) runs *inside* the distro, so it cannot fire when the distro itself is down — the 2026-07-14 outage went undetected until Ghost saw a browser error. A probe running OUTSIDE the distro (VM or phone) checking the public URL + SSH is still needed.
 
 ---
 
