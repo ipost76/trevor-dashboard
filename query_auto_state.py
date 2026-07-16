@@ -2,6 +2,20 @@
 """
 Consolidated AUTO state for /api/auto/state.
 
+🚨 TWO-CLOCK RULE (B1-ET-DAY-BOUNDARY, 2026-07-16) — LOAD-BEARING, do not mix:
+  · `auto_trades.closed_at` / `opened_at`  = naive EASTERN wall-clock
+    (`datetime.now()` on the ET VM). Compare these against RAW ET-calendar
+    strings — NEVER convert to UTC. (created_at == opened_at + 4h proves it.)
+  · `auto_trades.created_at`                = real UTC (SQLite CURRENT_TIMESTAMP).
+  · `equity_snapshots.ts`                   = real UTC.
+  · `auto_config.*.updated_at`              = real UTC.
+  This file compares BOTH clocks: `_et_window_starts` builds naive-ET boundaries
+  for the `closed_at` buckets (compute_windows / compute_custom); the SEPARATE
+  `_utc_window_starts` builds UTC boundaries for the equity BASE (get_equity_at →
+  equity_snapshots.ts). A boundary in the wrong clock silently shifts the day 4h
+  (drops the 00:00–03:59-ET window from "today"). NEVER re-introduce an
+  `.astimezone(UTC)` on a `closed_at`/`opened_at` boundary.
+
 RM-PNL P01 (2026-05-29): REALIZED-ONLY headline P&L model.
 
   THE MODEL (intentional, non-standard — see Hub CLAUDE.md preference):
@@ -13,8 +27,9 @@ RM-PNL P01 (2026-05-29): REALIZED-ONLY headline P&L model.
     regardless of its floating gain/loss; its committed notional is deployed
     capital, NOT P&L. Unrealized NEVER enters any realized number.
   - `realized` is bucketed across 5 windows — today / yesterday / week / month
-    / all — on EASTERN-CALENDAR boundaries (closed_at is stored UTC; we compute
-    ET-midnight boundaries via zoneinfo and convert to UTC for comparison).
+    / all — on EASTERN-CALENDAR boundaries. `closed_at` is naive Eastern (see the
+    two-clock rule above), so we compare it against RAW ET-midnight strings — NO
+    timezone conversion. (The equity BASE denominator is a separate UTC path.)
   - `unrealized_usd` = live HL floating PnL of open positions — a SEPARATE,
     de-emphasized ("greyed") field for the UI only. It is never summed into a
     realized total.
@@ -156,13 +171,44 @@ def _fetch_hl() -> dict | None:
 
 
 def _et_window_starts(now_utc: datetime) -> dict:
-    """ET-calendar window-start boundaries, returned as UTC-naive
-    'YYYY-MM-DD HH:MM:SS' strings to compare against the UTC `closed_at` column.
+    """ET-calendar window-start boundaries as NAIVE-EASTERN 'YYYY-MM-DD HH:MM:SS'
+    strings, compared LEXICALLY against the naive-Eastern `closed_at` column — NO
+    timezone conversion (closed_at is ET wall-clock; see the two-clock rule at the
+    top of this file). Mirrors query_auto_trades._range_bounds: pure ET calendar-
+    date arithmetic (`date + timedelta`), so a DST transition inside the window
+    never drifts the wall-clock boundary off midnight.
+
+    🚨 For the `closed_at` buckets ONLY (compute_windows). The equity BASE
+    denominator uses the SEPARATE `_utc_window_starts` (equity_snapshots.ts is UTC).
 
     today      = ET-midnight of the current ET day
     yesterday  = [prev ET-midnight, today ET-midnight)   (a RANGE, not open-ended)
     week       = ET-midnight 6 days before today (rolling 7-day incl. today)
     month      = ET-midnight 29 days before today (rolling 30-day incl. today)
+    """
+    today = now_utc.astimezone(ET).date()
+
+    def et(d) -> str:  # a date -> its ET-midnight naive string
+        return f"{d.isoformat()} 00:00:00"
+
+    return {
+        "today": et(today),
+        "yesterday": et(today - timedelta(days=1)),
+        "week": et(today - timedelta(days=6)),
+        "month": et(today - timedelta(days=29)),
+    }
+
+
+def _utc_window_starts(now_utc: datetime) -> dict:
+    """UTC instants of each ET-midnight window start, as naive-UTC
+    'YYYY-MM-DD HH:MM:SS' strings — for the equity BASE ONLY (get_equity_at reads
+    `equity_snapshots.ts`, which is REAL UTC; see the two-clock rule at the top).
+
+    🚨 DO NOT feed these to any `closed_at`/`opened_at` comparison — those are
+    naive Eastern (use `_et_window_starts`). ET-midnight of the current ET day is
+    04:00 (EDT) / 05:00 (EST) UTC, so this is genuinely a different string than the
+    ET boundary above; querying `equity_snapshots.ts <= <this>` returns the account
+    equity at the real-world start of the ET window.
     """
     now_et = now_utc.astimezone(ET)
     today0 = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -181,8 +227,10 @@ def _et_window_starts(now_utc: datetime) -> dict:
 def compute_windows(rows, now_utc: datetime) -> dict:
     """Bucket closed-LIVE trades into realized windows on ET-calendar boundaries.
 
-    `rows`: iterable of (closed_at_str_UTC, pnl_usd_or_None,
-    partial_pnl_realized_or_None). REALIZED ONLY — callers pass closed live
+    `rows`: iterable of (closed_at_str_ET, pnl_usd_or_None,
+    partial_pnl_realized_or_None). `closed_at` is naive EASTERN (two-clock rule);
+    the window starts from `_et_window_starts` are naive ET too. REALIZED ONLY —
+    callers pass closed live
     rows; this function never sees open positions or unrealized PnL, so no
     realized total can ever include floating P&L.
 
@@ -194,8 +242,8 @@ def compute_windows(rows, now_utc: datetime) -> dict:
     banked partial but a NULL final leg still contributes its partial.
 
     Returns {realized:{...}, realized_count:{...}, realized_unknown_count:int}.
-    String comparison on the zero-padded 'YYYY-MM-DD HH:MM:SS' UTC format is
-    chronologically correct.
+    Lexical comparison on the fixed-width 'YYYY-MM-DD HH:MM:SS' ET strings
+    (window starts + closed_at, same naive-ET clock) is chronologically correct.
     """
     b = _et_window_starts(now_utc)
     sums = {"today": 0.0, "yesterday": 0.0, "week": 0.0, "month": 0.0, "all": 0.0}
@@ -237,16 +285,27 @@ def compute_windows(rows, now_utc: datetime) -> dict:
     }
 
 
-def _parse_custom_args(argv) -> tuple[str, str] | None:
-    """Map two picked dates (argv: [start, end], 'YYYY-MM-DD') → an ET-bucketed
-    (start_ts, end_ts) UTC span (WA-P2). start = ET-midnight(start day); end =
-    ET-midnight(end day + 1), EXCLUSIVE — the SAME boundary convention the presets
-    use (see _et_window_starts). Single-day (start == end) → exactly that one ET
-    day. zoneinfo handles DST at the midnight boundary.
+def _parse_custom_args(
+    argv,
+) -> tuple[tuple[str, str], tuple[str, str]] | None:
+    """Map two picked dates (argv: [start, end], 'YYYY-MM-DD') → a custom span,
+    returned in BOTH clocks (WA-P2 + the two-clock rule at the top of this file):
 
-    Returns (start_ts_utc, end_ts_utc) or None when absent / malformed / end<start
-    — the caller then emits NO `custom` window (never a garbage span). NO new P&L
-    math: this only defines a (start, end), exactly like the preset bucketing.
+        ((et_start, et_end), (utc_start, utc_end))
+
+    · `et_*`  = naive-EASTERN 'YYYY-MM-DD HH:MM:SS' — for compute_custom, which
+      buckets `closed_at` (naive Eastern). Pure ET calendar-date arithmetic,
+      mirroring query_auto_trades._range_bounds (DST-safe, no wall-clock drift).
+    · `utc_*` = the UTC instants of those same ET midnights — for the equity BASE
+      only (get_equity_at → equity_snapshots.ts, real UTC).
+
+    start = ET-midnight(start day); end = ET-midnight(end day + 1), EXCLUSIVE —
+    the SAME boundary convention the presets use. Single-day (start == end) →
+    exactly that one ET day.
+
+    Returns None when absent / malformed / end<start — the caller then emits NO
+    `custom` window (never a garbage span). NO new P&L math: this only defines a
+    (start, end), exactly like the preset bucketing.
     """
     if len(argv) < 2:
         return None
@@ -259,27 +318,37 @@ def _parse_custom_args(argv) -> tuple[str, str] | None:
         return None
     # WA-P2: no future dates (defense-in-depth — the UI also caps both inputs at
     # ET-today via max=). end > ET-today rejects any range that touches the future;
-    # end == ET-today is allowed (a range ending today is valid).
+    # end == ET-today is allowed (a range ending today is valid). ET-date compare.
     if ed > datetime.now(UTC).astimezone(ET).date():
         return None
+    # ET bounds → compute_custom (closed_at is naive Eastern; NO conversion).
+    et_bounds = (
+        f"{sd.isoformat()} 00:00:00",
+        f"{(ed + timedelta(days=1)).isoformat()} 00:00:00",
+    )
+    # UTC bounds → the equity BASE only (equity_snapshots.ts is real UTC).
     start_et = datetime(sd.year, sd.month, sd.day, tzinfo=ET)
     end_et = datetime(ed.year, ed.month, ed.day, tzinfo=ET) + timedelta(days=1)
-    return (
+    utc_bounds = (
         start_et.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         end_et.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
     )
+    return (et_bounds, utc_bounds)
 
 
 def compute_custom(rows, start_ts: str, end_ts: str) -> dict:
     """Realized P&L over an ARBITRARY [start_ts, end_ts) span (WA-P2).
 
-    SAME numerator rule as compute_windows (NUM-B2/B3) — each row's realized =
-    `pnl_usd` (final-leg net) + `partial_pnl_realized` (banked scale-out
-    profits, COALESCE NULL→0); a row is "unknown" and excluded ONLY when it
-    booked no number at all (pnl_usd NULL *and* partial null/zero). `end_ts` is
-    EXCLUSIVE (ET-midnight of end-day+1), so the boundary convention matches the
-    presets exactly (a custom 'last 7 days' is byte-identical to the 1W preset).
-    NO new P&L math — just a different (start, end) than the preset buckets.
+    `start_ts`/`end_ts` are naive-EASTERN strings (the `et_bounds` from
+    _parse_custom_args) compared LEXICALLY against the naive-Eastern `closed_at` —
+    NO timezone conversion (two-clock rule). SAME numerator rule as compute_windows
+    (NUM-B2/B3) — each row's realized = `pnl_usd` (final-leg net) +
+    `partial_pnl_realized` (banked scale-out profits, COALESCE NULL→0); a row is
+    "unknown" and excluded ONLY when it booked no number at all (pnl_usd NULL *and*
+    partial null/zero). `end_ts` is EXCLUSIVE (ET-midnight of end-day+1), so the
+    boundary convention matches the presets exactly (a custom 'last 7 days' is
+    byte-identical to the 1W preset). NO new P&L math — just a different (start,
+    end) than the preset buckets.
 
     Returns {realized: float, count: int, unknown: int}.
     """
@@ -507,8 +576,12 @@ def main() -> int:
             cfg = {r["key"]: r["value"] for r in cfg_rows}
 
             # V2 cutover epoch (B3): both HISTORICAL reads below (closed_rows +
-            # total_count_row) are floored at the epoch. closed_at is a UTC
-            # 'YYYY-MM-DD HH:MM:SS' string, so string >= is chronological.
+            # total_count_row) are floored at the epoch. The epoch (auto_config
+            # AUTO_CUTOVER_EPOCH) is a UTC string while closed_at is naive EASTERN
+            # (two-clock rule), so this floor carries a ~4h skew band AT the
+            # 2026-07-02 cutover ONLY — immaterial now (every live trade is weeks
+            # post-cutover). PRESERVED exactly (Ghost's cutover law; the reference
+            # query_auto_trades.py floors identically). Lexical >= is chronological.
             epoch = _cutover_epoch(conn)
 
             # PCT-DENOM-FIX3 (2026-07-03): the POST-cutover STARTING CAPITAL — the
@@ -521,8 +594,9 @@ def main() -> int:
             # stored state. None (empty table) → route renders "—" (fail-open).
             cutover_base = _cutover_starting_capital(conn, epoch)
 
-            # REALIZED source: every closed LIVE trade (closed_at UTC + pnl_usd).
-            # Bucketed in Python on ET-calendar boundaries. Paper trades excluded.
+            # REALIZED source: every closed LIVE trade (closed_at naive EASTERN +
+            # pnl_usd). Bucketed in Python on ET-calendar boundaries (raw ET string
+            # compare, _et_window_starts). Paper trades excluded.
             closed_rows = conn.execute(
                 "SELECT closed_at, pnl_usd, partial_pnl_realized FROM auto_trades "
                 "WHERE trade_mode='live' AND status='closed' AND closed_at >= ?",
@@ -536,9 +610,13 @@ def main() -> int:
                 "FROM auto_trades WHERE status='open'"
             ).fetchone()
 
+            # R2 (B1-ET-DAY-BOUNDARY): trade_mode='live' matches the window queries
+            # (closed_rows) — the only window query that was missing it. Benign
+            # today (0 paper rows past the cutover) but a paper trade would silently
+            # inflate the 'total' otherwise.
             total_count_row = conn.execute(
-                "SELECT COUNT(*) AS n FROM auto_trades WHERE status='closed' "
-                "AND closed_at >= ?",
+                "SELECT COUNT(*) AS n FROM auto_trades "
+                "WHERE trade_mode='live' AND status='closed' AND closed_at >= ?",
                 (epoch,),
             ).fetchone()
 
@@ -563,7 +641,11 @@ def main() -> int:
             # the SAME mode=ro connection (display-only, no HL call, never writes).
             live_av, live_av_age, live_av_stale = _live_account_value(conn, now_utc)
 
-            starts = _et_window_starts(now_utc)
+            # 🚨 UTC window starts for the equity BASE — get_equity_at reads
+            # equity_snapshots.ts (REAL UTC), NOT closed_at. This is the SEPARATE
+            # clock from the ET boundaries compute_windows uses for closed_at (two-
+            # clock rule). Feeding ET boundaries here would query snapshots 4h early.
+            starts = _utc_window_starts(now_utc)
             base_starts = {
                 "today": max(starts["today"], epoch),
                 "yesterday": max(starts["yesterday"], epoch),
@@ -578,18 +660,21 @@ def main() -> int:
 
             # WA-P2 (2026-06-12): optional custom date-range window. The two picked
             # dates arrive as argv (start, end 'YYYY-MM-DD'); _parse_custom_args maps
-            # them to an ET-bucketed (start_ts, end_ts) span. Its start-of-window base
-            # is read by the SAME get_equity_at (A-P1's denominator) inside this SAME
-            # mode=ro connection — zero new denominator math.
-            custom_span = _parse_custom_args(sys.argv[1:])
+            # them to BOTH clocks (two-clock rule): `custom_et` (naive-ET) buckets the
+            # closed_at rows in compute_custom; `custom_utc` (real UTC) reads the
+            # start-of-window base via the SAME get_equity_at (A-P1's denominator)
+            # inside this SAME mode=ro connection — zero new denominator math.
+            _custom = _parse_custom_args(sys.argv[1:])
+            custom_et = _custom[0] if _custom is not None else None
+            custom_utc = _custom[1] if _custom is not None else None
             # PCT-DENOM-FIX3: floor the custom span's start at the cutover epoch too
             # — a range reaching before the cutover clamps to the epoch and uses the
             # POST-cutover starting capital (cutover_base, ~$69.74); a fully-post-epoch
             # range keeps its own start-of-window equity. Matches the epoch-floored
-            # numerator.
+            # numerator. UTC start (custom_utc) vs the UTC epoch — both UTC, coherent.
             custom_base = None
-            if custom_span:
-                cstart = max(custom_span[0], epoch)
+            if custom_utc is not None:
+                cstart = max(custom_utc[0], epoch)
                 custom_base = (
                     cutover_base if cstart == epoch else get_equity_at(conn, cstart)
                 )
@@ -606,14 +691,14 @@ def main() -> int:
         # WA-P2: fold the custom window into the SAME realized / realized_base /
         # realized_count dicts BEFORE the realized_pct loop below, so its % is
         # computed by the same code path as the presets (no separate calc).
-        if custom_span is not None:
+        if custom_et is not None:
             cwin = compute_custom(
                 (
                     (r["closed_at"], r["pnl_usd"], r["partial_pnl_realized"])
                     for r in closed_rows
                 ),
-                custom_span[0],
-                custom_span[1],
+                custom_et[0],  # naive-ET bounds vs naive-ET closed_at
+                custom_et[1],
             )
             realized["custom"] = cwin["realized"]
             realized_base["custom"] = custom_base
