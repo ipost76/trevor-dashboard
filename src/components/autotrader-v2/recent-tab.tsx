@@ -49,29 +49,18 @@ function fmtHold(min: number | null | undefined): string {
   return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
 }
 
-function parseUTC(ts: string | null | undefined): Date {
-  if (!ts) return new Date(NaN);
-  let s = ts.includes("T") ? ts : ts.replace(" ", "T");
-  if (!/Z$|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
-  return new Date(s);
-}
-
-function fmtClosedAt(ts: string | null | undefined): string {
-  const d = parseUTC(ts);
-  if (!Number.isFinite(d.getTime())) return "";
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  if (sameDay) return time;
-  const md = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${md} ${time}`;
+// closed_at is stored as EASTERN-LOCAL naive wall-clock ("YYYY-MM-DD HH:MM:SS",
+// no offset/Z) — written by Python datetime.now() on the America/New_York VM.
+// Render the raw HH:MM slice (24h): the value is ALREADY Eastern, so do NOT
+// parse it as UTC + re-localize — that was the 4-hour bug (15:21 EDT → 11:21).
+// The raw slice is browser-timezone-independent (a phone in any tz shows the
+// true ET close). A1 proof: created_at (SQLite CURRENT_TIMESTAMP = real UTC)
+// == opened_at/closed_at + exactly 4h on every row. Guarded: null/short/
+// malformed → "--:--" (never NaN, never an empty gap).
+function fmtEastern(ts: string | null | undefined): string {
+  if (typeof ts !== "string" || ts.length < 16) return "--:--";
+  const hhmm = ts.slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : "--:--";
 }
 
 export function RecentTab() {
@@ -189,16 +178,11 @@ export function RecentTab() {
             {filteredTrades.map((t) => (
               <li
                 key={t.id}
-                className="flex items-center justify-between gap-2 py-2 text-caption"
+                className="flex items-start justify-between gap-3 py-2.5"
               >
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Pill
-                    intent={t.trade_mode === "live" ? "live" : "warn"}
-                    size="sm"
-                  >
-                    {t.trade_mode}
-                  </Pill>
-                  <span className="font-bold tabular-nums">
+                {/* left column — line 1 identity (bold), line 2 meta (one line, never wraps) */}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-body font-bold tabular-nums text-fg-primary">
                     {t.ticker}{" "}
                     <span
                       className={
@@ -209,36 +193,39 @@ export function RecentTab() {
                     >
                       {t.direction}
                     </span>
-                  </span>
-                  <span className="text-fg-muted tabular-nums">
-                    {fmtHold(t.hold_duration_minutes)}
-                  </span>
-                  {t.closed_at && (
-                    <span
-                      className="font-mono text-fg-muted tabular-nums"
-                      title={t.closed_at}
-                    >
-                      · {fmtClosedAt(t.closed_at)}
+                  </div>
+                  {/* HH:MM (raw Eastern) · duration · exit_reason — single line,
+                      long reason ellipses (never wraps). min-w-0 is load-bearing
+                      for truncate to work inside the flex child. */}
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5 font-mono text-micro text-fg-muted tabular-nums">
+                    <span className="shrink-0" title={t.closed_at}>
+                      {fmtEastern(t.closed_at)}
                     </span>
-                  )}
-                  {t.exit_reason && (
-                    <span className="font-sans text-fg-faint">
-                      · {t.exit_reason}
-                    </span>
+                    <span className="shrink-0 text-fg-faint">·</span>
+                    <span className="shrink-0">{fmtHold(t.hold_duration_minutes)}</span>
+                    {t.exit_reason && (
+                      <>
+                        <span className="shrink-0 text-fg-faint">·</span>
+                        <span className="min-w-0 truncate">{t.exit_reason}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {/* fixed-width right P&L column so every row's % aligns on a common
+                    x. -100.00% (8 glyphs) is the sizing worst case; min-w is a floor
+                    not a cap → a rare >100% value extends left instead of clipping.
+                    The no-P&L pill lives in the SAME column so alignment holds. */}
+                <div className="min-w-[5rem] shrink-0 text-right">
+                  {t.pnl_pct != null ? (
+                    <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
+                  ) : (
+                    // B6-RECENT-GAPS / RM-RED-2 M10: closed trade w/ no captured
+                    // native P&L → "no P&L" neutral pill (never a misleading 0.00%).
+                    <Pill tone="neutral" size="sm" title="Closed — native P&L not captured">
+                      no P&L
+                    </Pill>
                   )}
                 </div>
-                {t.pnl_pct != null ? (
-                  <MoneyText value={t.pnl_pct} unit="%" size="md" showSign />
-                ) : (
-                  // B6-RECENT-GAPS: native P&L not captured (e.g. external_close)
-                  // → labeled "no P&L", never a misleading 0.00%. Row stays visible.
-                  // RM-RED-2 M10: label is "no P&L" (not "pending") — the trade IS
-                  // closed; only its captured P&L is missing. "pending" mis-read as a
-                  // stuck/open position and seeded a false orphan premise.
-                  <Pill tone="neutral" size="sm" title="Closed — native P&L not captured">
-                    no P&L
-                  </Pill>
-                )}
               </li>
             ))}
           </ul>
