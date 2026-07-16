@@ -41,6 +41,106 @@ ENV_VAR = "HUB_DOWNLOADS_WEBHOOK_URL"
 ENV_FILE = _REPO_ROOT / ".env.local"
 TIMEOUT_SECONDS = 30
 
+# --- Delivery format V2 (DELIVERY_FORMAT_V2) --------------------------------
+# Same flag name as the VM path ([B2]) so Ghost flips ONE concept for both boxes.
+# Default OFF -> the embed is byte-identical to the legacy shape below. ON ->
+# a standard delivery: title (resolved) + ET date/time, prose description dropped.
+DELIVERY_FORMAT_V2_ENV = "DELIVERY_FORMAT_V2"
+EMBED_COLOR = 0x5FB4CC  # refined cyan-soft, matches the hub aesthetic
+TITLE_CAP = 256  # Discord embed title limit
+DESC_CAP = 4096  # Discord embed description limit
+_H1_READ_BYTES = 8192  # bounded read — never slurp a large file to find a heading
+ET_ZONE = "America/New_York"
+
+
+def _format_v2_enabled() -> bool:
+    """True only when DELIVERY_FORMAT_V2 is explicitly truthy. Fail-closed OFF."""
+    try:
+        val = (os.environ.get(DELIVERY_FORMAT_V2_ENV) or "").strip().lower()
+    except Exception:
+        return False
+    return val in ("1", "true", "yes", "on")
+
+
+def _extract_h1(src: Path) -> str | None:
+    """Return the file's first Markdown H1 (`# Heading`), else None.
+
+    Size-bounded (reads at most _H1_READ_BYTES) and fully error-handled — a
+    binary, empty, unreadable, or heading-less file returns None and NEVER
+    raises. Title extraction must never break a delivery.
+    """
+    try:
+        with src.open("r", encoding="utf-8", errors="strict") as fh:
+            head = fh.read(_H1_READ_BYTES)
+    except Exception:
+        return None
+    for line in head.splitlines():
+        stripped = line.strip()
+        # exactly one leading '#' + a space (ATX H1, not '##'/'###')
+        if stripped.startswith("# "):
+            heading = stripped[2:].strip()
+            if heading:
+                return heading
+    return None
+
+
+def _is_clean_title(title: str | None) -> bool:
+    """Clean caller-title = present, single-line, within the title cap.
+
+    Concrete rule (B3): no newline AND len <= TITLE_CAP -> clean; otherwise
+    fall through to the file's H1. Guards against a prose blob mistakenly
+    passed as the title (the description was historically the prose slot).
+    """
+    if not title:
+        return False
+    t = title.strip()
+    return bool(t) and "\n" not in t and len(t) <= TITLE_CAP
+
+
+def _resolve_title(title: str | None, src: Path, basename: str) -> str:
+    """Fallback chain: clean caller title -> file H1 -> filename (sans ext)."""
+    if _is_clean_title(title):
+        return (title or "").strip()  # guard guarantees truthy; keeps type-checker happy
+    h1 = _extract_h1(src)
+    if h1:
+        return h1
+    return src.stem or basename
+
+
+def _delivery_timestamp_et() -> str:
+    """Post-time in Eastern, explicit ET, DST-robust (stdlib zoneinfo).
+
+    Matches the two-clock ET display convention; renders the SAME text on any
+    reader's screen (unlike Discord's native `timestamp`, which localizes).
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo(ET_ZONE)).strftime("%Y-%m-%d %I:%M %p ET")
+
+
+def _compose_embed(
+    title: str | None, description: str | None, basename: str, src: Path
+) -> dict:
+    """Build the Discord embed.
+
+    OFF (default) -> byte-identical to the legacy embed dict.
+    ON (DELIVERY_FORMAT_V2 truthy) -> title (resolved) + ET date/time; the
+    prose `description` is IGNORED (kept in the signature; callers unchanged).
+    """
+    if _format_v2_enabled():
+        return {
+            "title": _resolve_title(title, src, basename)[:TITLE_CAP],
+            "description": _delivery_timestamp_et()[:DESC_CAP],
+            "color": EMBED_COLOR,
+        }
+    # OFF: exact legacy shape — do not change these literals.
+    return {
+        "title": (title or basename)[:256],
+        "description": (description or "")[:4096],
+        "color": 0x5FB4CC,  # refined cyan-soft, matches the hub aesthetic
+    }
+
 
 def _read_webhook_url() -> str:
     """Return the hub's #downloads webhook URL from .env.local.
@@ -114,11 +214,7 @@ def post_file_sync(
 
     webhook_url = _read_webhook_url()  # raises if missing — intentional
     basename = src.name
-    embed = {
-        "title": (title or basename)[:256],
-        "description": (description or "")[:4096],
-        "color": 0x5FB4CC,  # refined cyan-soft, matches the hub aesthetic
-    }
+    embed = _compose_embed(title, description, basename, src)
     payload = {"payload_json": json.dumps({"embeds": [embed]})}
 
     try:
