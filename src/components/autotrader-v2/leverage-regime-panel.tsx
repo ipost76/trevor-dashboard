@@ -18,7 +18,6 @@ import {
   TrendingDown,
   Waves,
   Minus,
-  GitCompareArrows,
 } from "lucide-react";
 import { useLiveTerminal } from "@/lib/live-terminal";
 
@@ -30,8 +29,11 @@ import { useLiveTerminal } from "@/lib/live-terminal";
 //      ≥k×stop guarantee, and the conf/regime/vol multiplier breakdown (S2-P02).
 //   2. Current HMM regime per ticker (latest hmm_inference_log row).
 //   3. Margin utilization (live HL marginSummary).
-//   4. Regime-exit shadow comparison (exit_engine_shadow — would-be vs actual)
-//      so promotion can be judged.
+//
+// (The Regime-Exit Shadow sub-panel was removed from the AUTO tab 2026-07-15
+//  [B1-REMOVE-REGIME-PANEL] — Ghost's call, not a bug. The shadow SYSTEM,
+//  the /api/auto/leverage-regime route's regime_exit_shadow field, the DB
+//  table, and the bot-side logging all stay; only this render was cut.)
 //
 // This panel NEVER sends commands to the bot. It only GETs /api/auto/leverage-regime.
 // Matches the repo's data-fetching convention (raw fetch + setInterval); the
@@ -90,30 +92,6 @@ interface MarginState {
   error?: string;
 }
 
-interface ShadowRow {
-  id: number;
-  trade_id: number | null;
-  ticker: string;
-  direction: string | null;
-  regime: string | null;
-  check_time: string | null;
-  old_exit_action: string | null;
-  new_exit_action: string | null;
-  old_stop_price: number | null;
-  new_stop_price: number | null;
-  current_price: number | null;
-  pnl_pct: number | null;
-  divergent: boolean;
-}
-
-interface RegimeExitShadow {
-  available: boolean;
-  total: number;
-  divergent: number;
-  recent: ShadowRow[];
-  error?: string;
-}
-
 interface LeverageRegimeResponse {
   data_available: boolean;
   ts: number;
@@ -127,7 +105,6 @@ interface LeverageRegimeResponse {
   open_trades: LevTrade[];
   regimes: RegimeRow[];
   margin: MarginState;
-  regime_exit_shadow: RegimeExitShadow;
   // B2: true ⇒ live heartbeat membership; false ⇒ replica fallback.
   live?: boolean;
   error?: string;
@@ -249,7 +226,6 @@ export function LeverageRegimePanel() {
   const trades = data?.open_trades ?? [];
   const regimes = data?.regimes ?? [];
   const margin = data?.margin;
-  const shadow = data?.regime_exit_shadow;
 
   return (
     <div className="flex flex-col gap-4">
@@ -651,116 +627,6 @@ export function LeverageRegimePanel() {
               </div>
             )}
           </div>
-        )}
-      </Card>
-
-      {/* ── Regime-Exit Shadow (would-be vs actual) ───────────────────── */}
-      <Card padding="md">
-        <CardHeader>
-          <CardTitle>
-            <span className="flex flex-wrap items-center gap-2 uppercase tracking-wider">
-              <GitCompareArrows size={14} aria-hidden />
-              Regime-Exit Shadow
-              {shadow && (
-                <>
-                  <Pill tone="neutral" size="sm">
-                    {shadow.total} EVAL
-                  </Pill>
-                  {shadow.divergent > 0 && (
-                    <Pill intent="warn" size="sm">
-                      {shadow.divergent} DIVERGENT
-                    </Pill>
-                  )}
-                </>
-              )}
-            </span>
-          </CardTitle>
-        </CardHeader>
-
-        {loading && !data && <Skeleton className="h-20 w-full" />}
-
-        {shadow && !shadow.available && (
-          <div className="text-micro text-accent-gold">
-            shadow read degraded{shadow.error ? `: ${shadow.error}` : ""}
-          </div>
-        )}
-
-        {shadow && shadow.available && shadow.recent.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-1 py-6 text-center">
-            <GitCompareArrows size={24} className="opacity-20" aria-hidden />
-            <span className="text-caption text-fg-muted">No exit-shadow rows yet</span>
-            <span className="text-micro text-fg-faint">
-              Would-be vs actual exit decisions appear here as the regime-aware
-              exit engine evaluates open trades.
-            </span>
-          </div>
-        )}
-
-        {shadow && shadow.recent.length > 0 && (
-          <>
-            <p className="mb-2 text-micro text-fg-muted">
-              Production exit (actual) vs the regime-aware candidate (would-be) —
-              for judging promotion.
-            </p>
-            <ul className="divide-y divide-border-subtle">
-              {shadow.recent.map((s) => {
-                const v = regimeVisual(s.regime);
-                // One compact glance line per row (G4): ticker · dir · regime ·
-                // actual→would-be · pnl% · state. Boilerplate words cut; the
-                // old→new action divergence (gold when divergent) is the point.
-                return (
-                  <li
-                    key={s.id}
-                    className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-1.5 text-micro tabular-nums text-fg-muted"
-                  >
-                    <span className="text-caption font-bold tabular-nums">
-                      {s.ticker}{" "}
-                      <span
-                        className={
-                          s.direction === "LONG"
-                            ? "text-accent-mint"
-                            : "text-accent-red"
-                        }
-                      >
-                        {s.direction}
-                      </span>
-                    </span>
-                    <span className="text-fg-faint">·</span>
-                    <span className={`flex items-center gap-1 font-normal ${v.cls}`}>
-                      {v.icon}
-                      {s.regime ?? "—"}
-                    </span>
-                    <span className="text-fg-faint">·</span>
-                    <span className={s.divergent ? "text-accent-gold" : undefined}>
-                      {s.old_exit_action ?? "—"}→{s.new_exit_action ?? "—"}
-                    </span>
-                    {s.pnl_pct != null && (
-                      <>
-                        <span className="text-fg-faint">·</span>
-                        <span
-                          className={
-                            s.pnl_pct >= 0 ? "text-accent-mint" : "text-accent-red"
-                          }
-                        >
-                          {s.pnl_pct >= 0 ? "+" : ""}
-                          {Number(s.pnl_pct).toFixed(2)}%
-                        </span>
-                      </>
-                    )}
-                    {s.divergent ? (
-                      <Pill intent="warn" size="sm">
-                        DIVERGENT
-                      </Pill>
-                    ) : (
-                      <Pill tone="neutral" size="sm">
-                        EVAL
-                      </Pill>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </>
         )}
       </Card>
     </div>
