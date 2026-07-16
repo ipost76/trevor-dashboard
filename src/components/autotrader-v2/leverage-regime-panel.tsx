@@ -89,6 +89,9 @@ interface MarginState {
   margin_used: number;
   utilization_pct: number;
   total_ntl_pos: number;
+  // B2-MARGIN-REPLICA: age (seconds) of the equity snapshot backing this margin
+  // reading — badged `REPLICA ~Nm`. Absent when degraded.
+  age_seconds?: number;
   error?: string;
 }
 
@@ -566,6 +569,17 @@ export function LeverageRegimePanel() {
               Margin Utilization
             </span>
           </CardTitle>
+          {/* B2-MARGIN-REPLICA: margin is reconstructed from the litestream
+              replica; badge its age (same gold-micro pattern as the Leverage
+              card). Sourced from the payload's equity-snapshot age (UTC). */}
+          {margin?.age_seconds != null && (
+            <span
+              className="shrink-0 font-sans text-micro text-accent-gold"
+              title="Margin is reconstructed from the litestream replica — Σ posted margin over open trades ÷ the latest (≈hourly) equity snapshot. Age is time since that snapshot (UTC)."
+            >
+              REPLICA ~{fmtReplicaAge(margin.age_seconds)}
+            </span>
+          )}
         </CardHeader>
 
         {loading && !data && <Skeleton className="h-16 w-full" />}
@@ -623,7 +637,7 @@ export function LeverageRegimePanel() {
             ) : (
               <div className="text-micro text-accent-gold">
                 margin read degraded
-                {margin.error ? `: ${margin.error}` : " — HL unreachable"}
+                {margin.error ? `: ${margin.error}` : " — replica unavailable"}
               </div>
             )}
           </div>
