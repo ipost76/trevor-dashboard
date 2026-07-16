@@ -13,17 +13,20 @@ already lands in the bot DB but was never visible:
        ≥ k×stop liquidation-safety spot-check (k = LEVERAGE_LIQ_BUFFER_K).
   2. Current HMM regime per ticker — the latest `hmm_inference_log` row per
        ticker (predicted_state + probability + the full state-prob vector).
-  3. Margin utilization — live HL `marginSummary.totalMarginUsed / accountValue`
-       via the SAME `info.user_state` round-trip query_auto_state.py already uses.
+  3. Margin utilization — reconstructed from the litestream replica
+       (B2-MARGIN-REPLICA, 2026-07-15): margin_used = Σ `auto_trades.notional_usd`
+       (the POSTED MARGIN — NOT ÷ leverage) over open live trades, ÷ the latest
+       `equity_snapshots.equity`. The Observatory heartbeat that formerly fed this
+       was decommissioned in RM-DECOM (~2026-07-08).
   4. Regime-exit shadow comparison — `exit_engine_shadow` rows (would-be vs
        actual exit action, per S2-P04's parallel regime-aware-exit shadow). This
        is the semantically-correct "old vs new exit action + regime + divergent"
        table that exists today; it survives whatever S2-P04 finally names.
 
-NO ARGS. NO MUTATIONS. NO BOT COMMANDS. This script only reads:
-  - `auto_trades`, `hmm_inference_log`, `exit_engine_shadow`, `auto_config`
-    via a read-only sqlite URI (`file:...?mode=ro`), and
-  - the live HL `user_state` (read-only account query, one round-trip).
+NO ARGS. NO MUTATIONS. NO BOT COMMANDS. NO network I/O. This script only reads,
+via a read-only sqlite URI (`file:...?mode=ro`):
+  - `auto_trades`, `equity_snapshots`, `hmm_inference_log`, `exit_engine_shadow`,
+    `auto_config`.
 
 HONESTY NOTE (S2-P05): the three Stage-2 *leverage* columns
 (`leverage_at_entry`, `liq_distance_at_entry`, `lev_weight_breakdown_json`)
@@ -55,9 +58,10 @@ JSON output:
     "regimes": [
       { ticker, state, prob, all_probs:{...}, ts, age_seconds }
     ],
-    "margin": {
+    "margin": {                          # reconstructed from the replica (B2)
       "available": bool, "account_value": float, "margin_used": float,
-      "utilization_pct": float, "total_ntl_pos": float, "error": str? },
+      "utilization_pct": float, "total_ntl_pos": float,
+      "open_positions": int, "age_seconds": int?, "error": str? },
     "regime_exit_shadow": {
       "available": bool, "total": int, "divergent": int,
       "recent": [ {id, trade_id, ticker, direction, regime, check_time,
@@ -72,6 +76,7 @@ import json
 import sqlite3
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/home/trevor/trevor")
@@ -272,28 +277,125 @@ def fetch_regime_exit_shadow(conn) -> dict:
         }
 
 
-def fetch_margin() -> dict:
-    """W-H-P4-HUB (2026-06-09): margin utilization is now sourced from the
-    Observatory heartbeat in the Node route (/api/auto/leverage-regime), NOT a live
-    HL call here.
+def fetch_margin(conn) -> dict:
+    """Margin utilization, reconstructed from the litestream replica.
 
-    The Hub box has NO `hyperliquid` module and NO HL creds, so the prior live
-    `info.user_state` round-trip ALWAYS failed with `ModuleNotFoundError: No module
-    named 'hyperliquid'` and pinned the panel to "margin read degraded". The route
-    discards whatever this returns and rebuilds the margin block from the heartbeat
-    (account_value_usd + per-open-position notional_usd/leverage). So this function
-    now makes NO outbound call and imports NO HL module — it returns a neutral
-    sentinel that the route always overrides. Mirrors how /api/auto/state sources
-    equity from the heartbeat instead of the script's (credential-less) HL read.
+    RE-SOURCE (B2-MARGIN-REPLICA, 2026-07-15): the Observatory heartbeat
+    (:8443 / :3335) that formerly supplied this — via the Node route's
+    resolveHeartbeatMargin() — was DECOMMISSIONED in RM-DECOM (~2026-07-08) and
+    is gone BY DESIGN. Margin is now rebuilt from the SAME read-only replica this
+    script already reads, badged with its age. (Prior state: a no-op sentinel the
+    route overrode with the now-dead heartbeat.)
+
+    ┌────────────────────────────────────────────────────────────────────────────┐
+    │ 🚨🚨 LANDMINE — auto_trades.notional_usd IS THE POSTED MARGIN. 🚨🚨          │
+    │ Bot ground truth (auto_trader/models.py INSERT, M10 comment 2026-06-26):     │
+    │   "notional_usd holds MARGIN (= notional / leverage) ... Full notional =     │
+    │    margin × leverage."                                                        │
+    │   margin_used  = Σ notional_usd            → sum DIRECTLY.  *** NEVER ÷ lev ***│
+    │   position_ntl = Σ (notional_usd × lev)    → the × below; DISPLAY exposure    │
+    │                                              only, NOT the margin.            │
+    │ Dividing notional_usd by leverage would ~7× the figure and ship a FALSE risk │
+    │ number onto a leveraged-futures panel. Verified live 2026-07-15 (FARTCOIN,   │
+    │ notional_usd=4.68, lev=7, equity=33.68):                                      │
+    │   Σ notional_usd / equity        = 13.9%  ✅ (≈ A1's measured ~14%)          │
+    │   Σ (notional_usd/lev) / equity  =  2.0%  ❌ (the trap)                       │
+    └────────────────────────────────────────────────────────────────────────────┘
+
+    Fails CLOSED — no positive equity denominator ⇒ an honest {available:false}
+    degraded block, NEVER a silent 0% (a margin panel showing 0% when it actually
+    cannot read is a lie that hides risk).
     """
-    return {
-        "available": False,
-        "account_value": 0.0,
-        "margin_used": 0.0,
-        "utilization_pct": 0.0,
-        "total_ntl_pos": 0.0,
-        "error": "sourced from Observatory heartbeat (route override)",
+    # margin_used = Σ posted margin over open LIVE trades, deduped by DISTINCT id
+    # (phantom-bleeder law — defensive no-op since `id` is the PK, but a duplicated
+    # row must never inflate the margin figure / understate risk).
+    try:
+        cur = conn.execute(
+            "SELECT id, notional_usd, leverage FROM auto_trades "
+            "WHERE status='open' AND trade_mode='live'"
+        )
+        seen = set()
+        margin_used = 0.0
+        position_ntl = 0.0
+        open_positions = 0
+        for tid, ntl, lev in cur.fetchall():
+            if tid in seen:
+                continue
+            seen.add(tid)
+            m = _as_float(ntl)
+            if m is None:
+                continue
+            open_positions += 1
+            # ┌── notional_usd IS THE POSTED MARGIN → SUM DIRECTLY. DO NOT ÷ lev. ──┐
+            margin_used += m
+            # └─────────────────────────────────────────────────────────────────────┘
+            lv = _as_float(lev)
+            # position notional = margin × leverage (DISPLAY exposure ONLY; this ×
+            # is NOT the margin — do not confuse it with the += m line above).
+            position_ntl += m * lv if (lv and lv > 0) else m
+    except Exception as exc:
+        return {
+            "available": False, "account_value": 0.0, "margin_used": 0.0,
+            "utilization_pct": 0.0, "total_ntl_pos": 0.0,
+            "error": f"open-trade read failed: {type(exc).__name__}: {exc}",
+        }
+
+    # account_value = latest equity snapshot. equity_snapshots.ts is a naive UTC
+    # string (PROVEN: an Eastern reading would sit in the FUTURE vs the trade's UTC
+    # created_at). NEVER compare it against the Eastern opened_at/closed_at columns.
+    try:
+        row = conn.execute(
+            "SELECT equity, ts FROM equity_snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    except Exception as exc:
+        return {
+            "available": False, "account_value": 0.0, "margin_used": margin_used,
+            "utilization_pct": 0.0, "total_ntl_pos": position_ntl,
+            "error": f"equity read failed: {type(exc).__name__}: {exc}",
+        }
+
+    account_value = _as_float(row[0]) if row else None
+    if account_value is None or account_value <= 0:
+        # Fail CLOSED — no positive equity denominator ⇒ honest degraded, not 0%.
+        return {
+            "available": False,
+            "account_value": account_value or 0.0,
+            "margin_used": margin_used,
+            "utilization_pct": 0.0,
+            "total_ntl_pos": position_ntl,
+            "error": "equity snapshot unavailable",
+        }
+
+    utilization = (margin_used / account_value) * 100.0
+
+    # age_seconds = now(UTC) − snapshot ts(UTC): how stale this margin reading is.
+    # Dominated by the ~hourly equity-snapshot cadence, which subsumes the
+    # file-level replica lag (now − ts captures BOTH). Same UTC clock on both ends
+    # — the equity ts is UTC, so there is NO 4-hour Eastern trap here.
+    age_seconds = None
+    ts_raw = row[1]
+    if ts_raw:
+        try:
+            snap = datetime.strptime(
+                str(ts_raw), "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc)
+            age_seconds = max(
+                0, int(datetime.now(timezone.utc).timestamp() - snap.timestamp())
+            )
+        except (TypeError, ValueError):
+            age_seconds = None
+
+    out = {
+        "available": True,
+        "account_value": account_value,
+        "margin_used": margin_used,
+        "utilization_pct": utilization,
+        "total_ntl_pos": position_ntl,
+        "open_positions": open_positions,
     }
+    if age_seconds is not None:
+        out["age_seconds"] = age_seconds
+    return out
 
 
 def main() -> int:
@@ -354,8 +456,10 @@ def main() -> int:
 
         regime_exit_shadow = fetch_regime_exit_shadow(conn)
 
-    # HL margin read happens outside the sqlite context (separate I/O).
-    margin = fetch_margin()
+        # B2-MARGIN-REPLICA: margin is reconstructed from the SAME replica conn
+        # (the Observatory heartbeat that formerly fed it is decommissioned), so
+        # it must run INSIDE the `with conn:` block — it needs the connection.
+        margin = fetch_margin(conn)
 
     out = {
         "data_available": trades_err is None,

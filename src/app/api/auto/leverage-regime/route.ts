@@ -15,13 +15,16 @@ import {
 //      (liq_distance_at_entry), the conf/regime/vol multiplier breakdown
 //      (lev_weight_breakdown_json), and the ≥ k×stop liquidation-safety check.
 //   2. Current HMM regime per ticker (latest hmm_inference_log row per ticker).
-//   3. Margin utilization (live HL marginSummary.totalMarginUsed / accountValue).
+//   3. Margin utilization — reconstructed from the replica (B2-MARGIN-REPLICA):
+//      Σ auto_trades.notional_usd (the POSTED MARGIN, NOT ÷ leverage) over open
+//      live trades, ÷ latest equity_snapshots.equity. The Observatory heartbeat
+//      that formerly fed this was decommissioned in RM-DECOM (~2026-07-08).
 //   4. Regime-exit shadow comparison (exit_engine_shadow — would-be vs actual).
 //
 // READ-ONLY. There is NO write surface here — the panel never sends commands to
-// the bot. Backed by query_leverage_regime.py which reads auto_trades /
-// hmm_inference_log / exit_engine_shadow / auto_config (sqlite RO) + one live HL
-// user_state round-trip. Auth: middleware-enforced cookie session.
+// the bot. Backed entirely by query_leverage_regime.py which reads auto_trades /
+// equity_snapshots / hmm_inference_log / exit_engine_shadow / auto_config
+// (sqlite RO); no network I/O. Auth: middleware-enforced cookie session.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,6 +76,9 @@ interface MarginState {
   margin_used: number;
   utilization_pct: number;
   total_ntl_pos: number;
+  // B2-MARGIN-REPLICA: age (seconds, UTC clock) of the equity snapshot backing
+  // this reading — the panel badges it `REPLICA ~Nm`. Absent when degraded.
+  age_seconds?: number;
   error?: string;
 }
 
@@ -158,8 +164,9 @@ const cache = createSwrCache<LeverageRegimeResponse>({ defaultTtl: 10_000, concu
 // not-yet-synced) position rendered as "No open positions". Now membership =
 // heartbeat; a heartbeat-only id renders as a THIN "syncing" card; closed ids
 // are evicted; open_notional is Σ over the deduped+evicted merged set. The
-// Margin Utilization block (resolveHeartbeatMargin, below) is UNTOUCHED — it was
-// already heartbeat-sourced and live-correct.
+// Margin Utilization block is now reconstructed from the replica inside
+// query_leverage_regime.py (B2-MARGIN-REPLICA) — the Observatory heartbeat that
+// formerly fed it is decommissioned; the route no longer fetches it.
 interface ClosedIdsResponse {
   closed_ids?: number[];
 }
@@ -245,117 +252,21 @@ async function mergeOpenSet(py: LeverageRegimeResponse): Promise<LeverageRegimeR
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// W-H-P4-HUB (2026-06-09): margin utilization sourced from the Observatory
-// heartbeat, NOT a live HL call.
-//
-// The Hub box has NO `hyperliquid` module / HL creds, so the script's old
-// `info.user_state` margin read ALWAYS failed with ModuleNotFoundError and pinned
-// the panel to "margin read degraded". The heartbeat (same upstream as
-// src/app/api/heartbeat/route.ts + src/app/api/auto/state/route.ts) carries the
-// live `account_value_usd` plus, per open position, `notional_usd` + `leverage`.
-// The bot runs ISOLATED margin, where each position's posted (initial) margin =
-// notional / leverage and totalMarginUsed = Σ of those (confirmed in the bot's
-// live_executor.py). So margin utilization is reconstructed exactly, credential-
-// free:
-//     account_value   = account_value_usd
-//     total_ntl_pos   = Σ open_positions[].notional_usd
-//     margin_used      = Σ (open_positions[].notional_usd / leverage)
-//     utilization_pct = margin_used / account_value * 100
-// Flat (no open positions) → 0% used / $<account_value> acct. The entry-notional
-// basis drifts negligibly from live mark as price moves (isolated margin is locked
-// at entry) — a faithful gauge, and infinitely better than "unavailable".
-const OBSERVATORY_HEARTBEAT_URL =
-  "https://trevor-prime-2.tail2bf7a3.ts.net:8443/api/heartbeat";
-
-// Own cache so a heartbeat hiccup serves the last-known margin (stale) WITHOUT
-// poisoning — independent of the auto-state (Python) cache above.
-const marginCache = createSwrCache<MarginState>({ defaultTtl: 10_000, concurrency: 2 });
-
-interface HbPosition {
-  notional_usd?: number | null;
-  leverage?: number | null;
-}
-interface HbMarginPayload {
-  account_value_usd?: number | null;
-  categories?: {
-    autotrader?: {
-      account_value_usd?: number | null;
-      open_positions?: HbPosition[] | null;
-    };
-  };
-}
-
-async function resolveHeartbeatMargin(): Promise<MarginState> {
-  try {
-    const { value } = await marginCache.swr("hb-margin", async () => {
-      const res = await fetch(OBSERVATORY_HEARTBEAT_URL, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) throw new Error(`heartbeat ${res.status}`);
-      const hb = (await res.json()) as HbMarginPayload;
-      const av = hb?.account_value_usd ?? hb?.categories?.autotrader?.account_value_usd;
-      // Account value is required — absent/NaN ⇒ throw so swr keeps serving the
-      // last-known margin (stale) instead of caching a bad number.
-      if (typeof av !== "number" || !Number.isFinite(av)) {
-        throw new Error("account_value_usd absent");
-      }
-      const positions = hb?.categories?.autotrader?.open_positions ?? [];
-      let totalNtl = 0;
-      let marginUsed = 0;
-      for (const p of positions) {
-        const ntl =
-          typeof p?.notional_usd === "number" && Number.isFinite(p.notional_usd)
-            ? p.notional_usd
-            : 0;
-        const lev =
-          typeof p?.leverage === "number" && Number.isFinite(p.leverage) && p.leverage > 0
-            ? p.leverage
-            : 0;
-        totalNtl += ntl;
-        if (lev > 0) marginUsed += ntl / lev; // isolated initial margin = notional / leverage
-      }
-      const utilization = av > 0 ? (marginUsed / av) * 100 : 0;
-      return {
-        available: true,
-        account_value: av,
-        margin_used: marginUsed,
-        utilization_pct: utilization,
-        total_ntl_pos: totalNtl,
-      };
-    });
-    return value;
-  } catch {
-    // Cold + heartbeat unreachable. Surface "degraded" honestly (the panel shows
-    // a gold note) rather than a fake number — but with no ModuleNotFoundError.
-    return {
-      available: false,
-      account_value: 0,
-      margin_used: 0,
-      utilization_pct: 0,
-      total_ntl_pos: 0,
-      error: "heartbeat unavailable",
-    };
-  }
-}
-
 export async function GET() {
   try {
-    // Python supplies open_trades / regimes / shadow (sqlite RO); the heartbeat
-    // supplies the live margin block (the Hub has no HL creds). Run in parallel.
-    const [state, margin] = await Promise.all([
-      cache.swr("leverage-regime", async () => {
-        // 20s timeout preserved for the sqlite-heavy script (HL call now removed).
-        const raw = await runPython("query_leverage_regime.py", [], { timeout: 20_000 });
-        const py = safeJsonParse<LeverageRegimeResponse>(raw, FALLBACK);
-        // B2: merge the live heartbeat open-set into the per-trade leverage list.
-        return mergeOpenSet(py);
-      }),
-      resolveHeartbeatMargin(),
-    ]);
-    // W-H-P4-HUB: discard the script's (sentinel) margin; use the heartbeat block.
-    return NextResponse.json({ ...state.value, margin });
+    // query_leverage_regime.py supplies the WHOLE payload from the read-only
+    // replica: open_trades / regimes / shadow AND the margin block
+    // (B2-MARGIN-REPLICA — margin reconstructed from auto_trades.notional_usd
+    // [the posted margin] + equity_snapshots; the Observatory heartbeat that
+    // formerly fed margin is decommissioned, so the route no longer fetches it).
+    const state = await cache.swr("leverage-regime", async () => {
+      // 20s timeout preserved for the sqlite-heavy script.
+      const raw = await runPython("query_leverage_regime.py", [], { timeout: 20_000 });
+      const py = safeJsonParse<LeverageRegimeResponse>(raw, FALLBACK);
+      // B2: merge the live heartbeat open-set into the per-trade leverage list.
+      return mergeOpenSet(py);
+    });
+    return NextResponse.json(state.value);
   } catch (e) {
     // Fail-safe: never 500 the panel. Serve last-good if we have it.
     const stale = cache.peek("leverage-regime");
