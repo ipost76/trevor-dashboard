@@ -12,7 +12,8 @@ import {
   BottomSheet,
   HapticButton,
 } from "@/components/ui";
-import { History, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { History, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 interface ClosedTrade {
   id: number;
@@ -21,6 +22,10 @@ interface ClosedTrade {
   pnl_pct: number | null;
   pnl_usd: number | null;
   hold_duration_minutes: number | null;
+  // B1-COLLAPSE-FILTERS: opened_at is the SAME naive-EASTERN clock as closed_at
+  // (created_at == opened_at + 4h proven live) — rendered via the raw fmtEastern
+  // HH:MM slice, NEVER parseUTC/new Date/toLocale*. Optional-guarded to "--:--".
+  opened_at?: string | null;
   closed_at: string;
   trade_mode: "live" | "paper";
   exit_reason?: string | null;
@@ -121,15 +126,6 @@ function fmtDayHeader(isoDay: string): string {
     .toUpperCase();
 }
 
-function fmtHold(min: number | null | undefined): string {
-  if (min == null || !Number.isFinite(min)) return "—";
-  const m = Math.max(0, Math.floor(min));
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
-}
-
 // closed_at is stored as EASTERN-LOCAL naive wall-clock ("YYYY-MM-DD HH:MM:SS",
 // no offset/Z) — written by Python datetime.now() on the America/New_York VM.
 // Render the raw HH:MM slice (24h): the value is ALREADY Eastern, so do NOT
@@ -142,6 +138,18 @@ function fmtEastern(ts: string | null | undefined): string {
   if (typeof ts !== "string" || ts.length < 16) return "--:--";
   const hhmm = ts.slice(11, 16);
   return /^\d{2}:\d{2}$/.test(hhmm) ? hhmm : "--:--";
+}
+
+// B1-COLLAPSE-FILTERS: the held window "HH:MM → HH:MM" — BOTH times raw Eastern
+// via fmtEastern (opened_at is the SAME naive-Eastern clock as closed_at; created_at
+// == opened_at + 4h proven live). NEVER parseUTC / new Date / toLocale* on either.
+// GUARD: if opened_at is null/malformed (fmtEastern -> "--:--"), degrade to the
+// close time ALONE (no misleading "--:-- → HH:MM") — the same close-time-only value
+// the row showed before. NULL opened_at count is 0 today; this is purely defensive.
+function fmtWindow(opened: string | null | undefined, closed: string): string {
+  const open = fmtEastern(opened);
+  const close = fmtEastern(closed);
+  return open === "--:--" ? close : `${open} → ${close}`;
 }
 
 export function RecentTab() {
@@ -161,9 +169,18 @@ export function RecentTab() {
   const etToday = React.useMemo(() => etTodayStr(), []);
   const [customStart, setCustomStart] = React.useState<string | null>(null);
   const [customEnd, setCustomEnd] = React.useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
   const [draftStart, setDraftStart] = React.useState<string>("");
   const [draftEnd, setDraftEnd] = React.useState<string>("");
+
+  // B1-COLLAPSE-FILTERS: the 4 filter groups now live inside ONE FILTERS
+  // BottomSheet (filtersOpen). CUSTOM's date inputs render INLINE inside that
+  // same sheet when the CUSTOM chip is active (customExpanded) — NEVER a second
+  // nested sheet (bottom-sheet.tsx has no z-stacking/scroll-lock nesting guard,
+  // and one Escape would close both). All filter state stays here in RecentTab —
+  // the sheet renders the SAME controlled <FilterChips> wired to the SAME setters,
+  // so B2's tradesUrl-as-effect-dep stale-closure fix is fully preserved.
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
+  const [customExpanded, setCustomExpanded] = React.useState(false);
 
   // B2: derive the fetch URL from the CURRENT range. This URL is the effect's SOLE
   // dependency (mirroring capital-hero's stateUrl), so a range change re-runs the
@@ -254,16 +271,18 @@ export function RecentTab() {
   // stays truthful if a range ever genuinely reaches the ceiling.
   const capped = (trades?.length ?? 0) >= RECENT_LIMIT;
 
-  // B2: tapping "Custom" opens the picker (pre-filled with the applied range or
-  // today) instead of selecting a precomputed window. Presets select directly.
+  // B2/B1-COLLAPSE-FILTERS: tapping "Custom" reveals the INLINE date inputs
+  // (pre-filled with the applied range or today) inside the FILTERS sheet — no
+  // second sheet. Presets select directly AND collapse the inline custom inputs.
   const handleRangeChange = (label: string) => {
     const r = label as RangeKey;
     if (r === "CUSTOM") {
       setDraftStart(customStart ?? etToday);
       setDraftEnd(customEnd ?? etToday);
-      setPickerOpen(true);
+      setCustomExpanded(true);
       return;
     }
+    setCustomExpanded(false);
     setRange(r);
   };
 
@@ -282,53 +301,74 @@ export function RecentTab() {
     setCustomStart(draftStart);
     setCustomEnd(draftEnd);
     setRange("CUSTOM");
-    setPickerOpen(false);
+    // range is now CUSTOM, so the inline inputs stay visible via `showCustomInputs`
+    // (they remain editable for a re-Apply). No sheet to close.
   };
+
+  // B1-COLLAPSE-FILTERS: the CUSTOM date inputs show whenever CUSTOM is the active
+  // range OR the user just tapped the CUSTOM chip (pre-apply).
+  const showCustomInputs = range === "CUSTOM" || customExpanded;
+
+  // B1-COLLAPSE-FILTERS: at-a-glance active-filter state for the FILTERS button —
+  // count of NON-DEFAULT filters (defaults: ALL / ALL / ALL / TODAY) + a compact
+  // summary. He never wonders what's filtered without opening the sheet.
+  const activeFilters: string[] = [];
+  if (tickerFilter !== "ALL") activeFilters.push(tickerFilter);
+  if (directionFilter !== "ALL") activeFilters.push(directionFilter);
+  if (outcomeFilter !== "ALL") activeFilters.push(outcomeFilter);
+  if (range !== "TODAY") activeFilters.push(range);
+  const activeCount = activeFilters.length;
+  const activeSummary = activeFilters.join(" · ");
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
-      <div className="space-y-3">
-        <FilterChips
-          options={tickerOptions}
-          selected={tickerFilter}
-          onChange={setTickerFilter}
-          ariaLabel="Filter by ticker"
-        />
-        <FilterChips
-          options={DIRECTION_OPTIONS}
-          selected={directionFilter}
-          onChange={setDirectionFilter}
-          ariaLabel="Filter by direction"
-        />
-        <FilterChips
-          options={OUTCOME_OPTIONS}
-          selected={outcomeFilter}
-          onChange={setOutcomeFilter}
-          ariaLabel="Filter by outcome"
-        />
-        {/* B2: 4th row — server-side ET date range (drives a refetch, not a
-            client filter; composes with the three above). */}
-        <FilterChips
-          options={RANGE_OPTIONS}
-          selected={range}
-          onChange={handleRangeChange}
-          ariaLabel="Filter by date range"
-        />
-      </div>
-
       <Card padding="md">
         <CardHeader>
-          <CardTitle>
-            <span className="flex items-center gap-2 uppercase tracking-wider">
-              <History size={14} aria-hidden />
-              Recent Signals
-              {trades && (
-                <span className="ml-1 font-mono text-micro text-fg-muted">
-                  {filteredTrades.length}/{trades.length}
+          {/* B1-COLLAPSE-FILTERS: the header is the single control+status bar —
+              title + {filtered}/{total} on the left, the FILTERS button (opening
+              the sheet) on the right. The 4 chip rows moved into the sheet. The
+              button is min-w-0 so its summary truncates; the title holds its width. */}
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>
+              <span className="flex items-center gap-2 uppercase tracking-wider">
+                <History size={14} aria-hidden />
+                Recent Signals
+                {trades && (
+                  <span className="ml-1 font-mono text-micro text-fg-muted">
+                    {filteredTrades.length}/{trades.length}
+                  </span>
+                )}
+              </span>
+            </CardTitle>
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              aria-label={
+                activeCount > 0
+                  ? `Open filters — ${activeCount} active: ${activeSummary}`
+                  : "Open filters"
+              }
+              className={cn(
+                "tap-target flex min-w-0 items-center gap-1.5 rounded-pill border px-3 py-1 font-sans text-micro uppercase tracking-wider transition-colors duration-fast",
+                activeCount > 0
+                  ? "border-accent-cyan-soft bg-accent-cyan-soft/10 text-accent-cyan-soft-strong shadow-glow-subtle-cyan"
+                  : "border-border-subtle text-fg-muted hover:border-accent-cyan-soft/40 hover:text-fg-primary",
+              )}
+            >
+              <SlidersHorizontal size={12} className="shrink-0" aria-hidden />
+              <span className="shrink-0">Filters</span>
+              {activeCount > 0 && (
+                <span className="shrink-0 rounded-pill bg-accent-cyan-soft/20 px-1.5 tabular-nums text-accent-cyan-soft-strong">
+                  {activeCount}
                 </span>
               )}
-            </span>
-          </CardTitle>
+              {activeCount > 0 && (
+                <span className="min-w-0 truncate normal-case tracking-normal text-fg-muted">
+                  {activeSummary}
+                </span>
+              )}
+            </button>
+          </div>
         </CardHeader>
 
         {/* B2: transient refresh failure while last-good data is still shown. */}
@@ -418,15 +458,21 @@ export function RecentTab() {
                           {t.direction}
                         </span>
                       </div>
-                      {/* HH:MM (raw Eastern) · duration · exit_reason — single line,
-                          long reason ellipses (never wraps). min-w-0 is load-bearing
-                          for truncate to work inside the flex child. */}
+                      {/* HH:MM → HH:MM (raw Eastern held window) · exit_reason —
+                          single line, long reason ellipses (never wraps). min-w-0 is
+                          load-bearing for truncate to work inside the flex child.
+                          Duration dropped: the window conveys it (Ghost's call). */}
                       <div className="mt-0.5 flex min-w-0 items-center gap-1.5 font-mono text-micro text-fg-muted tabular-nums">
-                        <span className="shrink-0" title={t.closed_at}>
-                          {fmtEastern(t.closed_at)}
+                        <span
+                          className="shrink-0"
+                          title={
+                            t.opened_at
+                              ? `${t.opened_at} → ${t.closed_at}`
+                              : t.closed_at
+                          }
+                        >
+                          {fmtWindow(t.opened_at, t.closed_at)}
                         </span>
-                        <span className="shrink-0 text-fg-faint">·</span>
-                        <span className="shrink-0">{fmtHold(t.hold_duration_minutes)}</span>
                         {t.exit_reason && (
                           <>
                             <span className="shrink-0 text-fg-faint">·</span>
@@ -458,61 +504,114 @@ export function RecentTab() {
         )}
       </Card>
 
-      {/* B2: CUSTOM date-range picker (native inputs, phone-friendly) — mirrors
-          capital-hero. No date library; both inputs capped at ET-today. */}
+      {/* B1-COLLAPSE-FILTERS: ONE sheet hosts all 4 filter groups (reusing the
+          SAME controlled <FilterChips> + setters — B2's server-range refetch and
+          the composed client-side useMemo are untouched). CUSTOM's date inputs
+          render INLINE below the range chips (never a nested sheet). No date
+          library; both inputs capped at ET-today. */}
       <BottomSheet
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        title="Custom range"
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        title="Filters"
       >
-        <div className="space-y-4">
-          <label className="block space-y-1.5">
+        <div className="space-y-5">
+          <div className="space-y-2">
             <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-              Start
+              Ticker
             </span>
-            <input
-              type="date"
-              value={draftStart}
-              max={etToday}
-              onChange={(e) => setDraftStart(e.target.value)}
-              className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+            <FilterChips
+              options={tickerOptions}
+              selected={tickerFilter}
+              onChange={setTickerFilter}
+              ariaLabel="Filter by ticker"
             />
-          </label>
-          <label className="block space-y-1.5">
+          </div>
+          <div className="space-y-2">
             <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-              End
+              Direction
             </span>
-            <input
-              type="date"
-              value={draftEnd}
-              min={draftStart || undefined}
-              max={etToday}
-              onChange={(e) => setDraftEnd(e.target.value)}
-              className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+            <FilterChips
+              options={DIRECTION_OPTIONS}
+              selected={directionFilter}
+              onChange={setDirectionFilter}
+              ariaLabel="Filter by direction"
             />
-          </label>
-          {draftStart !== "" && draftEnd !== "" && draftStart > draftEnd && (
-            <p className="font-sans text-micro text-accent-red">
-              End date must be on or after the start date.
-            </p>
-          )}
-          <div className="flex gap-2 pt-1">
-            <HapticButton
-              variant="secondary"
-              fullWidth
-              onClick={() => setPickerOpen(false)}
-            >
-              Cancel
-            </HapticButton>
-            <HapticButton
-              variant="primary"
-              fullWidth
-              disabled={!draftValid}
-              onClick={applyCustom}
-              className="disabled:pointer-events-none disabled:opacity-40"
-            >
-              Apply
-            </HapticButton>
+          </div>
+          <div className="space-y-2">
+            <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              Outcome
+            </span>
+            <FilterChips
+              options={OUTCOME_OPTIONS}
+              selected={outcomeFilter}
+              onChange={setOutcomeFilter}
+              ariaLabel="Filter by outcome"
+            />
+          </div>
+          <div className="space-y-2">
+            <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              Date range
+            </span>
+            {/* server-side ET date range (drives a refetch, not a client filter;
+                composes with the three above). */}
+            <FilterChips
+              options={RANGE_OPTIONS}
+              selected={range}
+              onChange={handleRangeChange}
+              ariaLabel="Filter by date range"
+            />
+            {showCustomInputs && (
+              <div className="space-y-3 pt-2">
+                <label className="block space-y-1.5">
+                  <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+                    Start
+                  </span>
+                  <input
+                    type="date"
+                    value={draftStart}
+                    max={etToday}
+                    onChange={(e) => setDraftStart(e.target.value)}
+                    className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+                    End
+                  </span>
+                  <input
+                    type="date"
+                    value={draftEnd}
+                    min={draftStart || undefined}
+                    max={etToday}
+                    onChange={(e) => setDraftEnd(e.target.value)}
+                    className="w-full rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 font-mono text-body tabular-nums text-fg-primary focus:border-accent-cyan-soft focus:outline-none"
+                  />
+                </label>
+                {draftStart !== "" && draftEnd !== "" && draftStart > draftEnd && (
+                  <p className="font-sans text-micro text-accent-red">
+                    End date must be on or after the start date.
+                  </p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <HapticButton
+                    variant="secondary"
+                    fullWidth
+                    onClick={() => setCustomExpanded(false)}
+                  >
+                    Cancel
+                  </HapticButton>
+                  <HapticButton
+                    variant="primary"
+                    fullWidth
+                    disabled={!draftValid}
+                    onClick={applyCustom}
+                    className="disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    Apply
+                  </HapticButton>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </BottomSheet>
