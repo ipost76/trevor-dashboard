@@ -61,17 +61,36 @@ type EnrichedPosition = OpenPosition & {
 
 const WATCH_TICKERS = ["BTC", "ETH", "SOL", "HYPE", "FARTCOIN", "XRP", "DOGE", "NEAR", "SUI", "kPEPE"];
 
-function parseUTC(ts: string): Date {
-  if (!ts) return new Date(NaN);
-  let s = ts.includes("T") ? ts : ts.replace(" ", "T");
-  if (!/Z$|[+-]\d\d:?\d\d$/.test(s)) s += "Z";
-  return new Date(s);
+// opened_at is naive EASTERN wall-clock ("YYYY-MM-DD HH:MM:SS", no offset) —
+// written by Python datetime.now() on the America/New_York VM; created_at is its
+// real-UTC twin (proven exactly +4h). To measure the hold WITHOUT the +240-minute
+// bug, compare on ONE consistent ET clock: render "now" as ET wall-clock and
+// subtract opened_at, parsing BOTH the same append-Z way so the offset cancels →
+// true elapsed minutes, DST-robust, no hardcoded ±4/±5. NEVER
+// `Date.now() − parseUTC(opened_at)` (a real-UTC now against an ET-string-read-
+// as-UTC) — that mismatch is the +240-minute bug this replaces.
+function etWallClockNow(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const hh = g("hour") === "24" ? "00" : g("hour"); // hour12:false can emit "24"
+  return `${g("year")}-${g("month")}-${g("day")}T${hh}:${g("minute")}:${g("second")}`;
 }
 
 function holdMin(opened_at: string): number {
-  const ts = parseUTC(opened_at);
-  if (!Number.isFinite(ts.getTime())) return 0;
-  return Math.max(0, Math.floor((Date.now() - ts.getTime()) / 60_000));
+  if (typeof opened_at !== "string" || opened_at.length < 16) return 0;
+  const openedMs = Date.parse(opened_at.replace(" ", "T") + "Z");
+  const nowMs = Date.parse(etWallClockNow() + "Z");
+  if (!Number.isFinite(openedMs) || !Number.isFinite(nowMs)) return 0;
+  return Math.max(0, Math.floor((nowMs - openedMs) / 60_000));
 }
 
 function fmtHold(min: number): string {
@@ -108,8 +127,6 @@ function fmtRoe(n: number): string {
   return `${sign}${Math.abs(n).toFixed(2)}%`;
 }
 
-const ET_TZ = "America/New_York";
-
 interface ExitEvent {
   ts?: string;
   event?: string;
@@ -135,20 +152,16 @@ function latestExitEvent(raw: string | null | undefined): ExitEvent | null {
   }
 }
 
-// Short ET time-of-day (e.g. "4:59 PM ET"), matching dca-section.tsx's ET_TZ
-// convention. Reuses parseUTC (naive stamps are UTC). "" on bad/empty input.
+// exit_signals_log[].ts is naive EASTERN wall-clock ("YYYY-MM-DD HH:MM:SS") —
+// written by monitor.py log_exit_event via datetime.now() on the ET VM, the SAME
+// clock as opened_at (proven == opened_at, 4h off the UTC created_at). The value
+// is ALREADY Eastern, so render the raw HH:MM slice (24h) — NEVER parseUTC /
+// new Date / toLocaleTimeString on it (parse-as-UTC-then-relocalize was the
+// 4-hour-early bug, the class killed in recent-tab.tsx). "" on bad/empty input.
 function fmtEventTime(ts: string | undefined): string {
-  if (!ts) return "";
-  const d = parseUTC(ts);
-  if (!Number.isFinite(d.getTime())) return "";
-  return (
-    d.toLocaleTimeString("en-US", {
-      timeZone: ET_TZ,
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }) + " ET"
-  );
+  if (typeof ts !== "string" || ts.length < 16) return "";
+  const hhmm = ts.slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(hhmm) ? `${hhmm} ET` : "";
 }
 
 // RM-LIVE B4: one open position. Extracted so useLiveMark can be called once
