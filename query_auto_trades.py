@@ -25,7 +25,7 @@ JSON output for type='closed':
     "count": <N>,
     "trades": [
       { id, ticker, direction, pnl_pct, pnl_usd, hold_duration_minutes,
-        closed_at, exit_reason, trade_mode }
+        opened_at, closed_at, exit_reason, trade_mode }
     ]
   }
 
@@ -168,10 +168,15 @@ def fetch_closed(
         # the SQL text); the date values are bound via `params`. `limit` is
         # int-sanitized in main() (max(1, min(2000, ...))), matching the existing
         # LIMIT-interpolation contract.
+        # B1-COLLAPSE-FILTERS (2026-07-16): opened_at added (additive) so the
+        # RECENT row can render the held window (opened_at -> closed_at). Same
+        # naive-EASTERN clock as closed_at (created_at == opened_at + 4h proven),
+        # rendered client-side via the raw HH:MM slice — never parsed as UTC.
         cur = conn.execute(
             f"""
             SELECT id, ticker, direction, pnl_pct, pnl_usd,
-                   hold_duration_minutes, closed_at, exit_reason, trade_mode
+                   hold_duration_minutes, opened_at, closed_at, exit_reason,
+                   trade_mode
             FROM auto_trades
             WHERE {where}
             GROUP BY id
