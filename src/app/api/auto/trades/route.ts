@@ -98,7 +98,29 @@ export async function GET(req: NextRequest) {
   }
   const type = typeParam as "open" | "closed";
   const limitRaw = Number(url.searchParams.get("limit") ?? 10);
-  const limit = Math.max(1, Math.min(200, Number.isFinite(limitRaw) ? limitRaw : 10));
+  // B2 (2026-07-15): ceiling 200 -> 2000 so a full closed-trades ET date range
+  // (1W ~203, MAX ~482 post-cutover) is returned without silent truncation. The
+  // RECENT tab is the ONLY type=closed caller; type=open callers pass <=50, so the
+  // raised ceiling never bites there. Perf is a non-issue (sub-ms full scan+sort).
+  const limit = Math.max(1, Math.min(2000, Number.isFinite(limitRaw) ? limitRaw : 10));
+
+  // B2: OPTIONAL inclusive ET date-range params (closed path only) — matching the
+  // capital-hero -> query_auto_state convention (?start=&end=, inclusive picked
+  // dates; the exclusive +1-day upper bound is applied Python-side). validDate is
+  // a strict shape + real-calendar-date round-trip guard: it rejects injection,
+  // non-padded, and semantically-invalid dates (2026-13-99, 2026-02-30). A
+  // malformed value is DROPPED to null (fail-open to the cutover-floored default) —
+  // never a 400, never interpolated (runPython passes an argv array, no shell).
+  const validDate = (s: string | null): s is string => {
+    if (s === null || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  };
+  const startRaw = url.searchParams.get("start");
+  const endRaw = url.searchParams.get("end");
+  // Both must be valid to form a range; anything else -> null (keys as no-range).
+  const start = validDate(startRaw) ? startRaw : null;
+  const end = validDate(endRaw) ? endRaw : null;
 
   const fallback: TradesResponse =
     type === "open"
@@ -176,12 +198,34 @@ export async function GET(req: NextRequest) {
   // each distinct view collapses concurrent requests to ONE Python child per
   // window. The try/catch preserves the fail-safe (200 + fallback shape).
   try {
-    const { value } = await cache.swr(`closed:${limit}`, async () => {
-      const raw = await runPython("query_auto_trades.py", ["closed", String(limit)], {
-        timeout: 5_000,
-      });
-      return safeJsonParse<TradesResponse>(raw, fallback);
-    });
+    // B2: vary the SWR key by range so TODAY and 1W (etc.) never serve each
+    // other's cached result within the 15s TTL — the highest-probability bug in
+    // this change. Keyed on the VALIDATED start/end, so a dropped-malformed param
+    // keys identically to no-range (`closed:${limit}::`).
+    const { value } = await cache.swr(
+      `closed:${limit}:${start ?? ""}:${end ?? ""}`,
+      async () => {
+        // Pass start/end as argv[3]/argv[4] ONLY when both are valid; else the
+        // default cutover-floored view. argv array => no shell => injection-safe;
+        // the Python re-validates + parameterizes the bounds.
+        const args =
+          start !== null && end !== null
+            ? ["closed", String(limit), start, end]
+            : ["closed", String(limit)];
+        const raw = await runPython("query_auto_trades.py", args, {
+          timeout: 5_000,
+        });
+        // B2: close the error-vs-empty gap — a parse failure now carries an
+        // `error` field (was a silent {trades:[]}), so the client can tell "fetch
+        // broke" from "no trades this day". The Python's own error payloads
+        // already carry `error`, and the runPython-throw catch below does too — so
+        // EVERY failure path is now distinguishable from a genuine empty day.
+        return safeJsonParse<TradesResponse>(raw, {
+          ...fallback,
+          error: "unparseable closed-trades response",
+        });
+      },
+    );
     return NextResponse.json(value);
   } catch (err) {
     return NextResponse.json(
