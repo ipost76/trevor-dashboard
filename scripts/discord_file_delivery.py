@@ -108,15 +108,28 @@ def _resolve_title(title: str | None, src: Path, basename: str) -> str:
 
 
 def _delivery_timestamp_et() -> str:
-    """Post-time in Eastern, explicit ET, DST-robust (stdlib zoneinfo).
+    """Post-time in Eastern, DST-aware abbreviation (EDT/EST), stdlib zoneinfo.
 
-    Matches the two-clock ET display convention; renders the SAME text on any
-    reader's screen (unlike Discord's native `timestamp`, which localizes).
+    Uses %Z on an AWARE datetime (datetime.now(ZoneInfo(...))) so the suffix is
+    DST-correct year-round — EDT in summer, EST in winter — matching the VM's
+    _build_caption. NEVER a hardcoded literal " ET" (which drifts from real DST)
+    and NEVER an empty suffix (%Z on a NAIVE datetime yields ''; ours is aware).
+
+    Renders the SAME text on every reader's screen (unlike Discord's native
+    `timestamp`, which localizes). This stamp must never break a delivery: if
+    ZoneInfo/tzdata is unavailable, fall back to a present, honest UTC suffix
+    rather than crashing or emitting an empty timezone.
     """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    from datetime import datetime, timezone
 
-    return datetime.now(ZoneInfo(ET_ZONE)).strftime("%Y-%m-%d %I:%M %p ET")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(ET_ZONE)).strftime("%Y-%m-%d %I:%M %p %Z")
+    except Exception:
+        # tzdata missing / ZoneInfo unavailable — a delivery must land, so emit
+        # a present UTC stamp (never an exception, never an empty suffix).
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %I:%M %p UTC")
 
 
 def _compose_embed(
