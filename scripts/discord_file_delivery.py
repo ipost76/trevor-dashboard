@@ -53,10 +53,52 @@ _H1_READ_BYTES = 8192  # bounded read — never slurp a large file to find a hea
 ET_ZONE = "America/New_York"
 
 
-def _format_v2_enabled() -> bool:
-    """True only when DELIVERY_FORMAT_V2 is explicitly truthy. Fail-closed OFF."""
+def _read_env_local_value(key: str) -> str | None:
+    """Return `key`'s value from .env.local, or None if absent/unreadable.
+
+    Mirrors _read_webhook_url's on-demand hand-rolled parse (this box has no
+    python-dotenv, so load_dotenv is unavailable). Deliberately NOT merged with
+    _read_webhook_url — that function is fail-loud + secret-bearing and must stay
+    untouched; the small parse duplication is the low-blast-radius way to reuse
+    the SAME mechanism, not invent a second one. Fail-closed: any error
+    (missing / unreadable / malformed file, or key absent) -> None, NEVER raises.
+    Reads a value BY KEY only — never logs or prints a value.
+    """
     try:
-        val = (os.environ.get(DELIVERY_FORMAT_V2_ENV) or "").strip().lower()
+        if not ENV_FILE.exists():
+            return None
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, raw = line.partition("=")
+            if k.strip() == key:
+                raw = raw.strip()
+                if (raw.startswith('"') and raw.endswith('"')) or (
+                    raw.startswith("'") and raw.endswith("'")
+                ):
+                    raw = raw[1:-1]
+                return raw.strip()
+    except Exception:
+        return None
+    return None
+
+
+def _format_v2_enabled() -> bool:
+    """True only when DELIVERY_FORMAT_V2 is explicitly truthy. Fail-closed OFF.
+
+    Precedence (matches the VM's load_dotenv(override=False) mental model):
+    os.environ WINS when the key is PRESENT — even ""/"0" — so an explicit
+    `export DELIVERY_FORMAT_V2=0` overrides an .env.local line saying `1`. Only
+    when the key is ABSENT from the process env do we fall back to .env.local,
+    giving the flag a durable home that survives shell exit (a standalone-spawned
+    script inherits no Next.js env, unlike the runPython helpers). Any error -> OFF.
+    """
+    try:
+        raw = os.environ.get(DELIVERY_FORMAT_V2_ENV)
+        if raw is None:  # not set in the process env -> durable .env.local fallback
+            raw = _read_env_local_value(DELIVERY_FORMAT_V2_ENV)
+        val = (raw or "").strip().lower()
     except Exception:
         return False
     return val in ("1", "true", "yes", "on")
