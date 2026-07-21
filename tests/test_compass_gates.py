@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Phase-2 tests for the survival WALL + fixed-order/learned-blend scoring.
+
+Proves: the two-gate AND (DD ceiling ∧ CVaR floor), the WALL short-circuit
+(survived=False => NO consistency/magnitude computed), and the fixed-order code
+invariant (magnitude can NEVER outrank consistency — a learned inversion is
+clamped). DB-free (weights injected); the compass_weights seed is verified
+separately (seed script in Phase 2 / fixture in Phase 3).
+
+Dependency-free: `python3 tests/test_compass_gates.py`. pytest-compatible too.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from compass_metrics import (  # noqa: E402
+    evaluate_compass,
+    survival_gates,
+    _enforce_fixed_order,
+)
+
+# Injected level-0-style thresholds/weights so the tests never touch the DB.
+W = {"w_consistency": 0.7, "w_magnitude": 0.3, "dd_ceiling": 0.35, "cvar_floor": -0.15}
+THR = {"dd_ceiling": 0.35, "cvar_floor": -0.15}
+
+# A healthy per-period net series whose worst-5% mean clears the -0.15 floor.
+GOOD_PNL = [0.02] * 19 + [-0.10]          # 20 obs, worst-1 = -0.10 >= -0.15 -> PASS
+# A cascade-tail series whose worst-5% mean breaches the floor.
+BAD_PNL = [0.01] * 19 + [-0.42]           # 20 obs, worst-1 = -0.42 < -0.15 -> FAIL
+# Equity curves.
+SHALLOW_EQUITY = [100, 102, 99, 103, 101, 105]        # dd ~ (103-99)/103 = 0.039 -> PASS
+DEEP_EQUITY = [100, 120, 60, 80, 55, 70]              # dd = (120-55)/120 = 0.54 -> FAIL
+
+DAILY = [0.01, -0.02, 0.03, -0.01, 0.02, -0.015, 0.025]
+TRADES = [
+    {"pnl_usd": 10.0, "original_notional_usd": 1000.0, "ticker": "BTC"},
+    {"pnl_usd": 8.0, "original_notional_usd": 1000.0, "ticker": "ETH"},
+]
+
+
+def _survivor():
+    return {"equity_curve": SHALLOW_EQUITY, "net_pnl_series": GOOD_PNL,
+            "daily_returns": DAILY, "trades": TRADES}
+
+
+# --------------------------------------------------------------------------
+# survival_gates: each gate rejects independently; the AND is proven
+# --------------------------------------------------------------------------
+def test_dd_gate_rejects():
+    g = survival_gates({"equity_curve": DEEP_EQUITY, "net_pnl_series": GOOD_PNL}, THR)
+    assert g["passed"] is False and "dd_ceiling" in g["failing"], g
+    print("  survival_gates rejects DD breach: PASS")
+
+
+def test_cvar_gate_rejects():
+    g = survival_gates({"equity_curve": SHALLOW_EQUITY, "net_pnl_series": BAD_PNL}, THR)
+    assert g["passed"] is False and "cvar_floor" in g["failing"], g
+    print("  survival_gates rejects CVaR breach: PASS")
+
+
+def test_both_clear_passes():
+    g = survival_gates({"equity_curve": SHALLOW_EQUITY, "net_pnl_series": GOOD_PNL}, THR)
+    assert g["passed"] is True and g["failing"] == [], g
+    print("  survival_gates passes when BOTH clear: PASS")
+
+
+def test_and_semantics_dd_ok_cvar_fail_rejected():
+    # THE AND: passes DD (shallow) but fails CVaR (fat tail) => REJECTED.
+    g = survival_gates({"equity_curve": SHALLOW_EQUITY, "net_pnl_series": BAD_PNL}, THR)
+    assert g["dd"] <= THR["dd_ceiling"], g          # DD gate WOULD pass alone
+    assert g["passed"] is False, g                  # but ANDed with CVaR -> reject
+    assert "cvar_floor" in g["failing"] and "dd_ceiling" not in g["failing"], g
+    print("  AND semantics (DD ok, CVaR fail -> REJECT): PASS")
+
+
+def test_insufficient_tail_fails_survival_first():
+    # < 5 obs -> cvar None -> conservative FAIL (cannot clear the wall on an
+    # unassessable tail).
+    g = survival_gates({"equity_curve": SHALLOW_EQUITY, "net_pnl_series": [0.01, 0.02]}, THR)
+    assert g["passed"] is False and g["cvar"] is None, g
+    assert "cvar_floor(insufficient_tail)" in g["failing"], g
+    print("  insufficient tail -> survival-first FAIL: PASS")
+
+
+# --------------------------------------------------------------------------
+# evaluate_compass: the WALL short-circuits (no consistency/magnitude on fail)
+# --------------------------------------------------------------------------
+def test_wall_shortcircuits_no_scoring():
+    rejected = {"equity_curve": DEEP_EQUITY, "net_pnl_series": BAD_PNL,
+                "daily_returns": DAILY, "trades": TRADES}
+    v = evaluate_compass(rejected, level=0, weights=W)
+    assert v["survived"] is False, v
+    assert v["consistency"] is None, "WALL must NOT compute consistency on reject"
+    assert v["magnitude"] is None, "WALL must NOT compute magnitude on reject"
+    assert v["blend_score"] is None and v["verdict"] == "rejected", v
+    assert v["failing_gates"], v
+    print("  WALL short-circuit (no consistency/magnitude on reject): PASS")
+
+
+def test_survivor_is_scored():
+    v = evaluate_compass(_survivor(), level=0, weights=W)
+    assert v["survived"] is True and v["verdict"] == "scored", v
+    assert v["consistency"] is not None and v["magnitude"] is not None, v
+    assert v["blend_score"] is not None, v
+    # blend = 0.7*consistency + 0.3*magnitude
+    exp = 0.7 * v["consistency"] + 0.3 * v["magnitude"]
+    assert abs(v["blend_score"] - exp) < 1e-9, v
+    print("  survivor scored (blend = wc*consist + wm*mag): PASS")
+
+
+# --------------------------------------------------------------------------
+# fixed-order invariant: magnitude can NEVER outrank consistency
+# --------------------------------------------------------------------------
+def test_fixed_order_clamps_inversion():
+    # Helper-level: a learned inversion is clamped.
+    wc, wm, clamped = _enforce_fixed_order(0.3, 0.7)
+    assert clamped is True and wc == 0.3 and wm == 0.3, (wc, wm, clamped)
+    # Non-inverted passes through untouched.
+    wc2, wm2, c2 = _enforce_fixed_order(0.7, 0.3)
+    assert c2 is False and wc2 == 0.7 and wm2 == 0.3
+    print("  _enforce_fixed_order clamps inversion: PASS")
+
+
+def test_evaluate_clamps_inverted_weights():
+    # End-to-end: try to make magnitude outrank consistency via weights -> clamped.
+    inverted = {"w_consistency": 0.3, "w_magnitude": 0.7, "dd_ceiling": 0.35, "cvar_floor": -0.15}
+    v = evaluate_compass(_survivor(), level=0, weights=inverted)
+    assert v["weights_used"]["clamped"] is True, v
+    assert v["weights_used"]["w_magnitude"] == v["weights_used"]["w_consistency"] == 0.3, v
+    # blend used the CLAMPED weights (0.3/0.3), NOT the inverted 0.7 on magnitude.
+    exp = 0.3 * v["consistency"] + 0.3 * v["magnitude"]
+    assert abs(v["blend_score"] - exp) < 1e-9, v
+    print("  evaluate_compass clamps inverted weights (mag never outranks): PASS")
+
+
+def test_survived_unscorable_when_sortino_insufficient():
+    # Survives the wall but daily_returns has < 3 obs -> sortino None -> unscorable.
+    cand = {"equity_curve": SHALLOW_EQUITY, "net_pnl_series": GOOD_PNL,
+            "daily_returns": [0.01, 0.02], "trades": TRADES}
+    v = evaluate_compass(cand, level=0, weights=W)
+    assert v["survived"] is True and v["verdict"] == "survived_unscorable", v
+    assert v["consistency"] is None and v["blend_score"] is None, v
+    # magnitude WAS computed (it survived) — only the blend is withheld.
+    assert v["magnitude"] is not None, v
+    print("  survived-but-unscorable (sortino < 3 obs): PASS")
+
+
+ALL = [
+    test_dd_gate_rejects,
+    test_cvar_gate_rejects,
+    test_both_clear_passes,
+    test_and_semantics_dd_ok_cvar_fail_rejected,
+    test_insufficient_tail_fails_survival_first,
+    test_wall_shortcircuits_no_scoring,
+    test_survivor_is_scored,
+    test_fixed_order_clamps_inversion,
+    test_evaluate_clamps_inverted_weights,
+    test_survived_unscorable_when_sortino_insufficient,
+]
+
+
+if __name__ == "__main__":
+    print("=== Phase-2 survival-wall + fixed-order-blend tests ===")
+    for fn in ALL:
+        fn()
+    print("ALL PHASE-2 TESTS PASS")
