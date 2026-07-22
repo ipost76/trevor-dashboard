@@ -31,6 +31,8 @@ _TRAINER_MODULES = [
     "compass_metrics.py",
     "trainer_validation.py",    # R9-B3: CALLS the R3 engine, still zero reset path
     "trainer_hypotheses.py",    # R9-B3: standing hypotheses, no alpha_budget at all
+    "trainer_budget.py",        # R9-B4: daily API-spend self-gate, no alpha_budget at all
+    "trainer_reasoning.py",     # R9-B4: LLM narration + rejection log, zero reset path
 ]
 
 
