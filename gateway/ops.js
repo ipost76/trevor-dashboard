@@ -29,6 +29,29 @@ const OPS = {
     flag: null,
     validate: (a) => (["on", "off"].includes(String(a.action || "").toLowerCase()) ? null : "action must be 'on' or 'off'"),
   },
+
+  // R12-B1 (2026-07-22): the RECORD-ONLY promotion approval. The Hub records an
+  // APPROVAL RECORD; CC applies the config change later via a prompt. This op
+  // writes ONE row to promotion_approvals (applied=0) and touches NOTHING else —
+  // no config value, no auto_config flag, no champion table, no level mint.
+  //
+  // 🚨 The allowed-key Set is enumerated denial #1 (STRUCTURAL, not by convention):
+  // any key other than candidate_id/decision/note fails validation → 400 at this
+  // Hub choke, BEFORE the envelope is forwarded to the VM. No config field can
+  // ever enter the args. Flag-gated HUB_PROMOTION_WRITE_ENABLED (default OFF),
+  // enforced AUTHORITATIVELY VM-side by gw_exec._flag_on (423 when off).
+  "promotion.approve": {
+    flag: "HUB_PROMOTION_WRITE_ENABLED",
+    validate: (a) => {
+      const allowed = new Set(["candidate_id", "decision", "note"]);
+      const extra = Object.keys(a).filter((k) => !allowed.has(k));
+      if (extra.length) return `unexpected key(s): ${extra.join(", ")}`;
+      if (typeof a.candidate_id !== "string" || !a.candidate_id.trim()) return "candidate_id required";
+      if (!["approve", "reject"].includes(a.decision)) return "decision must be 'approve' or 'reject'";
+      if (a.note !== undefined && typeof a.note !== "string") return "note must be a string";
+      return null;
+    },
+  },
 };
 
 function getOp(name) {
