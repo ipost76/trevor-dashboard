@@ -29,6 +29,17 @@ positive — the whole point of going structural instead of grepping):
       and none touches ``auto_config`` AT ALL (never reads it, never writes it —
       stricter than "no writes").
 
+  (4) trainer ↛ shared-memory WATCHER namespace (R11-C1 critique-leak boundary): the R11
+      store (``lib/memory_db.py`` -> ``data/memory.db``) holds BOTH ``trainer_memory`` and
+      ``watcher_memory`` in ONE db. A trainer reaching ``watcher_memory`` through that shared
+      store would read the watcher's critiques of its own arms — breaking Hub-only,
+      Ghost-gated teaching (denial 2 protects ``watcher.db``, NOT the new shared store). So
+      no ``trainer_*.py`` / ``lib/trainer_db.py`` references the ``watcher_memory`` table, the
+      ``watcher_scope`` accessor, or a raw string path to ``watcher_memory`` — via a
+      hypothetical ``watcher_memory`` shim import, a name/attribute, OR a raw SQL string. The
+      trainer's OWN namespace (``trainer_scope`` / ``trainer_memory`` via ``lib.memory_db``)
+      stays fully allowed — importing ``lib.memory_db`` is NOT forbidden.
+
 String-literal scanning (beyond the pure symbol scan of the R9 reset-deny) is
 DELIBERATE: a DB is reached by PATH STRING, not just a symbol, so a symbol-only scan
 would miss ``sqlite3.connect("data/watcher.db")``. Docstrings are excluded so a
@@ -155,6 +166,15 @@ def _imports_halt_lever(mod):
     return comps[0] == "auto_trader" or any("gateway" in c for c in comps)
 
 
+def _imports_watcher_memory_ns(mod):
+    """R11-C1 denial 4: a trainer must never IMPORT a module that reaches the shared store's
+    WATCHER namespace. Defensive against a hypothetical ``watcher_memory`` shim module. The
+    realistic vector (``from lib.memory_db import watcher_scope`` + a use) is caught by the
+    ``watcher_scope`` / ``watcher_memory`` symbol_names, NOT here — importing ``lib.memory_db``
+    itself is allowed (the trainer needs it for its OWN ``trainer_scope``)."""
+    return "watcher_memory" in mod.split(".")
+
+
 # ── Denial (1): fragile ↛ integrity store, and the RECIPROCAL integrity ↛ main ──
 def test_denial_1_zero_cross_import_both_directions():
     watchers = _watcher_modules()
@@ -220,6 +240,28 @@ def test_denial_3_watcher_never_auto_halts():
     print(f"  (3) watcher ↛ auto-halt across {len(watchers)} watcher module(s): PASS")
 
 
+# ── Denial (4): trainer ↛ shared-memory WATCHER namespace (R11-C1 critique-leak boundary) ──
+def test_denial_4_trainer_cannot_reach_watcher_memory_namespace():
+    trainers = _trainer_modules()
+    assert trainers, "no trainer modules discovered — denial (4) would be vacuous"
+    # Anchor: denial 4 must NOT sweep the C1 adoption layer. memory_projection.py legitimately
+    # reads lib.trainer_db AND writes memory — it is NOT a trainer_*.py glob member, so it must
+    # be ABSENT from the trainer module set (else a valid write path would be falsely denied).
+    assert not any(os.path.basename(t) == "memory_projection.py" for t in trainers), (
+        f"memory_projection.py was swept into the trainer glob — denial 4 must not scan it: {trainers}")
+    hits = []
+    for rel in trainers:
+        hits += scan_file(
+            rel,
+            forbid_import=_imports_watcher_memory_ns,
+            symbol_names={"watcher_memory", "watcher_scope"},
+            string_subs={"watcher_memory"},
+        )
+    assert hits == [], f"trainer reaches the watcher memory namespace — leak boundary broken: {hits}"
+    print(f"  (4) trainer ↛ watcher_memory namespace: 0 refs across {len(trainers)} live trainer "
+          f"module(s): PASS")
+
+
 # ── Self-validation: the scanner MUST catch a real ref AND ignore prose ──
 def test_scanner_catches_real_refs_and_ignores_prose():
     # (a) a fragile module importing the integrity store — denial (1a) MUST fire.
@@ -254,11 +296,35 @@ def test_scanner_catches_real_refs_and_ignores_prose():
                             string_subs={"auto_config"})
     assert len(halt_hits) >= 2, f"auto-halt import+attr not both caught: {halt_hits}"
 
+    # (f) R11-C1 denial 4 — a trainer USING the watcher scope MUST fire via symbol_names
+    #     (the realistic vector); a hypothetical ``watcher_memory`` shim import MUST fire via
+    #     forbid_import. Importing lib.memory_db for trainer_scope is deliberately NOT a hit.
+    poison_ws_use = (
+        "from lib.memory_db import trainer_scope, watcher_scope\n"
+        "def farm():\n"
+        "    return watcher_scope().count()\n"
+    )
+    assert scan_source(poison_ws_use, "poison_ws_use.py",
+                       symbol_names={"watcher_memory", "watcher_scope"}), "watcher_scope use not caught"
+    poison_ws_import = "from lib.watcher_memory import get_connection\n"
+    assert scan_source(poison_ws_import, "poison_ws_import.py",
+                       forbid_import=_imports_watcher_memory_ns), "watcher_memory shim import not caught"
+
+    # (g) a raw string SELECT against the shared watcher namespace MUST fire (string_subs) —
+    #     the reason we scan strings: a table is reached by a PATH/name, not just a symbol.
+    poison_ws_sql = (
+        'import sqlite3\nc = sqlite3.connect("data/memory.db")\n'
+        'c.execute("SELECT * FROM watcher_memory")\n'
+    )
+    assert scan_source(poison_ws_sql, "poison_ws_sql.py",
+                       string_subs={"watcher_memory"}), "raw watcher_memory SELECT not caught"
+
     # (e) PROSE in a docstring + a comment must NOT fire under ANY denial's spec.
     prose = (
         '"""This module never touches watcher_integrity_db, watcher.db, watcher_db,\n'
-        'auto_config, killswitch, set_enabled, or auto_trader — all denied by design."""\n'
-        "y = 1  # not killswitch, not auto_config, not watcher.db\n"
+        'watcher_memory, watcher_scope, auto_config, killswitch, set_enabled, or\n'
+        'auto_trader — all denied by design."""\n'
+        "y = 1  # not killswitch, not auto_config, not watcher.db, not watcher_memory\n"
     )
     for spec in (
         dict(forbid_import=_imports_integrity_db, symbol_names={"watcher_integrity_db"},
@@ -267,16 +333,19 @@ def test_scanner_catches_real_refs_and_ignores_prose():
              string_subs={"watcher.db", "watcher_integrity.db", "watcher_db", "watcher_integrity_db"}),
         dict(forbid_import=_imports_halt_lever, symbol_names={"set_enabled", "killswitch", "force_close"},
              string_subs={"auto_config"}),
+        dict(forbid_import=_imports_watcher_memory_ns, symbol_names={"watcher_memory", "watcher_scope"},
+             string_subs={"watcher_memory"}),
     ):
         assert scan_source(prose, "prose.py", **spec) == [], f"prose false-flagged under {spec}"
-    print("  self-validation: scanner catches real import/string/attr refs + ignores "
-          "docstring & comment prose: PASS")
+    print("  self-validation: scanner catches real import/string/attr refs (incl. R11-C1 "
+          "denial 4) + ignores docstring & comment prose: PASS")
 
 
 _TESTS = [
     test_denial_1_zero_cross_import_both_directions,
     test_denial_2_trainer_cannot_read_watcher_store,
     test_denial_3_watcher_never_auto_halts,
+    test_denial_4_trainer_cannot_reach_watcher_memory_namespace,
     test_scanner_catches_real_refs_and_ignores_prose,
 ]
 
