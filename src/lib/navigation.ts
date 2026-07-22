@@ -76,8 +76,13 @@ export const ZONES: ReadonlyArray<Zone> = [
   {
     id: "intel",
     href: "/intel",
-    label: "Shadows",
-    shortLabel: "SHADOWS",
+    // R12-B3: zone RENAME only — route id + href stay "intel"/"/intel" (the whole
+    // /api/intel/* namespace + HUB_REDESIGN_INTEL + the route folder are unchanged).
+    // The TRAINER cockpit renders here when HUB_REDESIGN_TRAINER is on (B1); the
+    // Shadows view renders when it's off. Accent stays magenta → refined plum
+    // (accentTextClass), the TRAINER identity.
+    label: "Trainer",
+    shortLabel: "TRAINER",
     icon: Brain,
     accent: "magenta",
     // H1 (2026-07-09): the "Impact" ($-rank) + "Daily Edge" tabs were removed —
@@ -90,14 +95,6 @@ export const ZONES: ReadonlyArray<Zone> = [
     defaultSubTab: "shadow",
   },
   {
-    id: "docs",
-    href: "/docs",
-    label: "Docs",
-    shortLabel: "Docs",
-    icon: BookOpen,
-    accent: "amber",
-  },
-  {
     // RM-HUB-INTEL B2 (2026-07-11): the 4 raw MEMORY sub-tabs (Brain / Memory /
     // ChromaDB / Aggressive) + their sections were stripped and replaced by a
     // single quick-glance "Memory & Intelligence" loop_health dashboard. Now a
@@ -108,10 +105,25 @@ export const ZONES: ReadonlyArray<Zone> = [
     // HUB_AGGRESSIVE_TOGGLE_ENABLED is tombstoned (=false), never dropped.
     id: "memory",
     href: "/memory",
-    label: "Memory",
-    shortLabel: "Memory",
+    // R12-B3: zone RENAME only — route id + href stay "memory"/"/memory" (the
+    // /api/memory/* namespace + HUB_REDESIGN_MEMORY + the route folder are
+    // unchanged). The WATCHER cockpit renders here when HUB_REDESIGN_WATCHER is on
+    // (B2); the loop_health glance renders when it's off. Accent stays cyan → the
+    // refined cyan-soft, the WATCHER identity (distinct from TRAINER's plum).
+    label: "Watcher",
+    shortLabel: "Watcher",
     icon: Database,
     accent: "cyan",
+  },
+  {
+    // R12-B3 (2026-07-22): DOCS moved AFTER memory(Watcher), before health —
+    // target zone order auto → intel(Trainer) → memory(Watcher) → docs → health.
+    id: "docs",
+    href: "/docs",
+    label: "Docs",
+    shortLabel: "Docs",
+    icon: BookOpen,
+    accent: "amber",
   },
   {
     // B4: Health home — the promoted <HealthSection> view (single-view zone).

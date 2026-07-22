@@ -5,6 +5,7 @@ import { ErrorsSection } from "./errors-section";
 import { IntegritySection } from "./integrity-section";
 import { LevelSection } from "./level-section";
 import { MemoryIntelSection } from "@/components/memory/memory-intel-section";
+import { ZoneEyebrow } from "@/components/zone-eyebrow";
 
 /**
  * WATCHER zone dispatcher (R12-B2). Renders the cockpit surface where Ghost
@@ -47,5 +48,14 @@ export function WatcherZoneView({ subtab }: WatcherZoneViewProps) {
     }
   })();
 
-  return <div className="mx-auto w-full max-w-screen-2xl">{view}</div>;
+  return (
+    <div className="mx-auto w-full max-w-screen-2xl">
+      {/* R12-B3 flare: the WATCHER identity strip rides ABOVE the section (which
+          owns its own padding) so {view} renders byte-identical to before. */}
+      <div className="px-4 pt-4 md:px-6 lg:px-8">
+        <ZoneEyebrow zone="watcher" />
+      </div>
+      {view}
+    </div>
+  );
 }

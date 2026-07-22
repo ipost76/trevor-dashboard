@@ -5,6 +5,8 @@ import { TrainerSearchSection } from "./trainer-search-section";
 import { TrainerReasoningSection } from "./trainer-reasoning-section";
 import { PromotionCandidatesList } from "./promotion-candidates-list";
 import { CapabilityQueueSection } from "./capability-queue-section";
+import { TrainerPauseControl } from "./trainer-pause-control";
+import { ZoneEyebrow } from "@/components/zone-eyebrow";
 
 /**
  * TRAINER page dispatcher (R12-B1). Rendered by /intel when HUB_REDESIGN_TRAINER
@@ -33,7 +35,11 @@ export function TrainerZoneView({ subtab }: { subtab: string }) {
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      <ZoneEyebrow zone="trainer" />
       <MemoryLivenessLine />
+      {/* R12-B3: the trainer pause control — renders NOTHING until
+          HUB_PAUSE_CONTROL_ENABLED is on (default OFF), so this is inert today. */}
+      <TrainerPauseControl />
       {subtab === "reasoning" ? (
         <TrainerReasoningSection />
       ) : subtab === "promotions" ? (

@@ -52,6 +52,41 @@ const OPS = {
       return null;
     },
   },
+
+  // R12-B3 (2026-07-22): the trainer PAUSE control (H5). Records a durable pause
+  // REQUEST for the trainer + R8 loop; it does NOT stop an already-running loop —
+  // trainer_loop.run_trainer_loop checks TRAINER_LOOP_ENABLED once at entry, so
+  // the daemon must POLL this state per-iteration (wired in R13). Flag-gated
+  // HUB_PAUSE_CONTROL_ENABLED (default OFF), enforced AUTHORITATIVELY VM-side by
+  // gw_exec._flag_on (423 when off); this Hub `flag` field is reference + the UI
+  // renders the control only when it reads on. The VM script (set_trainer_pause.py)
+  // writes ONLY the additive trainer_pause_state row (+ the gateway's change_log
+  // audit) — NO WATCHER_* flag, NO champion/shadow_defs, NO level mint. THE
+  // WATCHER STAYS ON.
+  //
+  // 🚨 validate REJECTS any key other than `reason` (STRUCTURAL, mirrors
+  // promotion.approve) so no config field — and no WATCHER_* key — can enter the
+  // args at this Hub choke, BEFORE the envelope is forwarded to the VM.
+  "trainer.pause": {
+    flag: "HUB_PAUSE_CONTROL_ENABLED",
+    validate: (a) => {
+      const allowed = new Set(["reason"]);
+      const extra = Object.keys(a).filter((k) => !allowed.has(k));
+      if (extra.length) return `unexpected key(s): ${extra.join(", ")}`;
+      if (a.reason !== undefined && typeof a.reason !== "string") return "reason must be a string";
+      return null;
+    },
+  },
+  "trainer.resume": {
+    flag: "HUB_PAUSE_CONTROL_ENABLED",
+    validate: (a) => {
+      const allowed = new Set(["reason"]);
+      const extra = Object.keys(a).filter((k) => !allowed.has(k));
+      if (extra.length) return `unexpected key(s): ${extra.join(", ")}`;
+      if (a.reason !== undefined && typeof a.reason !== "string") return "reason must be a string";
+      return null;
+    },
+  },
 };
 
 function getOp(name) {
