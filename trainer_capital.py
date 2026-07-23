@@ -89,7 +89,7 @@ def _clamp_ceiling(x: float) -> float:
     return min(max(float(x), 1e-9), _CEILING_MAX)
 
 
-def propose_deployment_ceiling(candidate: Dict[str, Any], level: int = 0, *,
+def propose_deployment_ceiling(candidate: Dict[str, Any], level: int, *,
                                weights: Optional[Dict[str, float]] = None,
                                conn: Any = None) -> float:
     """Propose a survival-safe ``deployment_ceiling`` for ``candidate`` at ``level``.
@@ -161,7 +161,7 @@ def _compass_improves(v_with: Dict[str, Any], v_without: Dict[str, Any]) -> bool
     return False               # unscorable (sortino < 3 obs) → can't prove improvement
 
 
-def propose_regime_posture(candidate: Dict[str, Any], level: int = 0, *,
+def propose_regime_posture(candidate: Dict[str, Any], level: int, *,
                            weights: Optional[Dict[str, float]] = None,
                            conn: Any = None) -> Dict[str, Any]:
     """Propose a ``regime_as_posture`` (trade smaller in chaos, more in calm) as a

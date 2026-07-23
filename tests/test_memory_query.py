@@ -28,8 +28,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# is_known_dead_end must be byte-identical after B1 — the recorded Phase-0 baseline sha256.
-_TRAINER_REASONING_SHA256 = "1e46451a792de516631795274b97dd46a8ed427cc14ba304a591d1cac7cb3bdf"
+# is_known_dead_end must be byte-identical to the recorded baseline sha256.
+# RF1-B2 (2026-07-23): re-baselined — the authorized _level_of conversion (silent 0 default →
+# loud raise on a level-less candidate; sibling #5 of BLOCK-2) changed trainer_reasoning.py's
+# bytes. is_known_dead_end's BEHAVIOR is unchanged (functional half (b) below + the full
+# test_trainer_reasoning suite 8/8 both green); only _level_of's missing-level fallback changed.
+_TRAINER_REASONING_SHA256 = "e3465a8e2af3b256b19f1bcfa33148a88063497811f409fb0163e9c6e4002d99"
 
 
 # ── isolated-db harness ──

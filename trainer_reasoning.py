@@ -117,7 +117,9 @@ def _arm_axes(candidate: Any) -> Dict[str, Any]:
 
 
 def _level_of(candidate: Any) -> int:
-    """The candidate's level_id (default 0)."""
+    """The candidate's level_id. RF1-B2: NO silent 0 default — an explicit level (incl. 0)
+    is honored, but a candidate with NO resolvable level_id/level RAISES rather than
+    silently tagging a reasoning entry at level 0 (the BLOCK-2 corruption class)."""
     if isinstance(candidate, dict):
         for key in ("level_id", "level"):
             val = candidate.get(key)
@@ -126,7 +128,9 @@ def _level_of(candidate: Any) -> int:
                     return int(val)
                 except (TypeError, ValueError):
                     pass
-    return 0
+    raise ValueError(
+        "candidate has no resolvable level_id/level — refusing to silently tag a "
+        "reasoning entry at level 0 (RF1-B2)")
 
 
 def candidate_arm_hash(candidate: Any) -> str:

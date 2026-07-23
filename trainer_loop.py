@@ -72,10 +72,11 @@ import os
 import shlex
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # B0–B5 modules (import-safe on WSL; each gates its own live behavior behind a flag).
 import trainer_bandit
@@ -523,7 +524,7 @@ def _run_one_iteration(
     trace: Dict[str, Any] = {"level": int(level)}
 
     # 1) sample arm (B2) — inert {enabled:False} when TRAINER_BANDIT_ENABLED is off.
-    step = trainer_bandit.run_search_step(schema, int(level), rng=rng)
+    step = trainer_bandit.run_search_step(schema, level=int(level), rng=rng)
     trace["sample"] = {"enabled": step.get("enabled"), "arm_hash": step.get("arm_hash")}
     if not step.get("enabled") or not step.get("arm"):
         trace["skipped"] = step.get("reason", "no arm")
@@ -769,14 +770,125 @@ def _new_rng():
     return random.Random()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. RF1-B2 (BLOCK-2) — live-level resolution: resolve the minted level from the
+#    VM chain, hard-UNKNOWN on any failure, REJECT < 1. NO numeric default, EVER.
+# ═══════════════════════════════════════════════════════════════════════════
+# The authoritative level lives ONLY in the VM chain (repo-root rebuild_tracker.db,
+# read via scripts/level/level_query.py). MAX(level_id) in ANY WSL table is a LAGGING
+# proxy (G9) and is NEVER read here. Mirrors memory_tiers._read_current_level_via_ssh
+# discipline (read-only ssh, allowlist the 'current' reader subcommand, sudo -u trevor
+# opens a mode=ro handle, hard subprocess timeout, ANY failure → UNKNOWN) PLUS the
+# trainer-specific rule that a resolved value < 1 is UNKNOWN too. 🚨 0 IS THE CORRUPTION
+# this blocker exists to stop — level_query.current_level() returns 0 on an empty table
+# (TRAP A's door), so the trainer must REFUSE on < 1 rather than tag its whole corpus at
+# level 0. The watcher_integrity precedent treats current_level >= 1 as "positively
+# verified"; this matches that bar. The F8 door is closed CALLER-SIDE (this new reader),
+# never by touching the VM-side current_level() or memory_tiers (which legitimately
+# accepts 0 as "no demotion, safe" — a VM-side source hardening is a documented VM-tab
+# follow-up, no code here).
+_LEVEL_QUERY = os.environ.get("TRAINER_LEVEL_QUERY", "scripts/level/level_query.py")
+
+
+def _level_shim_timeout() -> float:
+    """Hard subprocess timeout (s) for the level read — a hung ssh becomes UNKNOWN.
+    Env-overridable for the timeout failure-mode test."""
+    raw = os.environ.get("TRAINER_LEVEL_SSH_TIMEOUT", "").strip()
+    try:
+        val = float(raw)
+        return val if val > 0 else 20.0
+    except (ValueError, TypeError):
+        return 20.0
+
+
+def _read_vm_level() -> Tuple[Optional[int], str]:
+    """Read ``current_level`` over the read-only ssh shim → ``(level, detail)``.
+
+    ``(int, "ok")`` on a clean read — the int MAY be 0 (the empty/unminted chain);
+    the < 1 gate lives in ``_resolve_live_level``. ``(None, <detail>)`` on ANY
+    transport/parse failure — spawn / timeout / nonzero / empty / malformed /
+    non-object / non-int / bool. NEVER raises, NEVER a guessed level, NEVER a VM
+    mutation (allowlist = the 'current' reader subcommand only; ``sudo -u trevor``
+    opens a mode=ro handle). ``HOME=/home/ghost`` so the child ssh resolves its
+    key/config regardless of the spawning runtime (the R12-B2 gotcha)."""
+    remote = "cd %s && sudo -u trevor python3 %s current" % (
+        shlex.quote(_VM_DIR), shlex.quote(_LEVEL_QUERY),
+    )
+    argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", _VM_HOST, remote]
+    env = dict(os.environ)
+    env["HOME"] = "/home/ghost"
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True,
+                           timeout=_level_shim_timeout(), env=env, check=False)
+    except subprocess.TimeoutExpired:
+        return None, "ssh_timeout"
+    except (OSError, ValueError) as exc:  # ssh missing / bad argv
+        return None, f"ssh_spawn_failed: {exc}"
+    if p.returncode != 0:
+        return None, f"ssh_nonzero (rc={p.returncode}): {(p.stderr or '').strip()[:200]}"
+    out = (p.stdout or "").strip()
+    if not out:
+        return None, "empty_output"
+    try:
+        data = json.loads(out)
+    except (ValueError, TypeError):
+        return None, "malformed_json"
+    if not isinstance(data, dict):
+        return None, "non_object_body"
+    lvl = data.get("current_level")
+    # bool is an int subclass — reject it explicitly; reject any non-int.
+    if isinstance(lvl, bool) or not isinstance(lvl, int):
+        return None, f"non_int_current_level ({lvl!r})"
+    return lvl, "ok"
+
+
+def _resolve_live_level(
+    reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
+) -> Tuple[Optional[int], str]:
+    """Resolve the minted level for a daemon start → ``(level>=1, "ok")`` or
+    ``(None, reason)``.
+
+    🚨 HARD-UNKNOWN, NO NUMERIC DEFAULT. A resolved value < 1 (INCLUDING the empty-table
+    0 that level_query returns) is UNKNOWN → refuse. ``reader`` is injectable for the
+    isolated-copy acceptance test (default = the read-only ssh shim ``_read_vm_level``)."""
+    read = reader or _read_vm_level
+    lvl, detail = read()
+    if lvl is None:
+        return None, f"unresolved ({detail})"
+    if lvl < 1:
+        return None, (f"level<1 (current_level={lvl}; empty/unminted chain — "
+                      f"the trainer never runs at level 0)")
+    return lvl, "ok"
+
+
 # ── explicit entrypoint (NO import-time execution; flag-gated) ───────────────
-def main() -> int:
-    """The R13 daemon entrypoint. Refuses to run unless ``TRAINER_LOOP_ENABLED``."""
+def main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None) -> int:
+    """The R13 daemon entrypoint. Refuses to run unless ``TRAINER_LOOP_ENABLED`` AND the
+    live level resolves to >= 1 from the VM chain (RF1-B2). ``reader`` is a test seam
+    injected by the isolated-copy acceptance gate; production passes nothing (the real
+    read-only ssh shim). NEVER passes a numeric default to ``run_trainer_loop``."""
     if not loop_enabled():
         print(json.dumps({"enabled": False,
                           "reason": f"{LOOP_FLAG} off — the trainer daemon does not start"}))
         return 0
-    result = run_trainer_loop()
+    # RF1-B2 / BLOCK-2: resolve the live level from the authoritative VM chain and REFUSE
+    # on hard-UNKNOWN. There is NO numeric default anywhere — 0 IS the corruption. A daemon
+    # that refuses HERE is the fix WORKING (see the go-live runbook), not a failure.
+    level, why = _resolve_live_level(reader)
+    if level is None:
+        # 🚨 Loud, durable-on-stderr refusal (the trainer's OWN daemon journal — the always-
+        # available surface). The #qa-agent alert row (auto_trader.observability._insert_alert)
+        # is a VM module, NOT in-process-reachable from WSL — and an ssh emit would itself fail
+        # on the ssh-failure/timeout refusal cases — so it is marked PENDING, never faked here.
+        print(
+            f"[trainer_loop] REFUSING TO START — {LOOP_FLAG} on but the live level did not "
+            f"resolve to >= 1: {why}. No numeric default; the trainer does NOT run at level 0.",
+            file=sys.stderr,
+        )
+        print(json.dumps({"enabled": True, "started": False,
+                          "reason": "level_unresolved", "detail": why}))
+        return 1
+    result = run_trainer_loop(level=level)
     print(json.dumps(result))
     return 0
 

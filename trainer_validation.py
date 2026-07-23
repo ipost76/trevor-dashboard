@@ -203,7 +203,7 @@ def enabled() -> bool:
     )
 
 
-def family_k(level_id: int = 0, *, db_path: Optional[str] = None) -> int:
+def family_k(level_id: int, *, db_path: Optional[str] = None) -> int:
     """n_trials = the family K the trainer's bandit has swept at ``level_id``.
 
     = COUNT of distinct arms with a posterior row at this level (one row per arm
@@ -266,7 +266,7 @@ def validate_candidate(
     masks: Optional[List[Dict[str, Any]]] = None,
     shadow_key: Optional[str] = None,
     shadow_stats: Optional[Dict[str, Any]] = None,
-    level_id: int = 0,
+    level_id: int,
     n_trials: Optional[int] = None,
     min_n: Optional[int] = None,
     bh_significant: bool = False,
@@ -384,6 +384,6 @@ if __name__ == "__main__":
             ["confidence", "atr_at_entry"],
             shadow_stats={"edge_series": [0.4, -0.1, 0.6, 0.3, -0.05, 0.5, 0.2, 0.35],
                           "n_div": 40, "dead_div": 8, "n_comp": 40, "dead_comp": 20},
-            min_n=38, run_throttle=False,
+            level_id=0, min_n=38, run_throttle=False,
         )
         print(json.dumps({"smoke": _r}, indent=2, default=str))

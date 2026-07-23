@@ -88,7 +88,7 @@ def test_flag_off_is_inert():
         raise AssertionError("flag OFF must not open the ssh pipe")
     subprocess.run = _poison
     try:
-        r = tv.validate_candidate(["confidence"], shadow_stats=_STATS)
+        r = tv.validate_candidate(["confidence"], shadow_stats=_STATS, level_id=0)
         assert r == {"enabled": False, "ok": False,
                      "reason": f"{tv.TRAINER_VALIDATION_ENABLED_ENV} off"}, r
         assert tv.enabled() is False
@@ -131,7 +131,7 @@ def test_live_validation_sequence():
     os.environ[tv.TRAINER_VALIDATION_ENABLED_ENV] = "true"
     try:
         # A) Layer 1 — a BANNED ledger column rejects.
-        a = tv.validate_candidate(["adjusted_confidence"], shadow_stats=_STATS,
+        a = tv.validate_candidate(["adjusted_confidence"], shadow_stats=_STATS, level_id=0,
                                   min_n=38, run_throttle=False)
         assert a.get("leakage_reject") is True and a.get("reject_layer") == 1, a
 
@@ -142,21 +142,21 @@ def test_live_validation_sequence():
         leaky = [1 if s > thr else 0 for s in stat]
         b = tv.validate_candidate(["confidence"], masks=[{
             "name": "fullsample_pctile", "stat_series": stat, "mask": leaky,
-            "quantile": 0.75, "comparison": ">"}], shadow_stats=_STATS,
+            "quantile": 0.75, "comparison": ">"}], shadow_stats=_STATS, level_id=0,
             min_n=38, run_throttle=False)
         assert b.get("leakage_reject") is True and b.get("reject_layer") == 2, b
 
         # C) both layers pass -> a verdict.
-        c = tv.validate_candidate(["confidence", "atr_at_entry"], shadow_stats=_STATS,
+        c = tv.validate_candidate(["confidence", "atr_at_entry"], shadow_stats=_STATS, level_id=0,
                                   min_n=38, run_throttle=False)
         assert c.get("ok") and c.get("leakage_reject") is False, c
         assert c["verdict"]["verdict"] in ("READY", "PROMISING", "NOT_READY"), c
         assert "deflated_sharpe" in c["verdict"]["metrics"], c
 
         # D) bar rises with trials: K=1 DSR > K=5000 DSR.
-        d1 = tv.validate_candidate(["confidence"], shadow_stats=_STATS, n_trials=1,
+        d1 = tv.validate_candidate(["confidence"], shadow_stats=_STATS, level_id=0, n_trials=1,
                                    min_n=38, run_throttle=False)
-        d2 = tv.validate_candidate(["confidence"], shadow_stats=_STATS, n_trials=5000,
+        d2 = tv.validate_candidate(["confidence"], shadow_stats=_STATS, level_id=0, n_trials=5000,
                                    min_n=38, run_throttle=False)
         dsr1 = d1["verdict"]["metrics"]["deflated_sharpe"]
         dsr2 = d2["verdict"]["metrics"]["deflated_sharpe"]

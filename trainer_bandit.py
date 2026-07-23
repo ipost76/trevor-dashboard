@@ -619,7 +619,7 @@ def sample_arm(candidate_arms: Sequence[Dict[str, Any]], level: int, *,
 # ═══════════════════════════════════════════════════════════════════════════
 # Orchestration entry (flag-gated) — propose the next config to try
 # ═══════════════════════════════════════════════════════════════════════════
-def run_search_step(schema: Optional[Dict[str, Any]] = None, level: int = 0, *,
+def run_search_step(schema: Optional[Dict[str, Any]] = None, *, level: int,
                     conn=None, rng: Optional[random.Random] = None,
                     n_fresh: int = 8, n_exploit: int = 8,
                     max_depth: Optional[int] = None) -> Dict[str, Any]:
@@ -683,4 +683,4 @@ if __name__ == "__main__":
     print(f"arm_hash: {arm_hash(_a)}")
     print(f"canonical: {canonicalize_arm(_a)}")
     print(f"flag enabled(): {enabled()}  (run_search_step dormant unless set)")
-    print(f"run_search_step (flag off): {run_search_step(_schema)}")
+    print(f"run_search_step (flag off): {run_search_step(_schema, level=0)}")

@@ -233,7 +233,7 @@ def test_run_search_step_broadens_live():
     os.environ[tb.FLAG_ENV] = "1"                          # flag ON for the live path
     try:
         schema = tb.default_axis_schema()
-        cold = tb.run_search_step(schema, 0, conn=conn, rng=random.Random(5))
+        cold = tb.run_search_step(schema, level=0, conn=conn, rng=random.Random(5))
         assert cold["enabled"] is True and cold["arm"] is not None
         assert cold["depth_cap"] == 1, cold                # cold start narrows to one axis
         # Accumulate grounding so total axis-obs crosses BROADEN_STEP.
@@ -243,7 +243,7 @@ def test_run_search_step_broadens_live():
             if arm:
                 tb.update_posterior(tb.arm_hash(arm), 0, 0.5, conn=conn,
                                     axes_json=tb.canonicalize_arm(arm))
-        warm = tb.run_search_step(schema, 0, conn=conn, rng=random.Random(5))
+        warm = tb.run_search_step(schema, level=0, conn=conn, rng=random.Random(5))
         assert warm["depth_cap"] >= 2, warm                # broadened past one axis
     finally:
         os.environ.pop(tb.FLAG_ENV, None)
@@ -294,7 +294,7 @@ def test_callable_axis_samples_enumerated_policies():
 
 def test_run_search_step_dormant_when_flag_off():
     os.environ.pop(tb.FLAG_ENV, None)
-    res = tb.run_search_step(tb.default_axis_schema(), 0)
+    res = tb.run_search_step(tb.default_axis_schema(), level=0)
     assert res == {"enabled": False, "arm": None, "arm_hash": None,
                    "reason": f"{tb.FLAG_ENV} off"}, res
     print("  run_search_step dormant (byte-identical inert) when flag off: PASS")
