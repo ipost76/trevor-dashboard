@@ -238,6 +238,11 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 - **Never modify files under `/home/trevor/trevor/`** from a Hub prompt — only read its `trevor.db`.
 - Bot-side engineering rules — file protection, deploy discipline, the honesty protocol — live in `/home/trevor/trevor/BEHAVIOR_RULES.md` + `/home/trevor/trevor/CLAUDE.md`. Cross-reference them; do not copy them here.
 - Honesty protocol applies to Hub work too: never claim done / fixed / working without pasted command output.
+- **Capital deposits & fund transfers are [HUMAN]-only — no box can move funds (R13-RUNBOOK-HUB, 2026-07-22).** Neither the VM nor this WSL box holds a key that can sign a value transfer; the VM holds only a **trade-only agent key** (places/cancels orders, cannot move USDC).
+  - **Trading account (deposit target):** `0x3dB742D5F533d6e0917D6214a3760436B67C4ed3` (`…7C4ed3`).
+  - **THE ONE RULE:** Hyperliquid credits the **sender** of a bridge deposit — the deposit must originate **from the trading wallet itself**. Bridging from any other wallet credits *that* wallet and the funds land off the trading account.
+  - **Full runbook lives on the VM** (procedure + recovery + the two scripts). Read it from here: `ssh vm 'sudo -u trevor cat /home/trevor/trevor/docs/CAPITAL_DEPOSIT_RUNBOOK.md'`.
+  - **Future CC session:** if Ghost or the planning chat asks about adding capital or a deposit that didn't arrive, read that runbook and brief from it — **never** propose that a box (VM or WSL) execute the transfer.
 
 ---
 
