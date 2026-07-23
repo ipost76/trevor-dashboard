@@ -87,6 +87,7 @@ from lib.trainer_db import get_connection, utc_now
 # ── flags ───────────────────────────────────────────────────────────────────
 LOOP_FLAG = "TRAINER_LOOP_ENABLED"                 # the daemon master gate (default OFF)
 EXECUTOR_FLAG = "SHADOW_LOOP_EXECUTOR_ENABLED"     # the cross-box submission gate (default OFF)
+PAUSE_POLL_FLAG = "TRAINER_PAUSE_POLL_ENABLED"     # R13-P1: the pause-poll arm (default OFF)
 
 
 def _truthy(name: str) -> bool:
@@ -102,6 +103,14 @@ def submissions_enabled() -> bool:
     """WSL-side hint for the cross-box submission gate (default OFF). Off → the client
     short-circuits every RPC to a local no-op (nothing crosses to the VM)."""
     return _truthy(EXECUTOR_FLAG)
+
+
+def pause_poll_enabled() -> bool:
+    """R13-P1 pause-poll arm (default OFF). Read ONCE at loop entry (a deploy-time arm, not
+    a hot-flip) to decide whether ``run_trainer_loop`` constructs a pause poll; the pause
+    STATE (``trainer_pause_state.paused``) is what's polled per-iteration. Off → the loop
+    never polls and is byte-identical to R9-B6."""
+    return _truthy(PAUSE_POLL_FLAG)
 
 
 # ── RPC / VM targets (env-overridable) ──────────────────────────────────────
@@ -624,6 +633,7 @@ def run_trainer_loop(
     sleep_fn: Optional[Callable[[float], None]] = None,
     db_path: Optional[str] = None, epoch: Optional[str] = None,
     on_iteration: Optional[Callable[[Dict[str, Any]], None]] = None,
+    pause_poll: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """The continuous always-on trainer search (decision 4), tying B1–B5 together.
 
@@ -649,11 +659,41 @@ def run_trainer_loop(
     sleep_seconds = float(sleep_seconds) if sleep_seconds is not None else float(
         os.environ.get("TRAINER_LOOP_SLEEP_SECONDS", "60"))
 
+    # R13-P1: construct the pause poll iff armed (or use an injected one for tests). None →
+    # the loop never checks pause and is byte-identical to R9-B6. Import is lazy so flag-OFF
+    # touches nothing (no ssh, no cache) and the module stays import-safe.
+    if pause_poll is None and pause_poll_enabled():
+        import trainer_pause
+        pause_poll = trainer_pause.PausePoll()
+
     heartbeat.pre_register()  # create the loop_heartbeat row once (idempotent)
 
     iterations = 0
+    paused_ticks = 0
     while max_iterations is None or iterations < max_iterations:
         iterations += 1
+
+        # ── R13-P1: pause poll at the TOP of the iteration (before any search work).
+        # 🚨 ONE check covers the trainer search AND the R8 loop: _run_one_iteration is the
+        # SOLE driver of all R8 activity (its client.submit_proposal / read_verdict /
+        # surface_candidate calls), and the VM R8 executor (auto_trader/shadow_executor.py)
+        # is a PASSIVE write endpoint with no self-drive — so pausing here halts scope
+        # 'trainer+r8_loop' in full, with no separate R8-side attachment point (do NOT go
+        # hunting for a second one; there is none — R13-P1 finding). Continue-
+        # NOT-break: the daemon stays alive (emits a heartbeat so the silent-death monitor
+        # never alarms) and resumes cleanly when paused flips to 0 — no wedged state, no lost
+        # cursor (run_trainer_loop holds none; bandit/budget state lives in trainer.db,
+        # untouched by a paused tick). UNKNOWN → is_paused()=False → keep running (surfaced
+        # to stderr + pause_unknown_count, never swallowed) — a transport blip must never
+        # phantom-halt a trainer that never trades.
+        if pause_poll is not None and pause_poll.is_paused():
+            paused_ticks += 1
+            heartbeat.emit()  # alive-but-paused
+            if max_iterations is not None and iterations >= max_iterations:
+                break
+            _sliced_sleep(sleep_fn, sleep_seconds, pause_poll, wake_when_paused=False)
+            continue
+
         err: Optional[BaseException] = None
         try:
             trace = _run_one_iteration(
@@ -671,12 +711,50 @@ def run_trainer_loop(
         heartbeat.emit(error=err)
         if max_iterations is not None and iterations >= max_iterations:
             break
+        # R13-P1: sliced sleep so a pause during the long inter-iteration sleep lands within
+        # ~one TTL (not a full loop cadence). pause_poll None (flag off) → the original single
+        # sleep, byte-identical.
+        if pause_poll is not None:
+            _sliced_sleep(sleep_fn, sleep_seconds, pause_poll, wake_when_paused=True)
+        else:
+            try:
+                sleep_fn(sleep_seconds)
+            except Exception:
+                pass
+
+    result = {"enabled": True, "iterations": iterations, "loop_name": heartbeat.loop_name}
+    if pause_poll is not None:  # additive diagnostics only when armed → flag-OFF return is byte-identical
+        result["paused_ticks"] = paused_ticks
+        result["pause_unknown_count"] = getattr(pause_poll, "unknown_count", 0)
+    return result
+
+
+def _sliced_sleep(sleep_fn: Callable[[float], None], total: float, pause_poll: Any,
+                  *, wake_when_paused: bool) -> None:
+    """R13-P1: sleep ``total`` seconds in TTL-sized slices, re-polling pause between slices
+    so a state change lands within ~one TTL rather than a full loop cadence. Returns early
+    when ``pause_poll.is_paused()`` matches ``wake_when_paused`` — the RUNNING path wakes on
+    a NEW pause (``True``); the PAUSED branch wakes on resume (``False``, incl. UNKNOWN →
+    not-paused → resume, the keep-running failure semantics). Each slice boundary is a
+    cache-served check, so ssh fires at most ~once per TTL, never once per slice. Never
+    raises — a pause-read hiccup must not break the sleep."""
+    remaining = float(total)
+    ttl = getattr(pause_poll, "ttl", 0.0) or remaining
+    slice_len = ttl if ttl > 0 else remaining
+    while remaining > 1e-9:
+        chunk = remaining if remaining < slice_len else slice_len
         try:
-            sleep_fn(sleep_seconds)
+            sleep_fn(chunk)
         except Exception:
             pass
-
-    return {"enabled": True, "iterations": iterations, "loop_name": heartbeat.loop_name}
+        remaining -= chunk
+        if remaining <= 1e-9:
+            break
+        try:
+            if pause_poll.is_paused() == wake_when_paused:
+                return
+        except Exception:
+            pass  # a pause-read failure must never break the sleep loop
 
 
 def _default_validate_fn(**kwargs: Any) -> Dict[str, Any]:

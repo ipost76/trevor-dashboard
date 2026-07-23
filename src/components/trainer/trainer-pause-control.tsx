@@ -5,12 +5,15 @@ import { cn } from "@/lib/utils";
 
 // TrainerPauseControl — R12-B3 (H5), the trainer PAUSE control on the TRAINER page.
 //
-// 🚨 THE HONESTY CONTRACT. This records a durable pause REQUEST; it does NOT stop
-// a running loop. trainer_loop.run_trainer_loop() reads TRAINER_LOOP_ENABLED once
-// at entry — its while-body never re-reads it — so the daemon must POLL the pause
-// state per-iteration (that wiring lands in R13). Until then this records INTENT
-// only. The copy below NEVER renders "trainer paused" as an asserted daemon state
-// — it says "pause requested / recorded / takes effect once the daemon polls".
+// 🚨 THE HONESTY CONTRACT. This records a durable pause REQUEST; the Hub itself
+// never stops a running loop. trainer_loop.run_trainer_loop() historically read
+// TRAINER_LOOP_ENABLED once at entry with no re-read (H5) — so R13-P1 wired a
+// per-cycle POLL of trainer_pause_state (trainer_pause.py) that the daemon actually
+// enforces: when it's running with the poll armed (TRAINER_PAUSE_POLL_ENABLED,
+// default OFF), it stops the trainer + R8 loop within ~30s (the poll TTL). The Hub
+// can't see the daemon's internal state, so the copy below NEVER renders "trainer
+// paused" as an asserted daemon state — only "pause requested / recorded / takes
+// effect within ~30s when armed + running".
 //
 // Gated by HUB_PAUSE_CONTROL_ENABLED (default OFF): when off the control renders
 // NOTHING (returns null). The pause covers the trainer + R8 loop only — it writes
@@ -41,8 +44,8 @@ function messageForStatus(
       return {
         text:
           action === "pause"
-            ? "Pause requested — recorded. The trainer stops once the daemon polls (R13)."
-            : "Resume requested — recorded. The loop restarts once the daemon polls (R13).",
+            ? "Pause requested — recorded. When the trainer daemon is running with the pause poll armed, it stops the trainer + R8 loop within ~30s (the poll interval)."
+            : "Resume requested — recorded. The running daemon resumes within ~30s of picking this up.",
         tone: "ok",
       };
     case 400:
@@ -181,8 +184,8 @@ export function TrainerPauseControl() {
 
       <p className="mt-2 font-sans text-micro leading-relaxed text-fg-muted">
         {paused
-          ? "Pause requested — recorded, not yet enforced. The trainer + R8 loop stop once the daemon polls (R13). The watcher stays on."
-          : "Running — no pause requested. Requesting a pause records intent; the trainer daemon enforces it once wired (R13). This never stops an already-running loop by itself."}
+          ? "Pause requested — recorded. The daemon polls this each cycle: when running with the poll armed, the trainer + R8 loop stop within ~30s. This only records the request — it never asserts a stopped loop. The watcher stays on."
+          : "Running — no pause requested. Recording a pause never stops an already-running loop by itself — the daemon's next per-cycle poll does (R13-P1), within ~30s, when armed + running."}
       </p>
 
       {paused && (data.requested_by || data.reason || data.requested_at) && (
