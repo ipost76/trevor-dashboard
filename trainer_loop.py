@@ -91,6 +91,13 @@ EXECUTOR_FLAG = "SHADOW_LOOP_EXECUTOR_ENABLED"     # the cross-box submission ga
 PAUSE_POLL_FLAG = "TRAINER_PAUSE_POLL_ENABLED"     # R13-P1: the pause-poll arm (default OFF)
 MEMORY_REASONING_FLAG = "MEMORY_REASONING_ENABLED"  # RF2-B2/W4: drive the memory projection (default OFF)
 MEMORY_QUERY_FLAG = "MEMORY_QUERY_ENABLED"          # RF2-B2/W9: have_we_tested superset read (default OFF)
+# RF2-B3: ONE flag gates BOTH the mid-run level-increment detector (W5-U5) AND the SL6
+# anti-lobotomy sweep it enables. They are INSEPARABLE by construction (a detector with the
+# sweep off silently detects flips and does nothing = the campaign's most-repeated defect
+# class wearing a config file; a sweep with no detector is unreachable — the loop re-resolves
+# the level only at main() start). One flag makes the detect-but-don't-sweep state UNREACHABLE.
+LEVEL_DETECTOR_FLAG = "TRAINER_LEVEL_DETECTOR_ENABLED"  # RF2-B3/W5: detector + SL6 sweep (default OFF)
+TEACH_FLAG = "TRAINER_TEACH_ENABLED"               # RF2-B3/W3: WSL-side teach arm (default OFF)
 
 
 def _truthy(name: str) -> bool:
@@ -126,6 +133,21 @@ def memory_query_enabled() -> bool:
     """RF2-B2/W9 arm (default OFF). Off → the self-pushback phase never calls have_we_tested
     (no import, no db) — the loop decision (is_known_dead_end via self_pushback) is unchanged."""
     return _truthy(MEMORY_QUERY_FLAG)
+
+
+def level_detector_enabled() -> bool:
+    """RF2-B3/W5 arm (default OFF). Off → ``run_trainer_loop`` constructs NO detector, never
+    ssh-reads the level mid-run, never sweeps — the loop tags at the loop-START level and is
+    byte-identical to R9-B6 (the U5 gap remains, dormant). Read ONCE at loop entry (a deploy-
+    time arm). ONE flag = detector + sweep together (detect-but-don't-sweep is unreachable)."""
+    return _truthy(LEVEL_DETECTOR_FLAG)
+
+
+def teach_enabled() -> bool:
+    """RF2-B3/W3 WSL-side teach arm (default OFF). Off → the loop never calls
+    ``recommend_execution_guidance`` (no import, nothing crosses). SEPARATE from the VM-side
+    ``BOTBRAIN_TEACH_ENABLED`` fail-closed gate — BOTH must be on for a teach entry to land."""
+    return _truthy(TEACH_FLAG)
 
 
 # ── RPC / VM targets (env-overridable) ──────────────────────────────────────
@@ -375,6 +397,87 @@ class R8HandoffClient:
         out["surfaced"] = True
         out["candidate"] = inner
         out["reason"] = "surfaced to promotion_candidates (Ghost+CC decide priority)"
+        return out
+
+    # ── SL6 anti-lobotomy sweep on a level flip (RF2-B3/W5) ──────────────────
+    def sweep_stale_on_flip(self, current_level: int) -> Dict[str, Any]:
+        """On a level increment N→N+1, R8's ``stale_candidates(N+1)`` names the in-flight
+        level-N rows and ``requeue_stale`` reopens each FORWARD at N+1 (ARCHIVED_STALE →
+        PROPOSED; superseded-not-dead — NO ledger append, NO death-cert). This is the
+        anti-lobotomy guarantee: a null result is archived-not-deleted and reopens at N+1.
+
+        🚨 REFUSE-OR-ALERT — NEVER A SILENT NO-OP. Submit/verdict/surface treat a ``_post``
+        ``None`` as a benign 'queued locally' no-op; HERE that is FORBIDDEN. An unreachable
+        executor means the anti-lobotomy sweep DID NOT RUN — in-flight level-N shadows stay
+        un-archived and un-reopened — so this returns ``ok=False`` on unreachable and the
+        caller surfaces it LOUD + RETRIES (does not advance ``last_swept_level``). The failure
+        is never swallowed. This is the campaign's most-repeated defect class (three prior
+        instances); the sweep must not be the fourth.
+
+        Returns ``{ok, reachable, swept, current_level, reason, requeue_failures}``:
+          • WSL/VM flag OFF → ``ok=True`` (benign inert: submissions were no-ops too, so
+            nothing crossed to be in-flight → nothing to sweep → advance, no alarm).
+          • executor unreachable → ``ok=False, reachable=False`` (RETRYABLE — THE alarm).
+          • executor error / partial requeue failure → ``ok=False, reachable=True`` (RETRYABLE;
+            VM ``requeue_stale`` is idempotent, so re-running the whole sweep is safe).
+          • full success → ``ok=True, reachable=True, swept=N``.
+        Never raises."""
+        out: Dict[str, Any] = {"ok": False, "reachable": None, "swept": 0,
+                               "current_level": int(current_level), "reason": None,
+                               "requeue_failures": 0}
+        if not submissions_enabled():
+            # EXECUTOR_FLAG off on WSL: the loop's submissions never crossed, so there is
+            # nothing in-flight to sweep. Benign inert (NOT the anti-lobotomy alarm) → advance.
+            out.update(ok=True, reason=f"{EXECUTOR_FLAG} off (WSL) — nothing crossed to sweep")
+            return out
+        read = self._post("shadow.stale_candidates",
+                          {"current_level": int(current_level), "trevor_db": self.trevor_db})
+        if read is None:  # 🚨 UNREACHABLE — the anti-lobotomy sweep DID NOT RUN.
+            out.update(reachable=False,
+                       reason="executor unreachable — SL6 sweep did NOT run (RETRYABLE): "
+                              "in-flight level-N shadows NOT archived/reopened")
+            return out
+        if not read.get("ok"):
+            out.update(reachable=True,
+                       reason=f"executor error on stale_candidates: {read.get('error')}")
+            return out
+        candidates = read.get("result")
+        if candidates is None:  # VM flag OFF → dispatch returns {ok:True, result:None}. Benign.
+            out.update(ok=True, reachable=True,
+                       reason=f"{EXECUTOR_FLAG} off on VM (result None) — nothing to sweep")
+            return out
+        if not isinstance(candidates, list):
+            out.update(reachable=True,
+                       reason=f"malformed stale_candidates result: {type(candidates).__name__}")
+            return out
+        # requeue each stale row forward at N+1. VM requeue_stale is idempotent (no-ops an
+        # already-ARCHIVED_STALE row) → a partial failure safely retries the WHOLE sweep.
+        swept = 0
+        failures = 0
+        for cand in candidates:
+            sid = cand.get("shadow_id") if isinstance(cand, dict) else None
+            if not sid:
+                failures += 1
+                continue
+            resp = self._post("shadow.requeue_stale",
+                              {"shadow_id": sid, "trevor_db": self.trevor_db})
+            if resp is None:  # unreachable mid-sweep → partial → retry the whole sweep.
+                out.update(reachable=False, swept=swept, requeue_failures=failures + 1,
+                           reason=f"executor went unreachable mid-sweep after {swept} requeued "
+                                  f"(RETRYABLE): remaining level-N shadows NOT reopened")
+                return out
+            if not resp.get("ok") or resp.get("result") is None:
+                failures += 1
+                continue
+            swept += 1
+        if failures:
+            out.update(reachable=True, swept=swept, requeue_failures=failures,
+                       reason=f"{swept} requeued, {failures} failed (RETRYABLE — VM requeue "
+                              f"is idempotent)")
+            return out
+        out.update(ok=True, reachable=True, swept=swept,
+                   reason=f"SL6 sweep complete — {swept} stale level-N shadow(s) "
+                          f"archived+reopened at N+1")
         return out
 
 
@@ -647,6 +750,41 @@ def _run_one_iteration(
                                             reasoning=rationale)
         trace["surface"] = {"surfaced": surfaced.get("surfaced"), "reason": surfaced.get("reason")}
 
+    # 10) teach (RF2-B3/W3) — recommend how the R5 bot-brain EXECUTES better, by handing the
+    #     loop's REAL validated outcome to trainer_teach as ONE natural-language string. NO
+    #     simulator: the ``rationale`` is narrate_verdict's output over the real VM verdict,
+    #     REUSED (not re-narrated — W3 adds ZERO new Anthropic cost; the ChromaDB write embeds
+    #     with the collection's default LOCAL sentence-transformer, no API → $0/day). 🚨 TEXT
+    #     ONLY, never a numeric weight — the coupling deliberately torn out of training_bridge
+    #     stays torn out; the wire is 100% caller-side, training_bridge.py is byte-untouched.
+    #
+    #     🚨 DECISION (NOT a design finding — v1/v2/RECON-TRAINER-001 are SILENT on the teach
+    #     trigger; A3 §7-U3 offered this as a labelled proposal): teach on a VALIDATED, PROMOTABLE
+    #     learning — ``gate_passed is True AND validation.ok is True``. EXCLUDES compass-rejected,
+    #     pushback-blocked, gate-FAILED (gate_passed is False), leakage-rejected, and UN-GRADEABLE
+    #     (gate_passed is None) arms — only a clean validated promotable outcome teaches. HONEST
+    #     NOTE: production grading is ASYNC, so gate_passed being True in the SAME iteration as
+    #     submission is RARE → teaching is rare + high-signal (the intended cadence, NOT a bug).
+    #
+    #     TWO gates, both required: TRAINER_TEACH_ENABLED (WSL arm, default OFF) AND the VM-side
+    #     BOTBRAIN_TEACH_ENABLED (fail-closed). recommend_execution_guidance NEVER raises
+    #     (malformed → skip+log; transport error → surfaced, never faked as success); the
+    #     try/except is belt-and-suspenders so a teach hiccup can never kill the iteration.
+    if (teach_enabled() and gate_passed is True and isinstance(validation, dict)
+            and validation.get("ok") is True):
+        try:
+            import trainer_teach
+            trainer_teach.recommend_execution_guidance({
+                "text": rationale,
+                "level_id": int(level),
+                "metadata": {"arm_hash": ahash, "stage": "r9_validated_config",
+                             "shadow_id": shadow_id},
+            })
+            trace["taught"] = True
+        except Exception as exc:  # a teach hiccup must never kill an iteration
+            print(f"[trainer_loop] teach failed (non-fatal): {exc!r}", file=sys.stderr)
+            trace["taught"] = False
+
     trace["outcome"] = "completed"
     return trace
 
@@ -663,6 +801,7 @@ def run_trainer_loop(
     db_path: Optional[str] = None, epoch: Optional[str] = None,
     on_iteration: Optional[Callable[[Dict[str, Any]], None]] = None,
     pause_poll: Optional[Any] = None,
+    level_detector: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """The continuous always-on trainer search (decision 4), tying B1–B5 together.
 
@@ -695,10 +834,19 @@ def run_trainer_loop(
         import trainer_pause
         pause_poll = trainer_pause.PausePoll()
 
+    # RF2-B3/W5: construct the mid-run level detector iff armed (or use an injected one for
+    # tests). None → the loop never re-reads the level, tags every row at the loop-START level,
+    # and is byte-identical to R9-B6 (the U5 gap stays dormant). The detector reuses the
+    # existing read-only ssh shim (_read_vm_level); it READS the level, NEVER mints one.
+    if level_detector is None and level_detector_enabled():
+        level_detector = LevelDetector(int(level))
+
     heartbeat.pre_register()  # create the loop_heartbeat row once (idempotent)
 
     iterations = 0
     paused_ticks = 0
+    current_level = int(level)  # the live tag-level; the detector adopts N+1 on a flip.
+    sl6_sweep_unreachable_count = 0
     while max_iterations is None or iterations < max_iterations:
         iterations += 1
 
@@ -723,10 +871,39 @@ def run_trainer_loop(
             _sliced_sleep(sleep_fn, sleep_seconds, pause_poll, wake_when_paused=False)
             continue
 
+        # ── RF2-B3/W5: mid-run level-increment detector + SL6 anti-lobotomy sweep. Runs at the
+        # TOP of the (not-paused) iteration so THIS iteration + W4's projection tag at the
+        # correct (possibly just-flipped) level. Checked ONCE per iteration → ~1 ssh per loop
+        # cadence (negligible at the 60s default; a hung ssh is bounded by _level_shim_timeout,
+        # ~20s, and is non-fatal). It sits inside the not-paused path (after the pause continue)
+        # because the sweep IS R8 work — a paused loop must not sweep. Flag OFF → level_detector
+        # None → current_level stays the loop-START level → byte-identical to R9-B6.
+        if level_detector is not None:
+            level_detector.check()  # adopts N+1 on a flip; surfaces UNKNOWN/monotonic itself
+            current_level = level_detector.current_level
+            if level_detector.needs_sweep():
+                sweep = client.sweep_stale_on_flip(level_detector.current_level)
+                if sweep.get("ok"):
+                    level_detector.mark_swept()
+                    print(f"[trainer_loop] {sweep.get('reason')}", file=sys.stderr)
+                else:
+                    # 🚨 REFUSE-OR-ALERT — the anti-lobotomy sweep did NOT land. LOUD + RETRYABLE
+                    # (last_swept_level NOT advanced → re-attempted next iteration). NEVER a
+                    # silent no-op: a missed sweep leaves in-flight level-N shadows un-archived
+                    # and un-reopened — the guarantee silently didn't run — the campaign's
+                    # most-repeated defect class (three prior instances). The durable #qa-agent
+                    # alert is VM-only (auto_trader.observability._insert_alert, NOT in-process-
+                    # reachable from WSL) → PENDING, never faked (same posture as RF1-B2).
+                    sl6_sweep_unreachable_count += 1
+                    print(f"[trainer_loop] 🚨🚨 SL6 ANTI-LOBOTOMY SWEEP DID NOT RUN at level "
+                          f"{level_detector.current_level}: {sweep.get('reason')}. RETRYABLE — "
+                          f"re-attempting next iteration. #qa-agent alert PENDING (VM-only).",
+                          file=sys.stderr)
+
         err: Optional[BaseException] = None
         try:
             trace = _run_one_iteration(
-                schema=schema, level=int(level), client=client, rng=rng,
+                schema=schema, level=current_level, client=client, rng=rng,
                 backtest_fn=backtest_fn, validate_fn=validate_fn, db_path=db_path,
                 epoch=epoch)
             if on_iteration is not None:
@@ -743,9 +920,10 @@ def run_trainer_loop(
         # (refresh_reasoning_log keeps the MEMORY_REASONING_ENABLED gate — NOT a bare
         # run_projection). Flag OFF → no import, inert {0,0}, byte-identical. A projection error
         # is SURFACED to stderr + NEVER kills the daemon (honesty posture — not a silent
-        # swallow). 🚨 Rows carry the level resolved at loop START (main() >= 1); a mid-run
-        # level flip is W5's increment-detector — NOT wired here — so all rows this run carry
-        # the start-of-loop level (documented W4 constraint, inherited by B3's detector work).
+        # swallow). 🚨 RF2-B3 CLOSED the B2 stale-level constraint: the W5 detector above adopts
+        # N+1 BEFORE the iteration, so _run_one_iteration writes rejection_log/hypotheses rows
+        # at current_level (N+1) and THIS projection tags them at N+1 (not the stale loop-START
+        # level). Rows written before a flip was observed correctly keep the old level.
         if memory_reasoning_enabled():
             try:
                 import memory_reasoning
@@ -770,6 +948,12 @@ def run_trainer_loop(
     if pause_poll is not None:  # additive diagnostics only when armed → flag-OFF return is byte-identical
         result["paused_ticks"] = paused_ticks
         result["pause_unknown_count"] = getattr(pause_poll, "unknown_count", 0)
+    if level_detector is not None:  # RF2-B3/W5 — additive only when armed (flag-OFF byte-identical)
+        result["final_level"] = level_detector.current_level
+        result["level_flips_detected"] = level_detector.flips_detected
+        result["level_read_unknown_count"] = level_detector.unknown_count
+        result["sl6_sweep_pending"] = level_detector.needs_sweep()
+        result["sl6_sweep_unreachable_count"] = sl6_sweep_unreachable_count
     return result
 
 
@@ -902,6 +1086,92 @@ def _resolve_live_level(
         return None, (f"level<1 (current_level={lvl}; empty/unminted chain — "
                       f"the trainer never runs at level 0)")
     return lvl, "ok"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3b. RF2-B3 (W5-U5) — the mid-run level-increment detector.
+# ═══════════════════════════════════════════════════════════════════════════
+class LevelDetector:
+    """Detect a level flip WHILE the loop runs — the piece that makes the SL6 sweep reachable.
+
+    v2 §D.12.7 requires the running loop to become aware of a flip mid-run (it keeps searching
+    against the OLD champion UNTIL the level flips). But the built loop re-resolves the level
+    ONLY at ``main()`` start (RF1-B2), so a long-running loop could never observe an increment
+    — making the SL6 anti-lobotomy sweep unreachable in practice. This closes that: once per
+    iteration the loop re-reads the VM level via the EXISTING read-only shim (``_read_vm_level``
+    — the SAME seam, never a second reader, never a WSL ``MAX(level_id)`` lagging proxy),
+    compares it to the level it holds, and on a flip adopts N+1 and signals the sweep.
+
+    🚨 READS the level, NEVER writes one. ``MAX(level)`` is minted ONLY at go-live (R2), never
+    here. The detector holds NO durable state: on a daemon restart, ``main()`` re-resolves the
+    true level from the authoritative VM chain and a fresh detector inits from that — the
+    in-memory held level need not survive a restart (the VM chain is the source of truth).
+
+    🚨 START-vs-MID-RUN ASYMMETRY (keep this comment — a future reader gets it wrong without it):
+    at START an unresolved level means 'don't know what to tag' → corpus corruption → the daemon
+    REFUSES (``_resolve_live_level``). MID-RUN the level was ALREADY positively resolved (>=1)
+    and the chain is MONOTONIC, so a transient unreachable only DELAYS observing a flip by one
+    cadence — it NEVER corrupts, because the loop keeps tagging at a still-valid level. So a
+    mid-run read failure is keep-running-VISIBLY (stderr + ``unknown_count``), NEVER a refuse and
+    NEVER a silent skip.
+
+    Idempotency: ``last_swept_level`` (init = ``start_level``) tracks the highest flip whose
+    sweep LANDED. ``needs_sweep()`` = ``current_level > last_swept_level``; the caller calls
+    ``mark_swept()`` ONLY on a successful sweep. A flip observed while a prior sweep is un-landed
+    re-fires the sweep (retry); a landed sweep never re-fires (``current == last_swept``)."""
+
+    def __init__(self, start_level: int,
+                 reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None) -> None:
+        self.current_level = int(start_level)
+        # the loop's OWN start-level in-flight shadows need no sweep → last_swept = start.
+        self.last_swept_level = int(start_level)
+        self._read = reader or _read_vm_level
+        self.flips_detected = 0
+        self.unknown_count = 0
+
+    def check(self) -> Dict[str, Any]:
+        """Re-read the VM level (called once per iteration) and adopt N+1 on a flip. Returns a
+        small diagnostics dict. NEVER raises (a read hiccup must not kill an iteration)."""
+        try:
+            lvl, detail = self._read()
+        except Exception as exc:  # defensive — the injected/real reader must never throw here
+            self.unknown_count += 1
+            print(f"[trainer_loop] level-detector read raised (non-fatal; keep running at level "
+                  f"{self.current_level}): {exc!r}", file=sys.stderr)
+            return {"flipped": False, "unknown": True, "current_level": self.current_level}
+        if lvl is None:
+            # 🚨 mid-run unreachable — NOT a silent skip. Keep running at the current known-good
+            # (monotonic-safe) level; surface + count; retry next iteration.
+            self.unknown_count += 1
+            print(f"[trainer_loop] level-detector UNKNOWN ({detail}) — cannot confirm a flip this "
+                  f"tick; keep running at level {self.current_level} (retry next iteration).",
+                  file=sys.stderr)
+            return {"flipped": False, "unknown": True, "current_level": self.current_level}
+        if lvl > self.current_level:
+            prev = self.current_level
+            self.current_level = int(lvl)   # ADOPT N+1 immediately → this iteration + W4's
+            self.flips_detected += 1        # projection tag at N+1 (closes B2's stale-level).
+            print(f"[trainer_loop] 🔺 LEVEL FLIP DETECTED {prev} → {lvl} — adopting {lvl}; SL6 "
+                  f"anti-lobotomy sweep pending.", file=sys.stderr)
+            return {"flipped": True, "unknown": False, "prev": prev,
+                    "current_level": self.current_level}
+        if lvl < self.current_level:
+            # monotonic violation — the level chain never decreases. Ignore (never lower the
+            # level); surface defensively. Impossible on a healthy chain.
+            print(f"[trainer_loop] level-detector read {lvl} BELOW held {self.current_level} "
+                  f"(monotonic violation) — ignoring, staying at {self.current_level}.",
+                  file=sys.stderr)
+            return {"flipped": False, "unknown": False, "current_level": self.current_level}
+        return {"flipped": False, "unknown": False, "current_level": self.current_level}
+
+    def needs_sweep(self) -> bool:
+        return self.current_level > self.last_swept_level
+
+    def mark_swept(self) -> None:
+        """Record that the SL6 sweep for ``current_level`` LANDED. Call ONLY on sweep success —
+        a failed sweep leaves ``last_swept_level`` behind so ``needs_sweep()`` stays True (the
+        retry that makes refuse-or-alert re-attempt, never forget)."""
+        self.last_swept_level = self.current_level
 
 
 # ── explicit entrypoint (NO import-time execution; flag-gated) ───────────────
