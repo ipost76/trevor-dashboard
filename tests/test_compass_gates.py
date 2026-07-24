@@ -84,6 +84,64 @@ def test_insufficient_tail_fails_survival_first():
 
 
 # --------------------------------------------------------------------------
+# gate (a) FAILS SAFE on an UNASSESSABLE curve (RF3T1-B3) — the symmetric
+# survival-first idiom to gate (b). A dd of 0 on ABSENT data is "no data",
+# NOT "no drawdown": every degenerate curve REJECTS; a valid curve with a
+# genuine zero drawdown still PASSES. (These fixtures carry a PASSING tail so
+# any reject is unambiguously due to gate (a).)
+# --------------------------------------------------------------------------
+def test_gate_a_rejects_missing_curve():
+    g = survival_gates({"net_pnl_series": GOOD_PNL}, THR)
+    assert g["passed"] is False and g["dd"] is None, g
+    assert "dd_ceiling(insufficient_curve)" in g["failing"], g
+    print("  gate (a) rejects a MISSING equity curve (fail-safe, not fail-open): PASS")
+
+
+def test_gate_a_rejects_empty_curve():
+    g = survival_gates({"equity_curve": [], "net_pnl_series": GOOD_PNL}, THR)
+    assert g["passed"] is False and g["dd"] is None, g
+    assert "dd_ceiling(insufficient_curve)" in g["failing"], g
+    print("  gate (a) rejects an EMPTY equity curve: PASS")
+
+
+def test_gate_a_rejects_degenerate_curves():
+    # None value, length-1, all-zero, all-NaN -> ALL unassessable -> REJECT, dd None.
+    # (The None value used to CRASH with a TypeError; it now rejects cleanly.)
+    for label, curve in (
+        ("None value", None),
+        ("length-1", [100.0]),
+        ("all-zero", [0.0, 0.0, 0.0]),
+        ("all-NaN", [float("nan"), float("nan")]),
+    ):
+        g = survival_gates({"equity_curve": curve, "net_pnl_series": GOOD_PNL}, THR)
+        assert g["passed"] is False and g["dd"] is None, (label, g)
+        assert "dd_ceiling(insufficient_curve)" in g["failing"], (label, g)
+    print("  gate (a) rejects None/length-1/all-zero/all-NaN (no crash): PASS")
+
+
+def test_gate_a_valid_curve_with_zero_drawdown_still_passes():
+    # THE CRUX: the fix is NOT "dd == 0 -> reject". A VALID multi-point curve that
+    # genuinely never declined is assessed "no drawdown" (dd 0.0) and PASSES.
+    g = survival_gates({"equity_curve": [50, 55, 60], "net_pnl_series": GOOD_PNL}, THR)
+    assert g["passed"] is True and g["dd"] == 0.0 and g["failing"] == [], g
+    # The _DD_MIN_N=2 boundary: a genuine 2-point curve is minimum-assessable, PASSES.
+    g2 = survival_gates({"equity_curve": [100, 101], "net_pnl_series": GOOD_PNL}, THR)
+    assert g2["passed"] is True and g2["dd"] == 0.0, g2
+    print("  gate (a) PASSES a valid curve with a genuine zero drawdown (crux): PASS")
+
+
+def test_evaluate_compass_rejects_no_curve_at_the_wall():
+    # Full path: a candidate with no backtest equity curve is REJECTED at the wall
+    # (survived=False), never scored on absent evidence.
+    cand = {"net_pnl_series": GOOD_PNL, "daily_returns": DAILY, "trades": TRADES}
+    v = evaluate_compass(cand, level=0, weights=W)
+    assert v["survived"] is False and v["verdict"] == "rejected", v
+    assert v["consistency"] is None and v["magnitude"] is None, v
+    assert "dd_ceiling(insufficient_curve)" in v["failing_gates"], v
+    print("  evaluate_compass rejects a curve-less candidate at the wall: PASS")
+
+
+# --------------------------------------------------------------------------
 # evaluate_compass: the WALL short-circuits (no consistency/magnitude on fail)
 # --------------------------------------------------------------------------
 def test_wall_shortcircuits_no_scoring():
@@ -152,6 +210,11 @@ ALL = [
     test_both_clear_passes,
     test_and_semantics_dd_ok_cvar_fail_rejected,
     test_insufficient_tail_fails_survival_first,
+    test_gate_a_rejects_missing_curve,
+    test_gate_a_rejects_empty_curve,
+    test_gate_a_rejects_degenerate_curves,
+    test_gate_a_valid_curve_with_zero_drawdown_still_passes,
+    test_evaluate_compass_rejects_no_curve_at_the_wall,
     test_wall_shortcircuits_no_scoring,
     test_survivor_is_scored,
     test_fixed_order_clamps_inversion,

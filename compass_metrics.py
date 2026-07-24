@@ -193,6 +193,31 @@ def max_drawdown_frac(equity_curve: Sequence[Any]) -> float:
 
 
 # ===========================================================================
+# 3c. _assess_dd — the SURVIVAL-FIRST gate (a) input (RF3T1-B3).
+#     🚨 THE FIX IS *NOT* "dd == 0 -> reject". A VALID multi-point curve that
+#     genuinely never declined returns 0.0 and PASSES (assessed "no drawdown").
+#     A dd of 0 on ABSENT data is "no data", NOT "no drawdown" -> None -> REJECT,
+#     exactly mirroring cvar_95 -> None on an unassessable tail (gate (b)). A
+#     survival gate that fails OPEN on missing/empty data is not a gate.
+# ===========================================================================
+_DD_MIN_N = 2   # a peak-to-trough needs >= 2 points; empty/length-1 = no data
+
+
+def _assess_dd(equity_curve: Sequence[Any]) -> Optional[float]:
+    """Gate (a)'s input. Returns the fractional max-drawdown of ``equity_curve``,
+    or ``None`` when the curve is UNASSESSABLE — missing / empty / ``None`` /
+    fewer than ``_DD_MIN_N`` valid points / no positive peak (all values <= 0, so
+    a fractional drawdown is undefined). ``None`` makes gate (a) fail SAFE
+    (REJECT), never fail OPEN on absent data. A valid curve with genuinely zero
+    drawdown still returns ``0.0`` and clears the gate — the distinction between
+    "no data" (None) and "no drawdown" (0.0) is the whole correctness here."""
+    clean = _values(equity_curve) if equity_curve is not None else []
+    if len(clean) < _DD_MIN_N or not any(v > 0.0 for v in clean):
+        return None
+    return max_drawdown_frac(clean)
+
+
+# ===========================================================================
 # 4. n_eff_bets — NEW (grep=0 repo-wide). Effective number of independent bets
 #    = 1 / HHI(normalized ticker notional weights). Herfindahl inverse.
 # ===========================================================================
@@ -380,24 +405,34 @@ def survival_gates(candidate: Dict[str, Any], thresholds: Dict[str, float]) -> D
     """The TWO-GATE survival WALL — DD ceiling AND CVaR floor, ANDed. A candidate
     that breaches EITHER is rejected at ANY return.
 
-      Gate (a): max_drawdown_frac(equity_curve) <= dd_ceiling   (the slow bleed)
-      Gate (b): cvar_95(net_pnl_series)         >= cvar_floor    (the one-day wick)
+      Gate (a): _assess_dd(equity_curve)  <= dd_ceiling   (slow bleed; None -> REJECT)
+      Gate (b): cvar_95(net_pnl_series)   >= cvar_floor    (the one-day wick)
 
     Returns {passed, dd, cvar, dd_ceiling, cvar_floor, failing}. `failing` names
-    the breached gate(s). SURVIVAL-FIRST: an unassessable left tail (cvar None,
-    < 5 observations) FAILS gate (b) — you cannot clear the survival wall on a
-    tail you cannot prove is safe.
+    the breached gate(s). SURVIVAL-FIRST: an unassessable equity curve (missing /
+    empty / too-short / no positive peak -> dd None) FAILS gate (a), and an
+    unassessable left tail (cvar None, < 5 observations) FAILS gate (b) — you
+    cannot clear the survival wall on data you cannot prove is safe. A dd of 0 on
+    ABSENT data is "no data", not "no drawdown".
     """
     dd_ceiling = float(thresholds["dd_ceiling"])
     cvar_floor = float(thresholds["cvar_floor"])
 
-    dd = max_drawdown_frac(candidate.get(_K_EQUITY, []))
+    dd = _assess_dd(candidate.get(_K_EQUITY, []))
     cvar = cvar_95(candidate.get(_K_NET_PNL, []))
 
     failing: List[str] = []
-    gate_a = dd <= dd_ceiling
+    # dd None -> cannot assess the curve -> conservative FAIL (survival-first),
+    # matching gate (b)'s cvar-None idiom. A dd of 0 on absent data is "no data".
+    gate_a = dd is not None and dd <= dd_ceiling
     if not gate_a:
-        failing.append("dd_ceiling")
+        failing.append("dd_ceiling" if dd is not None else "dd_ceiling(insufficient_curve)")
+        if dd is None:
+            _log.warning(
+                "🚨 COMPASS survival gate (a): unassessable equity curve "
+                "(missing / empty / too-short / no positive peak) — REJECTED. "
+                "No data is not 'no drawdown'."
+            )
     # cvar None -> cannot assess the tail -> conservative FAIL (survival-first).
     gate_b = cvar is not None and cvar >= cvar_floor
     if not gate_b:
