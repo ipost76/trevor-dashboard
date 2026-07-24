@@ -1,0 +1,44 @@
+# /etc/systemd/system/trevor-watcher.service — RF2-C1
+# The R10 watcher oversight loop (surface + review + integrity, A2 shape #5, driven by
+# watcher_health.run_cycle — the ONLY module with a real daemon __main__). review/integrity
+# get NO unit of their own; they run in-process inside this one loop.
+#
+# INSTALL-ONLY today: NOT `enable`d, NOT `--now`. All WATCHER_* flags default OFF, so with
+# the flags off watcher_health.py's main() returns 0 immediately (MEASURED) — under Type=simple
+# the unit would run briefly and go `inactive (dead)`, NOT a live daemon. The real start is an
+# R13 go-live step AFTER `WATCHER_SURFACING_ENABLED=true` is set (+ the review/integrity flags),
+# run via `sudo systemctl enable --now trevor-watcher.service`, then the W15 arm-time check.
+[Unit]
+Description=TREVOR Watcher (oversight loop) — RF-2
+After=network-online.target tailscaled.service
+Wants=network-online.target
+# WSL-local death alert: on a SUSTAINED crash (Restart budget exhausted -> `failed`) systemd
+# starts trevor-alert@trevor-watcher.service, which POSTs to Discord (#qa-agent once minted,
+# else #downloads). A single crash-and-recover never reaches `failed` -> fires nothing.
+OnFailure=trevor-alert@%n.service
+# Defines "sustained failure": 5 failed starts within 300s -> `failed` -> OnFailure fires.
+# At RestartSec=3 that's ~15s of instant crashes; a lone crash-and-recover never trips it.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+# 🚨 EnvironmentFile is how the WATCHER_* flags AND ANTHROPIC_API_KEY reach the process.
+#    Omitting it = the daemon starts with no flags/key: inert + silently under-powered.
+EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
+# 🚨 HOME so run_watcher_loop's heartbeat.pre_register() ssh-pipe write to the VM loop_heartbeat
+#    resolves the `vm` alias + key (tailsync precedent). Without it the heartbeat silently degrades.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 watcher_health.py
+# on-failure (NOT always): flag-OFF main() exits 0 (success) -> no restart-loop of the inert no-op.
+Restart=on-failure
+RestartSec=3
+# 🚨 NO WatchdogSec. A bare one < the 900s inter-cycle sleep would SIGABRT a HEALTHY loop every
+#    cycle, and a hang->kill->restart->hang loop never reaches `failed` so it would never alert
+#    (the wedge row stays documented-open — heartbeat staleness is the eventual signal).
+
+[Install]
+WantedBy=multi-user.target

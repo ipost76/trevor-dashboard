@@ -1,0 +1,24 @@
+# /etc/systemd/system/trevor-alert@.service — RF2-C1
+# WSL-LOCAL death-alert handler, TEMPLATED on the failed unit name.
+#
+# A monitored daemon references this as `OnFailure=trevor-alert@%n.service`, so when
+# that daemon reaches `failed`, systemd starts `trevor-alert@<failed-unit>.service`
+# and %i = the failed unit name (e.g. trevor-watcher.service). One template serves
+# every TREVOR daemon (watcher now; trainer later — same template, zero new handler).
+#
+# 🚨 NO `OnFailure=` on THIS unit — recursion guard. If the alert handler itself fails,
+#    it fails LOUD to its own journal (watcher_alert.py prints to stderr); it never
+#    re-triggers an alert about the alert.
+[Unit]
+Description=TREVOR WSL-local death alert for %i (RF2-C1)
+
+[Service]
+Type=oneshot
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+# EnvironmentFile so resolve_webhook() sees HUB_QA_WEBHOOK_URL / HUB_DOWNLOADS_WEBHOOK_URL;
+# HOME so any ssh/config lookups resolve (parity with the daemons + tailsync precedent).
+EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 scripts/watcher_alert.py %i

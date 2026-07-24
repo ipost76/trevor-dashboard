@@ -1,0 +1,41 @@
+# /etc/systemd/system/trevor-trainer.service — RF2-C1 (AUTHORED IN-REPO ONLY — NOT INSTALLED)
+#
+# 🚨 THIS UNIT IS NOT INSTALLED, NOT enable`d, NOT `--now`. It is authored here so the trainer
+#    daemon (RF-1's sibling to the watcher) reuses the SAME trevor-alert@ death-alert template
+#    with ZERO new handler work. Installing/enabling it is an R13 go-live step, GATED ON L1
+#    EXISTING (VM MAX(level) >= 1) — see the R13 runbook in CLAUDE.md.
+#
+# ⚠️ WHY NOT NOW: trainer_loop.main() (RF1-B2) RESOLVES the live level from the VM chain and
+#    REFUSES to start (loud stderr + rc=1) on hard-UNKNOWN or level < 1. Today VM MAX(level)=0,
+#    so enabling this now would rc=1 -> `failed` -> fire an alert every restart = pre-cutover
+#    noise from a daemon behaving CORRECTLY. A refusing daemon is the RF1-B2 fix WORKING.
+#
+# 🚨 WHAT THIS UNIT CLOSES (RF1-B2 carry-forward): RF1-B2 marked the trainer's durable
+#    #qa-agent refusal alert PENDING because auto_trader.observability._insert_alert is a VM
+#    module NOT in-process-reachable from WSL. With OnFailure= pointing at the WSL-LOCAL
+#    trevor-alert@ handler, a SUSTAINED refuse (rc=1 exhausting StartLimitBurst -> `failed`)
+#    DOES fire the alert -> the PENDING is CLOSED the moment this unit is enabled at R13.
+#    (An arm-time refuse is caught immediately by the W15 check; a transient refuse recovers
+#    within the Restart budget -> silent, acceptable.)
+[Unit]
+Description=TREVOR Trainer (search loop) — RF-1/RF-2 (in-repo; enable at R13 after L1)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+OnFailure=trevor-alert@%n.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 trainer_loop.py
+Restart=on-failure
+RestartSec=3
+# NO WatchdogSec — same reasoning as trevor-watcher.service.
+
+[Install]
+WantedBy=multi-user.target
