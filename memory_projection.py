@@ -31,6 +31,7 @@ Python 3, stdlib sqlite3 only.
 """
 import hashlib
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -42,11 +43,14 @@ from lib.memory_db import CONFIG_AXES, MECHANICAL_CHECKS, ROLE_HOT
 # from this set, never invented.
 _VOCAB = frozenset(CONFIG_AXES) | frozenset(MECHANICAL_CHECKS)
 
-# Cursor slots (memory_state keys) — the highest projected source id per source table.
+# Cursor slots (memory_state keys). rejection_log advances on the INSERT-only integer ``id``;
+# standing_hypotheses advances on ``last_updated`` (a monotonic ISO string) because it UPSERTs
+# in place — the rowid never moves (W10). The value stored is the highest cursor seen.
 CURSOR_REJECTION = "projection_cursor:rejection_log"
 CURSOR_HYPOTHESIS = "projection_cursor:standing_hypotheses"
 
 _SOURCE_DB = "trainer.db"
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,12 +68,26 @@ class Entry:
     source_db: Optional[str] = None
     source_table: Optional[str] = None
     source_id: Optional[int] = None
+    # W10: an optional CONTENT signature folded into entry_hash for sources that UPDATE a row
+    # in place (standing_hypotheses UPSERTs on (hyp_id, level_id); its rowid never moves).
+    # None (rejection_log — INSERT-only, id-based) ⇒ the hash is byte-identical to pre-W10.
+    content_key: Optional[str] = None
     tags: List[str] = field(default_factory=list)
 
     @property
     def entry_hash(self) -> str:
-        """Deterministic provenance hash — same source row + role ⇒ same hash ⇒ dedup."""
+        """Deterministic provenance hash — same source row + role ⇒ same hash ⇒ dedup.
+
+        🚨 W10: without a content component, an UPSERT-in-place source (standing_hypotheses)
+        re-hashes IDENTICALLY as evidence grows → INSERT OR IGNORE dedups it → within-level
+        accumulation freezes at first-seen. ``content_key`` (set only by the hypothesis
+        projector, to ``n_obs|last_updated``) makes an updated row hash DIFFERENTLY so a new
+        append-only row lands. ``content_key=None`` ⇒ raw is byte-identical to the pre-W10
+        ``db|table|id|role`` scheme (the rejection half is left exactly as it was).
+        """
         raw = f"{self.source_db}|{self.source_table}|{self.source_id}|{self.role}"
+        if self.content_key is not None:
+            raw += f"|{self.content_key}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
@@ -108,15 +126,36 @@ def _parse_json(raw: Any) -> Any:
         return None
 
 
+def _coerce_level(raw: Any, table: str, ref: Any) -> Optional[int]:
+    """🚨 BLOCK-2 fail-loud guard: a projected level MUST be a positive int. A missing / <1
+    level → SKIP the row + a LOUD warning, NEVER a silent level-0 projection (which would
+    poison compute_tier demotion latently — the exact latent-until-L3 class BLOCK-2 was).
+    Harmless today (log_rejection/_level_of raise on level-less input); a tripwire, not a
+    default. Skip-and-count matches memory_reasoning's 'one bad source row is not fatal'."""
+    try:
+        lvl = int(raw)
+    except (TypeError, ValueError):
+        _log.warning("memory_projection: %s row (ref=%r) has non-int level_id=%r — SKIPPED "
+                     "(refuse a silent level-0 projection)", table, ref, raw)
+        return None
+    if lvl < 1:
+        _log.warning("memory_projection: %s row (ref=%r) has level_id=%d (<1) — SKIPPED "
+                     "(refuse a silent level-0 projection)", table, ref, lvl)
+        return None
+    return lvl
+
+
 # ── projection functions (A1 §R2 field→tag mapping) ───────────────────────────────────────
-def project_trainer_rejection(row: Dict[str, Any]) -> Entry:
-    """rejection_log row → canonical Entry.
+def project_trainer_rejection(row: Dict[str, Any]) -> Optional[Entry]:
+    """rejection_log row → canonical Entry (or None to SKIP a level<1 row, W4-tighten).
 
     subjects {arm_hash, config_json axes} · action 'reject' · because failing_gates + rationale
     · level level_id · outcome 'rejected' · confidence from p_value/dsr · prose rationale_text.
     """
     arm_hash = row.get("arm_hash")
-    level_id = int(row.get("level_id") or 0)
+    level_id = _coerce_level(row.get("level_id"), "rejection_log", arm_hash)
+    if level_id is None:
+        return None  # refuse a silent level-0 projection (was ``int(... or 0)``)
     config = _parse_json(row.get("config_json")) or {}
     if not isinstance(config, dict):
         config = {}
@@ -150,15 +189,22 @@ def project_trainer_rejection(row: Dict[str, Any]) -> Entry:
     )
 
 
-def project_trainer_hypothesis(row: Dict[str, Any]) -> Entry:
-    """standing_hypotheses row → canonical Entry.
+def project_trainer_hypothesis(row: Dict[str, Any]) -> Optional[Entry]:
+    """standing_hypotheses row → canonical Entry (or None to SKIP a level<1 row, W4-tighten).
 
     subjects {domain, hypothesis_id} · action 'hypothesize' · because claim · level level_id
     · outcome status · confidence from n_obs · prose claim + evidence summary.
+
+    🚨 W10: ``content_key = n_obs|last_updated`` makes entry_hash content-aware so a within-
+    level re-eval (UPSERT-in-place, growing n_obs) lands a NEW append-only row instead of
+    being deduped by INSERT OR IGNORE. ``source_id`` stays the (stable) rowid for provenance;
+    the CURSOR moves to ``last_updated`` in ``_sweep_table`` (the rowid never advances).
     """
     domain = row.get("domain")
     hyp_id = row.get("hypothesis_id")
-    level_id = int(row.get("level_id") or 0)
+    level_id = _coerce_level(row.get("level_id"), "standing_hypotheses", hyp_id)
+    if level_id is None:
+        return None  # refuse a silent level-0 projection (was ``int(... or 0)``)
     claim = row.get("claim")
     evidence = _parse_json(row.get("evidence_json"))
     ev_summary = ""
@@ -179,6 +225,8 @@ def project_trainer_hypothesis(row: Dict[str, Any]) -> Entry:
         source_db=_SOURCE_DB,
         source_table="standing_hypotheses",
         source_id=(None if row.get("rowid") is None else int(row["rowid"])),
+        # W10: fold the within-level growth signal into the hash (see entry_hash + docstring).
+        content_key=f"{row.get('n_obs')}|{row.get('last_updated')}",
         # tag the domain ONLY if it is within the reused vocabulary (never invent a tag)
         tags=[str(domain)] if domain in _VOCAB else [],
     )
@@ -214,13 +262,32 @@ def _store(scope: "memory_db.MemoryScope", entry: Entry, *, commit: bool = True)
 
 
 def _sweep_table(src: sqlite3.Connection, scope: "memory_db.MemoryScope", *,
-                 table: str, cursor_key: str, id_col: str, projector) -> int:
-    """Project new rows past the stored cursor. 'no such table' / 0 rows -> 0 (expected empty)."""
+                 table: str, cursor_key: str, id_col: str, projector,
+                 cursor_is_text: bool = False) -> int:
+    """Project new rows past the stored cursor. 'no such table' / 0 rows -> 0 (expected empty).
+
+    🚨 W10: ``cursor_is_text`` selects a STRING cursor. standing_hypotheses sweeps on
+    ``last_updated`` (a monotonic ISO timestamp) because ``evaluate_at_level`` UPSERTs in
+    place — the rowid never advances, so a ``rowid > cursor`` sweep would never re-select an
+    updated row. The rejection sweep keeps the integer ``id`` cursor (``cursor_is_text=False``,
+    the default) → byte-identical to pre-W10. ``>`` (not ``>=``) is safe: ``last_updated`` is
+    set from ``utc_now()`` on every UPSERT and strictly increases across evaluations (each is a
+    full loop iteration seconds+ apart); a same-second re-eval of the SAME (hyp, level) — the
+    only case ``>`` could miss — cannot happen in the loop. (Defense-in-depth: content_key
+    also folds n_obs, so two distinct-n_obs rows swept in ONE pass both land.)
+
+    A projector may return None to SKIP a row (e.g. the level<1 guard). The cursor still
+    advances past a skipped row (logged once by the projector, never re-swept), matching the
+    'one bad source row is counted, not fatal' posture.
+    """
     raw = memory_db.get_state(cursor_key, conn=scope.conn)
-    try:
-        cursor = int(raw) if raw is not None else 0
-    except (TypeError, ValueError):
-        cursor = 0
+    if cursor_is_text:
+        cursor: Any = raw if raw is not None else ""
+    else:
+        try:
+            cursor = int(raw) if raw is not None else 0
+        except (TypeError, ValueError):
+            cursor = 0
     try:
         src.row_factory = sqlite3.Row
         rows = src.execute(
@@ -229,17 +296,21 @@ def _sweep_table(src: sqlite3.Connection, scope: "memory_db.MemoryScope", *,
         ).fetchall()
     except sqlite3.OperationalError:
         return 0  # table absent on a fresh trainer.db — expected pre-cutover, never an alarm
-    n = 0
+    n = 0            # rows actually projected (returned to the caller)
+    swept = 0        # rows seen this pass (gates the cursor advance — skipped rows count here)
     max_seen = cursor
     for r in rows:
         d = dict(r)
-        entry = projector(d)
-        _store(scope, entry, commit=False)
         sid = d.get(id_col)
         if sid is not None:
-            max_seen = max(max_seen, int(sid))
+            max_seen = max(max_seen, str(sid)) if cursor_is_text else max(max_seen, int(sid))
+        swept += 1
+        entry = projector(d)
+        if entry is None:
+            continue  # skipped (e.g. level<1) — cursor still advances past it, logged once
+        _store(scope, entry, commit=False)
         n += 1
-    if n:
+    if swept:
         memory_db.upsert_state(cursor_key, str(max_seen), conn=scope.conn)
         scope.conn.commit()
     return n
@@ -261,8 +332,8 @@ def run_projection(db_path: Optional[str] = None) -> Dict[str, int]:
                              cursor_key=CURSOR_REJECTION, id_col="id",
                              projector=project_trainer_rejection)
         n_hyp = _sweep_table(src, scope, table="standing_hypotheses",
-                             cursor_key=CURSOR_HYPOTHESIS, id_col="rowid",
-                             projector=project_trainer_hypothesis)
+                             cursor_key=CURSOR_HYPOTHESIS, id_col="last_updated",
+                             projector=project_trainer_hypothesis, cursor_is_text=True)
         return {"rejection_log": n_rej, "standing_hypotheses": n_hyp}
     finally:
         scope.close()

@@ -89,6 +89,8 @@ from lib.trainer_db import get_connection, utc_now
 LOOP_FLAG = "TRAINER_LOOP_ENABLED"                 # the daemon master gate (default OFF)
 EXECUTOR_FLAG = "SHADOW_LOOP_EXECUTOR_ENABLED"     # the cross-box submission gate (default OFF)
 PAUSE_POLL_FLAG = "TRAINER_PAUSE_POLL_ENABLED"     # R13-P1: the pause-poll arm (default OFF)
+MEMORY_REASONING_FLAG = "MEMORY_REASONING_ENABLED"  # RF2-B2/W4: drive the memory projection (default OFF)
+MEMORY_QUERY_FLAG = "MEMORY_QUERY_ENABLED"          # RF2-B2/W9: have_we_tested superset read (default OFF)
 
 
 def _truthy(name: str) -> bool:
@@ -112,6 +114,18 @@ def pause_poll_enabled() -> bool:
     STATE (``trainer_pause_state.paused``) is what's polled per-iteration. Off → the loop
     never polls and is byte-identical to R9-B6."""
     return _truthy(PAUSE_POLL_FLAG)
+
+
+def memory_reasoning_enabled() -> bool:
+    """RF2-B2/W4 arm (default OFF). Off → the loop never drives the memory projection and is
+    byte-identical to R9-B6 (no import, no sweep). The projection wrapper is also flag-gated."""
+    return _truthy(MEMORY_REASONING_FLAG)
+
+
+def memory_query_enabled() -> bool:
+    """RF2-B2/W9 arm (default OFF). Off → the self-pushback phase never calls have_we_tested
+    (no import, no db) — the loop decision (is_known_dead_end via self_pushback) is unchanged."""
+    return _truthy(MEMORY_QUERY_FLAG)
 
 
 # ── RPC / VM targets (env-overridable) ──────────────────────────────────────
@@ -564,6 +578,20 @@ def _run_one_iteration(
     # 3) self-pushback (B4) — skip known dead-ends + the optional advisory LLM sanity.
     pushback = trainer_reasoning.self_pushback(candidate, db_path=db_path)
     trace["pushback"] = {"proceed": pushback.get("proceed"), "source": pushback.get("source")}
+    # W9 (RF2-B2): cross-tier "have we tested X?" SUPERSET, alongside self_pushback's exact
+    # is_known_dead_end (which stays trainer-owned + UNCHANGED — this NEVER replaces it).
+    # 🚨 agent="trainer" is a MANDATORY LITERAL: the default agent=None is the FORBIDDEN
+    # cross-agent span that reads watcher_memory (the AST guard cannot catch a runtime None).
+    # Flag OFF → [] (no db opened) → the loop decision is byte-identical. ADVISORY (surfaced
+    # in the trace); it does NOT gate the proceed decision — is_known_dead_end remains the gate.
+    if memory_query_enabled():
+        try:
+            import memory_query
+            prior = memory_query.have_we_tested(
+                {"arm_hash": ahash, "config": arm}, level=int(level), agent="trainer")
+            trace["have_we_tested"] = len(prior)
+        except Exception as exc:  # an advisory read must never kill an iteration
+            print(f"[trainer_loop] have_we_tested failed (non-fatal): {exc}", file=sys.stderr)
     if not pushback.get("proceed"):
         # a proven dead-end / not-sensible → don't spend a slot. It was folded when first
         # rejected (rejection_log); nothing more to learn this trial.
@@ -710,6 +738,21 @@ def run_trainer_loop(
             err = exc
         # emit the heartbeat every iteration (success or error) — the silent-death surface.
         heartbeat.emit(error=err)
+        # W4 (RF2-B2): after the decision, sweep the per-DECISION rejection_log (+ standing_
+        # hypotheses, W10-fixed) into trainer_memory via the flag-gated wrapper
+        # (refresh_reasoning_log keeps the MEMORY_REASONING_ENABLED gate — NOT a bare
+        # run_projection). Flag OFF → no import, inert {0,0}, byte-identical. A projection error
+        # is SURFACED to stderr + NEVER kills the daemon (honesty posture — not a silent
+        # swallow). 🚨 Rows carry the level resolved at loop START (main() >= 1); a mid-run
+        # level flip is W5's increment-detector — NOT wired here — so all rows this run carry
+        # the start-of-loop level (documented W4 constraint, inherited by B3's detector work).
+        if memory_reasoning_enabled():
+            try:
+                import memory_reasoning
+                memory_reasoning.refresh_reasoning_log(db_path)
+            except Exception as exc:
+                print(f"[trainer_loop] memory projection sweep failed (non-fatal): {exc}",
+                      file=sys.stderr)
         if max_iterations is not None and iterations >= max_iterations:
             break
         # R13-P1: sliced sleep so a pause during the long inter-iteration sleep lands within
