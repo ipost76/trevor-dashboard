@@ -44,6 +44,8 @@ from typing import Any, Callable, Dict, Optional
 
 from lib.watcher_db import get_connection
 from watcher_surface import record_health, run_surface_checks
+import watcher_review        # the review-brain MODULE (NOT lib.watcher_integrity_db) — RF2-B4 W6 orchestration
+import watcher_integrity     # the integrity MODULE — exact-dotted-component ≠ 'watcher_integrity_db' (denial-1a clean)
 
 logger = logging.getLogger("watcher_health")
 
@@ -54,6 +56,22 @@ _TRUTHY = {"1", "true", "yes", "on"}
 def is_surfacing_enabled() -> bool:
     """The watcher surfacing daemon master gate. Default OFF ⇒ fully inert."""
     return os.environ.get("WATCHER_SURFACING_ENABLED", "").strip().lower() in _TRUTHY
+
+
+def is_review_enabled() -> bool:
+    """The review cycle's env gate (WATCHER_REVIEW_ENABLED, default OFF). Read HERE at the
+    orchestrator so run_cycle's gating is visible in one place — NOT via watcher_review's
+    internal review_enabled() (which stays as defense-in-depth). Env only, NEVER auto_config
+    (B0 denial 3). Duplicating an env READ is not duplicating logic — it makes the gate visible."""
+    return os.environ.get("WATCHER_REVIEW_ENABLED", "").strip().lower() in _TRUTHY
+
+
+def is_integrity_enabled() -> bool:
+    """The integrity cycle's env gate (WATCHER_INTEGRITY_ENABLED, default OFF). Read HERE at
+    the orchestrator (NOT via watcher_integrity's PRIVATE _enabled()) so the gate is visible and
+    run_cycle is not coupled to a private implementation detail; the callee's own _enabled()
+    stays as defense-in-depth. Env only, NEVER auto_config (B0 denial 3)."""
+    return os.environ.get("WATCHER_INTEGRITY_ENABLED", "").strip().lower() in _TRUTHY
 
 
 # ── the watcher's own loop_heartbeat identity ────────────────────────────────
@@ -215,11 +233,19 @@ def run_cycle(*, watcher_conn=None, heartbeat: Optional[WatcherHeartbeat] = None
               surface_fn: Optional[Callable[..., Dict[str, Any]]] = None,
               register: bool = False, vm_run: Optional[Callable[..., Dict[str, Any]]] = None,
               local_run: Optional[Callable[..., Dict[str, Any]]] = None) -> Dict[str, Any]:
-    """One gated surfacing cycle: (optionally pre_register) → run the subscribe-layer checks
-    → emit the heartbeat → record the watcher's own self-health. Returns a summary.
+    """One gated OVERSIGHT cycle (A2 shape #5 — sequential, NO shared store handle):
+    (optionally pre_register) → surface checks (this box's watcher.db) → review cycle (opens its
+    OWN watcher.db) → integrity cycle (opens its OWN integrity store) → emit the heartbeat →
+    record self-health. Each of the THREE cycles runs in its OWN try/except so one cycle's fault
+    is logged and skipped, never propagated (the outer run_watcher_loop catch is preserved). The
+    orchestrator passes ONLY scalars/config — NEVER a store handle. Returns a summary.
+
+    🚨 run_integrity_cycle() is called with ZERO ARGUMENTS. A handle would make the integrity
+    module read/write the MAIN store at runtime while the AST independence suite stays green (a
+    FALSE GREEN). The zero-arg call + tests/test_integrity_zero_arg_gate.py are what prevent it.
 
     FULLY INERT when WATCHER_SURFACING_ENABLED is OFF: returns immediately WITHOUT opening any
-    connection, reading the replica, or touching ssh."""
+    connection, reading the replica, or touching ssh — byte-identical to pre-B4."""
     if not is_surfacing_enabled():
         return {"enabled": False}
 
@@ -232,20 +258,59 @@ def run_cycle(*, watcher_conn=None, heartbeat: Optional[WatcherHeartbeat] = None
     try:
         if register:
             heartbeat.pre_register()
-        results = surface_fn(watcher_conn=watcher_conn, vm_run=vm_run, local_run=local_run)
-        # tally how the cycle went for the self-health line
-        checks = results if isinstance(results, dict) else {}
-        n_fired = sum(len(r.get("fired", [])) for r in checks.values()
-                      if isinstance(r, dict))
-        n_unknown = sum(1 for r in checks.values()
-                        if isinstance(r, dict) and r.get("status") in ("unknown", "error"))
+
+        # ── (1) surface cycle — this box's watcher.db (same store, fine); isolated so a surface
+        #        fault cannot skip the review/integrity siblings ──
+        checks: Dict[str, Any] = {}
+        n_fired = n_unknown = 0
+        surface_ok = True
+        try:
+            results = surface_fn(watcher_conn=watcher_conn, vm_run=vm_run, local_run=local_run)
+            checks = results if isinstance(results, dict) else {}
+            n_fired = sum(len(r.get("fired", [])) for r in checks.values()
+                          if isinstance(r, dict))
+            n_unknown = sum(1 for r in checks.values()
+                            if isinstance(r, dict) and r.get("status") in ("unknown", "error"))
+        except Exception as exc:  # a surface fault must not skip its siblings or kill the cycle
+            surface_ok = False
+            logger.warning("watcher surface cycle raised (non-fatal): %s", exc)
+
+        # ── (2) review cycle — opens its OWN watcher.db; gated WATCHER_REVIEW_ENABLED; NO conn ──
+        n_critiques = 0
+        review_ok = True
+        if is_review_enabled():
+            try:
+                review_res = watcher_review.run_review_cycle()  # NO conn arg — own store
+                n_critiques = sum(len(review_res[k]) for k in ("verdict", "promotion", "level_change")
+                                  if isinstance(review_res.get(k), list))
+            except Exception as exc:  # a fragile review-brain fault must not skip integrity
+                review_ok = False
+                logger.warning("watcher review cycle raised (non-fatal): %s", exc)
+
+        # ── (3) integrity cycle — opens its OWN integrity store; gated WATCHER_INTEGRITY_ENABLED ──
+        n_findings = 0
+        integrity_ok = True
+        if is_integrity_enabled():
+            try:
+                # 🚨 ZERO ARGUMENTS — never conn=, never a variable that could hold a handle.
+                integ_res = watcher_integrity.run_integrity_cycle()
+                integ = integ_res.get("integrity") if isinstance(integ_res, dict) else None
+                if isinstance(integ, dict) and integ.get("ok") is False:
+                    n_findings = 1  # the integrity evaluation surfaced a not-ok finding this cycle
+            except Exception as exc:  # an integrity fault must not kill the cycle or the daemon
+                integrity_ok = False
+                logger.warning("watcher integrity cycle raised (non-fatal): %s", exc)
+
         emitted = heartbeat.emit()
-        status = "ok" if emitted else "degraded"
+        status = "ok" if (emitted and surface_ok and review_ok and integrity_ok) else "degraded"
         record_self_health(watcher_conn, status,
-                           f"cycle ok; {n_fired} malfunction(s) surfaced, {n_unknown} "
-                           f"check(s) UNKNOWN; heartbeat={'emitted' if emitted else 'FAILED (non-fatal)'}")
+                           f"cycle {'ok' if surface_ok else 'DEGRADED (surface error)'}; "
+                           f"{n_fired} malfunction(s) surfaced, {n_unknown} check(s) UNKNOWN; "
+                           f"{n_critiques} critique(s), {n_findings} integrity finding(s); "
+                           f"heartbeat={'emitted' if emitted else 'FAILED (non-fatal)'}")
         return {"enabled": True, "checks": checks, "heartbeat_emitted": emitted,
-                "surfaced": n_fired, "unknown_checks": n_unknown}
+                "surfaced": n_fired, "unknown_checks": n_unknown,
+                "critiques": n_critiques, "integrity_findings": n_findings}
     finally:
         if own_conn:
             watcher_conn.close()
