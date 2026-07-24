@@ -9,7 +9,11 @@ import { createSwrCache } from "@/lib/single-flight";
 //     today/yesterday/week/month/all on EASTERN-calendar boundaries; they sum
 //     ONLY closed-trade `pnl_usd` — never unrealized.
 //   - `unrealized_usd` is a SEPARATE field for the greyed secondary line only.
-//   - `open_exposure_usd` is deployed notional (neutral), never P&L.
+//   - `open_margin_usd` is the POSTED MARGIN of open positions (neutral), never
+//     P&L and NOT leveraged exposure — `notional_usd` IS the margin, so true
+//     notional = margin × leverage (~13× larger). Renamed from
+//     `open_exposure_usd` (RF3T2-B5) — the old key claimed exposure while
+//     computing margin. The card's visible label ("deployed") was always honest.
 //   - `equity_usd` is the live HL account value (floats with open positions).
 //   - `realized_unknown_count` surfaces closed rows that never booked a pnl.
 //   Legacy fields (`equity`, `pnl_today_*`, `trades_*`, `open_positions_count`,
@@ -58,7 +62,7 @@ interface AutoStateResponse {
   realized_base: NullableWindows;
   realized_count: { today: number; yesterday: number; week: number; month: number; all: number; custom?: number };
   realized_unknown_count: number;
-  open_exposure_usd: number;
+  open_margin_usd: number;
   unrealized_usd: number;
   open_count: number;
   ts: number;
@@ -96,7 +100,7 @@ const FALLBACK: AutoStateResponse = {
   realized_base: { ...NULL_WINDOWS },
   realized_count: { today: 0, yesterday: 0, week: 0, month: 0, all: 0 },
   realized_unknown_count: 0,
-  open_exposure_usd: 0,
+  open_margin_usd: 0,
   unrealized_usd: 0,
   open_count: 0,
   ts: 0,
@@ -152,7 +156,7 @@ const equityCache = createSwrCache<HeartbeatEquity>({ defaultTtl: 10_000, concur
 const EQUITY_STALE_AGE_MS = 60_000;
 
 // B1 HEADER-CEILING (2026-07-01): absolute staleness ceiling for the header COUNT
-// (open_count) + deployed (open_exposure_usd) — a HARDER bound ON TOP of the 60s
+// (open_count) + deployed (open_margin_usd) — a HARDER bound ON TOP of the 60s
 // `equity_stale` age flag above. The equity cache is SWR keep-stale: when the
 // background heartbeat refresh fails, single-flight.ts writes the store only on
 // success, so the last-known value keeps serving with an OLD ts. The 60s flag
@@ -174,7 +178,7 @@ interface RealHlEquity {
   // W-H-P4-HUB: live OPEN numbers from the SAME heartbeat. null ⇒ heartbeat never
   // observed ⇒ caller keeps the replica (Python) values rather than overriding.
   openCount: number | null;
-  openExposure: number | null; // Σ open_positions[].notional_usd (deployed)
+  openMargin: number | null; // Σ open_positions[].notional_usd (deployed)
 }
 
 interface HeartbeatPosition {
@@ -204,7 +208,7 @@ interface HeartbeatEquity {
   unrealized: number | null;
   // W-H-P4-HUB: live open-count + deployed notional, from the SAME heartbeat.
   openCount: number | null;
-  openExposure: number | null;
+  openMargin: number | null;
 }
 
 async function resolveRealHlEquity(): Promise<RealHlEquity> {
@@ -228,18 +232,26 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       const unrealized = typeof u === "number" && Number.isFinite(u) ? u : null;
       // W-H-P4-HUB: live OPEN numbers from the SAME heartbeat — kills the ≤15min
       // litestream-replica lag (phantom open-count + deployed). `open_count` is the
-      // LIVE count; `open_exposure` (deployed) = Σ open_positions[].notional_usd.
+      // LIVE count; `open_margin` (deployed) = Σ open_positions[].notional_usd.
       // Absent ⇒ null so the caller keeps the replica value (never invents 0).
+      // 🚨 RF3T2-B5 RECORDED RISK: this heartbeat branch is DEAD today — the
+      // Observatory is masked+inactive and nothing listens on :8443, so the
+      // fetch always throws and the `??` below falls to the replica. If the
+      // heartbeat is ever RESTORED, this field is fed by heartbeat
+      // `open_positions[].notional_usd` instead — the SAME column name, produced
+      // by a service that could not be verified. Re-verify this field's source
+      // BEFORE unmasking the Observatory. See
+      // docs/design/DISPLAY_TIER_MATERIALITY.md (reopening condition #2).
       const oc = hb?.categories?.autotrader?.open_count;
       const openCount = typeof oc === "number" && Number.isFinite(oc) ? oc : null;
       const positions = hb?.categories?.autotrader?.open_positions ?? null;
-      const openExposure = positions
+      const openMargin = positions
         ? positions.reduce((sum, p) => {
             const n = p?.notional_usd;
             return sum + (typeof n === "number" && Number.isFinite(n) ? n : 0);
           }, 0)
         : null;
-      return { equity: av, unrealized, openCount, openExposure };
+      return { equity: av, unrealized, openCount, openMargin };
     });
     // W-H-P2-HUB FIX: the SWR per-call `stale` flag is `true` on EVERY poll because the
     // equity cache TTL (10s) is shorter than the client poll interval (15s) — so the cache
@@ -252,7 +264,7 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
     const ageStale = age > EQUITY_STALE_AGE_MS;
     // B1 HEADER-CEILING: past the absolute ceiling since the last *successful*
     // refresh, fail SAFE — null the header COUNT (open_count) + deployed
-    // (open_exposure_usd) so the GET handler's `?? value.*` coalesces to the
+    // (open_margin_usd) so the GET handler's `?? value.*` coalesces to the
     // self-refreshing Python replica instead of a frozen-heartbeat ghost. Scope
     // is the count ONLY: the equity $ / unrealized keep the 60s age flag (they
     // float slowly and are already flagged, W-H-P2-HUB). `openCount:null` is the
@@ -273,7 +285,7 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       stale: ageStale,
       ts,
       openCount: countExpired ? null : value.openCount,
-      openExposure: countExpired ? null : value.openExposure,
+      openMargin: countExpired ? null : value.openMargin,
     };
   } catch {
     // Cold (never observed) AND upstream failed/absent. NEVER substitute the
@@ -287,7 +299,7 @@ async function resolveRealHlEquity(): Promise<RealHlEquity> {
       stale: false,
       ts: 0,
       openCount: null,
-      openExposure: null,
+      openMargin: null,
     };
   }
 }
@@ -354,13 +366,13 @@ export async function GET(request: Request) {
       // W-H-P4-HUB: OPEN/live numbers mirror the heartbeat (live), NOT the ≤15min
       // litestream replica the Python script reads — this kills the transient
       // phantom open-count + deployed (e.g. a just-closed #100444 lingering for one
-      // restore window). `open_exposure_usd` (deployed) = Σ heartbeat
+      // restore window). `open_margin_usd` (deployed) = Σ heartbeat
       // open_positions[].notional_usd. Closed history / realized stay on the replica
       // (fine at 15min). Fall back to the replica value only when the heartbeat was
-      // never observed (openCount/openExposure null).
+      // never observed (openCount/openMargin null).
       open_count: equity.openCount ?? value.open_count,
       open_positions_count: equity.openCount ?? value.open_positions_count,
-      open_exposure_usd: equity.openExposure ?? value.open_exposure_usd,
+      open_margin_usd: equity.openMargin ?? value.open_margin_usd,
       // PCT-DENOM-FIX B1: realized_pct / realized_base / pnl_today_pct pass
       // through from `...value` (the Python's per-window values) — no override.
       equity_available: available,

@@ -52,7 +52,7 @@ interface AutoState {
   realized_pct: NullableWindows;
   realized_count: RealizedWindows;
   realized_unknown_count: number;
-  open_exposure_usd: number;
+  open_margin_usd: number;
   unrealized_usd: number;
   open_count: number;
   // RM-EQUITY-RESTORE B1: true live account value (the bot writes it to
@@ -295,7 +295,9 @@ export function CapitalHero() {
   const realized = data?.realized ?? ZERO;
   const realizedPct = data?.realized_pct ?? ZERO;
   const realizedCount = data?.realized_count ?? ZERO;
-  const openExposure = data?.open_exposure_usd ?? 0;
+  // RF3T2-B5: posted margin, NOT leveraged exposure. The visible label below
+  // ("deployed") is the honest word for margin and is deliberately UNCHANGED.
+  const openMargin = data?.open_margin_usd ?? 0;
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
 
@@ -455,7 +457,7 @@ export function CapitalHero() {
               </div>
             </div>
             <div className="font-mono text-caption tabular-nums text-fg-muted">
-              {openCount} open · ${openExposure.toFixed(2)} deployed
+              {openCount} open · ${openMargin.toFixed(2)} deployed
             </div>
           </div>
 

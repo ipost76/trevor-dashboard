@@ -33,8 +33,12 @@ RM-PNL P01 (2026-05-29): REALIZED-ONLY headline P&L model.
   - `unrealized_usd` = live HL floating PnL of open positions — a SEPARATE,
     de-emphasized ("greyed") field for the UI only. It is never summed into a
     realized total.
-  - `open_exposure_usd` = sum of committed notional of open positions — neutral
-    deployed capital, never P&L.
+  - `open_margin_usd` = Σ `auto_trades.notional_usd` over open positions — the
+    POSTED MARGIN (deployed capital), neutral, never P&L. 🚨 This is NOT
+    leveraged exposure: `notional_usd` IS the margin (see the landmine block in
+    `query_leverage_regime.py`); true notional = margin × leverage, which
+    measures ~13× larger on this book. Renamed from `open_exposure_usd`
+    (RF3T2-B5, 2026-07-24) — the old key claimed exposure while computing margin.
   - `equity_usd` = live HL MTM equity = spot USDC `total` (honest cash) + Σ
     unrealized PnL (EQF-01 2026-06-04: perps `accountValue` is the spot-USDC
     HELD margin, already inside spot `total` — adding them double-counted).
@@ -531,7 +535,7 @@ def main() -> int:
         "cutover_base_usd": None,
         "realized_count": {"today": 0, "yesterday": 0, "week": 0, "month": 0, "all": 0},
         "realized_unknown_count": 0,
-        "open_exposure_usd": 0.0,
+        "open_margin_usd": 0.0,
         "unrealized_usd": 0.0,
         "open_count": 0,
         # RM-EQUITY-RESTORE B1: true live account value (auto_config
@@ -603,8 +607,12 @@ def main() -> int:
                 (epoch,),
             ).fetchall()
 
-            # OPEN exposure = committed notional of currently-open positions
-            # (BOTH live + paper opens, matching the existing open-count tile).
+            # OPEN margin = Σ posted margin of currently-open positions (BOTH
+            # live + paper opens, matching the existing open-count tile).
+            # 🚨 `notional_usd` IS THE POSTED MARGIN, not position notional —
+            # sum it DIRECTLY, never ÷ leverage (that trap ~7×'s the figure).
+            # True notional = margin × leverage; this field is deliberately the
+            # margin, which is what the card's "deployed" label means.
             open_row = conn.execute(
                 "SELECT COUNT(*) AS n, COALESCE(SUM(notional_usd), 0) AS notional "
                 "FROM auto_trades WHERE status='open'"
@@ -738,7 +746,7 @@ def main() -> int:
             "cutover_base_usd": cutover_base,  # PCT-DENOM-FIX3: post-cutover starting capital (~$69.74)
             "realized_count": win["realized_count"],
             "realized_unknown_count": win["realized_unknown_count"],
-            "open_exposure_usd": round(float(open_row["notional"] or 0.0), 4),
+            "open_margin_usd": round(float(open_row["notional"] or 0.0), 4),
             "unrealized_usd": unrealized,
             "open_count": open_count,
             # RM-EQUITY-RESTORE B1: true live account value + freshness (real $ or,
