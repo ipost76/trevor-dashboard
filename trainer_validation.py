@@ -70,6 +70,19 @@ from trainer_budget_adapter import throttle_test
 # ── flag (default OFF → inert) ──
 TRAINER_VALIDATION_ENABLED_ENV = "TRAINER_VALIDATION_ENABLED"
 
+# RF3T2-B3 / T2-d — the SAME flag that gates the compass coherence fixes. Read
+# here as a plain env var rather than importing compass_metrics: duplicating an
+# env READ is not duplicating logic (the RF2-B4 precedent), and it keeps this
+# module's import surface unchanged. OFF (default) -> family_k stays level-scoped.
+COMPASS_COHERENCE_V2_ENV = "COMPASS_COHERENCE_V2_ENABLED"
+
+
+def _coherence_v2_enabled() -> bool:
+    """True iff COMPASS_COHERENCE_V2_ENABLED is truthy. OFF -> v1 (level-scoped)."""
+    return os.environ.get(COMPASS_COHERENCE_V2_ENV, "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
 # ── RPC target (env-overridable; defaults to the established `ssh vm` pipe, B2 parity) ──
 _VM_HOST = os.environ.get("TRAINER_VM_HOST", "vm")
 _VM_DIR = os.environ.get("TRAINER_VM_DIR", "/home/trevor/trevor")
@@ -204,19 +217,47 @@ def enabled() -> bool:
 
 
 def family_k(level_id: int, *, db_path: Optional[str] = None) -> int:
-    """n_trials = the family K the trainer's bandit has swept at ``level_id``.
+    """n_trials = the family K the trainer's bandit has swept.
 
-    = COUNT of distinct arms with a posterior row at this level (one row per arm
-    tried). This is the "bar rises with trials" lever: a larger K raises the DSR
-    selection-deflation bar. Floored at 1 (DSR needs n_trials >= 1). Reads the
-    trainer's OWN trainer.db via B0's connection — NEVER the VM, NEVER the replica.
+    = COUNT of arms with a posterior row (one row per arm tried). This is the
+    "bar rises with trials" lever: a larger K raises the DSR selection-deflation
+    bar. Floored at 1 (DSR needs n_trials >= 1). Reads the trainer's OWN
+    trainer.db via B0's connection — NEVER the VM, NEVER the replica.
+
+    🚨 RF3T2-B3 / T2-d — CUMULATIVE ACROSS ALL LEVELS (decision D-1).
+    This COUNTed `WHERE level_id = ?`, so a fresh level RESET the selection-
+    deflation family and the same search could be re-tried with the multiple-
+    comparisons penalty wiped — the classic way to farm a false positive past a
+    multiplicity correction. It now counts every arm ever tried, at any level.
+
+    THE REASONING (D-1, preserved): the alpha budget already treats the search as
+    CONTINUOUS — `alpha_budget.apply_level_increment` documents "NEVER a full
+    reset", carries `wealth` across a level increment, adds only a bounded
+    magnitude-proportional top-up (`top_up = magnitude*rho*w0` = 1.0*0.5*0.05 =
+    exactly 0.025000, < w0), and carries its cumulative counters. Verified live
+    on the VM this run. A PER-LEVEL DSR would contradict the alpha budget's own
+    precedent inside the same promotion decision. Internal consistency was the
+    tiebreaker: too strict costs a missed discovery, too loose costs a PROMOTED
+    FALSE POSITIVE — and a promoted false positive is the one that spends money.
+
+    DIRECTION (intended): cumulative -> LARGER n_trials -> MORE deflation ->
+    FEWER promotions. Strictly more conservative than before.
+
+    ``level_id`` is retained in the signature (callers pass it, and it stays in
+    the returned verdict for provenance) but no longer scopes the count.
     """
     from lib.trainer_db import get_connection  # B0 — stdlib sqlite3, WSL-local
     conn = get_connection(db_path)
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM bandit_posteriors WHERE level_id=?", (int(level_id),)
-        ).fetchone()
+        if _coherence_v2_enabled():
+            # T2-d: CUMULATIVE — every arm ever tried, at ANY level.
+            row = conn.execute("SELECT COUNT(*) FROM bandit_posteriors").fetchone()
+        else:
+            # v1 (flag OFF): byte-identical level-scoped count.
+            row = conn.execute(
+                "SELECT COUNT(*) FROM bandit_posteriors WHERE level_id=?",
+                (int(level_id),),
+            ).fetchone()
     finally:
         conn.close()
     return max(1, int(row[0]) if row and row[0] is not None else 0)

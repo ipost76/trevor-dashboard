@@ -14,11 +14,27 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import contextlib  # noqa: E402
+
 from compass_metrics import (  # noqa: E402
     evaluate_compass,
     survival_gates,
     _enforce_fixed_order,
+    COMPASS_COHERENCE_V2_ENV,
 )
+
+
+@contextlib.contextmanager
+def _flag_off():
+    """RF3T2-B3: pin COMPASS_COHERENCE_V2_ENABLED OFF for the v1 fixtures, and
+    restore whatever was there before. The flag already defaults OFF — this stops
+    a fixture from silently passing for the wrong reason if the env is set."""
+    prev = os.environ.pop(COMPASS_COHERENCE_V2_ENV, None)
+    try:
+        yield
+    finally:
+        if prev is not None:
+            os.environ[COMPASS_COHERENCE_V2_ENV] = prev
 
 # Injected level-0-style thresholds/weights so the tests never touch the DB.
 W = {"w_consistency": 0.7, "w_magnitude": 0.3, "dd_ceiling": 0.35, "cvar_floor": -0.15}
@@ -157,14 +173,19 @@ def test_wall_shortcircuits_no_scoring():
 
 
 def test_survivor_is_scored():
-    v = evaluate_compass(_survivor(), level=0, weights=W)
-    assert v["survived"] is True and v["verdict"] == "scored", v
-    assert v["consistency"] is not None and v["magnitude"] is not None, v
-    assert v["blend_score"] is not None, v
-    # blend = 0.7*consistency + 0.3*magnitude
-    exp = 0.7 * v["consistency"] + 0.3 * v["magnitude"]
-    assert abs(v["blend_score"] - exp) < 1e-9, v
-    print("  survivor scored (blend = wc*consist + wm*mag): PASS")
+    # RF3T2-B3: this asserts the **v1** blend explicitly. The flag defaults OFF,
+    # but pin it so the fixture can never silently start testing v2 (a fixture
+    # that passes for the wrong reason is worse than one that fails).
+    with _flag_off():
+        v = evaluate_compass(_survivor(), level=0, weights=W)
+        assert v["survived"] is True and v["verdict"] == "scored", v
+        assert v["consistency"] is not None and v["magnitude"] is not None, v
+        assert v["blend_score"] is not None, v
+        # v1 blend = 0.7*consistency + 0.3*magnitude (raw linear sum)
+        exp = 0.7 * v["consistency"] + 0.3 * v["magnitude"]
+        assert abs(v["blend_score"] - exp) < 1e-9, v
+        assert v["coherence"]["blend_version"] == "v1", v
+    print("  survivor scored (v1 blend = wc*consist + wm*mag): PASS")
 
 
 # --------------------------------------------------------------------------
@@ -183,12 +204,13 @@ def test_fixed_order_clamps_inversion():
 def test_evaluate_clamps_inverted_weights():
     # End-to-end: try to make magnitude outrank consistency via weights -> clamped.
     inverted = {"w_consistency": 0.3, "w_magnitude": 0.7, "dd_ceiling": 0.35, "cvar_floor": -0.15}
-    v = evaluate_compass(_survivor(), level=0, weights=inverted)
-    assert v["weights_used"]["clamped"] is True, v
-    assert v["weights_used"]["w_magnitude"] == v["weights_used"]["w_consistency"] == 0.3, v
-    # blend used the CLAMPED weights (0.3/0.3), NOT the inverted 0.7 on magnitude.
-    exp = 0.3 * v["consistency"] + 0.3 * v["magnitude"]
-    assert abs(v["blend_score"] - exp) < 1e-9, v
+    with _flag_off():  # RF3T2-B3: pinned to the v1 path (see test_survivor_is_scored)
+        v = evaluate_compass(_survivor(), level=0, weights=inverted)
+        assert v["weights_used"]["clamped"] is True, v
+        assert v["weights_used"]["w_magnitude"] == v["weights_used"]["w_consistency"] == 0.3, v
+        # blend used the CLAMPED weights (0.3/0.3), NOT the inverted 0.7 on magnitude.
+        exp = 0.3 * v["consistency"] + 0.3 * v["magnitude"]
+        assert abs(v["blend_score"] - exp) < 1e-9, v
     print("  evaluate_compass clamps inverted weights (mag never outranks): PASS")
 
 

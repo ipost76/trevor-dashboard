@@ -37,7 +37,23 @@ Python 3, stdlib only. Reads/writes ONLY the trainer's own compass_weights table
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Union
+import os
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+
+# ---------------------------------------------------------------------------
+# RF3T2-B3 — COMPASS COHERENCE v2. ONE flag gates all four coherence fixes
+# (T2-a blend, T2-b correlation-adjusted n_eff, T2-c sample damper, T2-d is in
+# trainer_validation.family_k). Default OFF -> every path below is byte-identical
+# to v1. Read at CALL time (never cached at import) so a test/harness can flip it.
+# ---------------------------------------------------------------------------
+COMPASS_COHERENCE_V2_ENV = "COMPASS_COHERENCE_V2_ENABLED"
+
+
+def coherence_v2_enabled() -> bool:
+    """True iff COMPASS_COHERENCE_V2_ENABLED is truthy. OFF (default) -> v1."""
+    return os.environ.get(COMPASS_COHERENCE_V2_ENV, "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 # ---------------------------------------------------------------------------
 # The standardized round-trip cost bar. SINGLE SOURCE OF TRUTH is
@@ -218,40 +234,175 @@ def _assess_dd(equity_curve: Sequence[Any]) -> Optional[float]:
 
 
 # ===========================================================================
-# 4. n_eff_bets — NEW (grep=0 repo-wide). Effective number of independent bets
-#    = 1 / HHI(normalized ticker notional weights). Herfindahl inverse.
+# 4. n_eff_bets — effective number of INDEPENDENT bets.
+#
+#    v1 (flag OFF): 1 / HHI(normalized ticker notional weights). Herfindahl
+#    inverse — a CONCENTRATION measure, NOT an INDEPENDENCE measure.
+#
+#    🚨 v2 (RF3T2-B3, flag ON): 1 / (wᵀ C w) — correlation-adjusted.
+#    WHY: HHI counts ten crypto-beta-correlated names as ~10 independent bets.
+#    Measured live this run: 10 equal-notional crypto-beta tickers report
+#    n_eff = 10.0000 while the correlation-adjusted truth is 1.4599 at rho=0.65
+#    -> a 6.85x OVER-COUNT (7.14x at rho~=0.68, the figure RV-D1 S4 reports; the
+#    factor is rho-dependent — this is a precision note on D1, NOT a correction).
+#    Since magnitude = total_net / n_eff_bets, an over-counted denominator makes
+#    a fake-diversified book both understate its own per-bet magnitude AND
+#    advertise a diversification a downstream consumer will believe.
+#
+#    The v2 form degrades PROVABLY:
+#      * all correlations 0  -> reduces EXACTLY to 1/HHI (the v1 behaviour)
+#      * all correlations 1  -> n_eff = 1.0 (a fully correlated book IS one bet)
+#    v1 is therefore the special case that ASSUMES INDEPENDENCE — the one
+#    assumption that is definitely false for ten crypto-beta names.
 # ===========================================================================
-def n_eff_bets(weights: Union[Dict[str, float], Sequence[float]]) -> float:
-    """Effective number of bets = ``1 / HHI`` over ticker notional weights,
-    where HHI = sum(w_i^2) of the L1-normalized non-negative weights.
 
-    Equal weights over N tickers -> N (e.g. 4 -> 4.0); all mass on one ticker
-    -> 1.0. Empty / all-zero / degenerate weights -> 1.0 (a single effective
-    bet — the conservative floor). Negative weights are treated by magnitude
-    (abs) before normalizing; notional weights are non-negative in practice.
-    """
+# 🚨 THE FAIL DIRECTION — THE WHOLE SAFETY PROPERTY OF T2-b.
+# When correlation data is MISSING / THIN / DEGENERATE we fail toward HIGH
+# correlation (FEWER effective bets), NEVER toward independence.
+#
+#   FALLBACK VALUE: n_eff = 1.0   (== the rho=1 limit of 1/(wᵀCw), so it is the
+#   formula's OWN conservative limit, not an arbitrary constant.)
+#
+#   REASON: we cannot PROVE independence, so we claim NONE. Falling back to
+#   1/HHI on missing data would silently re-create the exact 6.85-7.14x
+#   over-count this fix exists to remove — a default that is secretly a policy.
+#   Claiming one bet is the honest floor: it never advertises diversification
+#   the data cannot support.
+_N_EFF_CONSERVATIVE_FALLBACK: float = 1.0
+
+
+def _clean_weights(
+    weights: Union[Dict[str, float], Sequence[float]]
+) -> Tuple[List[str], List[float]]:
+    """Normalize a weight map/sequence -> (keys, L1-normalized magnitudes).
+    Returns ([], []) when empty / all-zero / non-numeric (the degenerate case)."""
     if isinstance(weights, dict):
-        raw = list(weights.values())
+        items = list(weights.items())
     else:
-        raw = list(weights)
+        items = [(str(i), w) for i, w in enumerate(weights)]
 
+    keys: List[str] = []
     mags: List[float] = []
-    for w in raw:
+    for k, w in items:
         try:
             fw = abs(float(w))
         except (TypeError, ValueError):
             continue
         if math.isnan(fw) or math.isinf(fw):
             continue
+        keys.append(str(k))
         mags.append(fw)
 
     total = sum(mags)
     if total <= 0.0 or not mags:
+        return [], []
+    return keys, [m / total for m in mags]
+
+
+def _corr_lookup(correlation: Any, a: str, b: str) -> Optional[float]:
+    """Pull rho(a,b) from a correlation container, or None when unavailable.
+
+    Accepts a nested dict ``{ticker: {ticker: rho}}`` (either orientation) or a
+    flat pair-keyed dict ``{(a, b): rho}``. Self-pairs are 1.0. Any value that is
+    not a finite number in [-1, 1] is treated as UNAVAILABLE (None) — a
+    malformed entry must never be read as a low correlation."""
+    if a == b:
         return 1.0
-    hhi = sum((m / total) ** 2 for m in mags)
-    if hhi <= 0.0:
+    if correlation is None:
+        return None
+    raw: Any = None
+    try:
+        if isinstance(correlation, dict):
+            inner = correlation.get(a)
+            if isinstance(inner, dict) and b in inner:
+                raw = inner[b]
+            else:
+                inner_b = correlation.get(b)
+                if isinstance(inner_b, dict) and a in inner_b:
+                    raw = inner_b[a]
+                elif (a, b) in correlation:
+                    raw = correlation[(a, b)]
+                elif (b, a) in correlation:
+                    raw = correlation[(b, a)]
+    except (TypeError, KeyError):
+        return None
+    if raw is None:
+        return None
+    try:
+        rho = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(rho) or math.isinf(rho) or not (-1.0 <= rho <= 1.0):
+        return None
+    return rho
+
+
+def n_eff_bets(
+    weights: Union[Dict[str, float], Sequence[float]],
+    correlation: Any = None,
+) -> float:
+    """Effective number of INDEPENDENT bets over ticker notional weights.
+
+    v1 (flag OFF, or ``correlation`` omitted while the flag is OFF):
+        ``1 / HHI`` — HHI = sum(w_i^2) of the L1-normalized non-negative weights.
+        Equal weights over N tickers -> N; all mass on one ticker -> 1.0.
+
+    v2 (``COMPASS_COHERENCE_V2_ENABLED`` ON):
+        ``1 / (wᵀ C w)`` using the caller-supplied ``correlation``. Reduces
+        EXACTLY to 1/HHI when every off-diagonal rho is 0, and to 1.0 when every
+        rho is 1. 🚨 When ``correlation`` is missing / unusable for ANY off-diagonal
+        pair, returns the CONSERVATIVE fallback ``1.0`` (fail toward HIGH
+        correlation) — see ``_N_EFF_CONSERVATIVE_FALLBACK`` above for the value
+        and the reason. Partial coverage is NOT interpolated: one unavailable
+        pair makes the whole matrix untrusted, because guessing a single rho low
+        is exactly the silent over-count this fix removes.
+
+    Empty / all-zero / degenerate weights -> 1.0 in BOTH versions (single
+    effective bet — the conservative floor). Negative weights are taken by
+    magnitude (abs) before normalizing; notional weights are non-negative in
+    practice.
+
+    ⚠️ CORRELATION SOURCE IS **PENDING / UNSOLVED** (RF3T2-B3, 2026-07-24) —
+    NOT merely unimplemented. There is NO clean source on this box:
+      * ``training_correlations`` (29 rows) is ``source='synthetic_training'``
+        rule-based lessons ("BTC dumps >3% -> ETH -6.2%"), NOT a pairwise matrix.
+      * ``correlation_cluster_shadow`` (1268 rows) carries cluster LABELS
+        (MAJORS/MEMES/L1S) for concurrent-risk capping, NOT pairwise rho.
+      * BOTH live on the 0444 LAGGED litestream replica. The compass is a
+        DECISION path, and RV verified zero decision-path replica reads — reading
+        them here would violate the matched-data promotion guarantee.
+    The correlation matrix is therefore supplied BY THE CALLER. ``backtest_fn``
+    is the intended provider (it already owns the simulation store, so it can
+    compute C from the SAME data it simulates from — no replica read, no
+    matched-data violation). Until ``backtest_fn`` exists (D-5 / RF-BACKTEST),
+    every v2 call takes the conservative fallback. Do NOT "fix" this by pointing
+    it at the replica.
+    """
+    keys, w = _clean_weights(weights)
+    if not w:
         return 1.0
-    return 1.0 / hhi
+
+    if not coherence_v2_enabled():
+        # ---- v1: 1 / HHI (byte-identical to pre-RF3T2-B3) ----
+        hhi = sum(x * x for x in w)
+        return 1.0 / hhi if hhi > 0.0 else 1.0
+
+    # ---- v2: 1 / (wᵀ C w), conservative on ANY unavailable pair ----
+    quad = 0.0
+    n = len(w)
+    for i in range(n):
+        for j in range(n):
+            rho = _corr_lookup(correlation, keys[i], keys[j])
+            if rho is None:
+                return _N_EFF_CONSERVATIVE_FALLBACK
+            quad += w[i] * w[j] * rho
+    if quad <= 0.0:
+        # Degenerate / non-PSD quadratic form -> cannot trust it -> conservative.
+        return _N_EFF_CONSERVATIVE_FALLBACK
+    n_eff = 1.0 / quad
+    # A correlation matrix can never yield MORE independent bets than names, and
+    # never fewer than one. Clamp defensively (a non-PSD input could overshoot).
+    return max(1.0, min(float(n), n_eff))
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +443,7 @@ def per_eff_bet_net(
     pnl_key: str = "pnl_usd",
     notional_key: str = "original_notional_usd",
     ticker_key: str = "ticker",
+    correlation: Any = None,
 ) -> PerEffBetNet:
     """Compute total net-of-cost realized $ per effective bet over a batch of
     trades (candidate-simulator output — each carries a GROSS realized pnl the
@@ -305,6 +457,11 @@ def per_eff_bet_net(
     so a concentrated book earns fewer effective bets. Trades missing a ticker
     are bucketed under a synthetic per-trade key (each counts as its own name),
     which is the conservative (higher-HHI) treatment.
+
+    ``correlation`` (RF3T2-B3) is passed straight through to ``n_eff_bets`` — see
+    that docstring for the v2 form, the conservative fallback, and the PENDING
+    correlation-source blocker. ``None`` (the default, and the only value
+    possible today) -> v1 keeps 1/HHI, v2 takes the conservative fallback.
 
     Empty / all-uncharged batch -> value 0.0, n_eff_bets 1.0 (degenerate floor).
     """
@@ -346,7 +503,7 @@ def per_eff_bet_net(
         key = str(tk) if tk not in (None, "") else f"__trade_{i}__"
         notional_by_ticker[key] = notional_by_ticker.get(key, 0.0) + notional
 
-    eff = n_eff_bets(notional_by_ticker) if notional_by_ticker else 1.0
+    eff = n_eff_bets(notional_by_ticker, correlation) if notional_by_ticker else 1.0
     value = total_net / eff if eff > 0.0 else total_net
     return PerEffBetNet(
         value=value,
@@ -378,6 +535,175 @@ _K_EQUITY = "equity_curve"       # gate (a): fractional max-drawdown
 _K_NET_PNL = "net_pnl_series"    # gate (b): cvar_95 left-tail
 _K_DAILY = "daily_returns"       # consistency: sortino
 _K_TRADES = "trades"             # magnitude: per_eff_bet_net
+_K_CORR = "correlation"          # T2-b: caller-supplied correlation matrix (opt)
+
+
+# ===========================================================================
+# RF3T2-B3 / T2-c — THE SAMPLE DAMPER (a DAMPER, *NOT* a GATE).
+#
+# CVaR-95 over fewer than ~40 points is a SINGLE order statistic: the cutoff is
+# `max(1, int(n*0.05))`, which stays 1 across the whole 5..39 range, so ONE
+# observation decides the tail. Reproduced live this run with an identical -0.20
+# worst point: n=39 -> cvar -0.2000 REJECT; n=40 -> cutoff 2 -> cvar -0.0950
+# PASS. Adding one benign observation flips the verdict.
+#
+# 🚨 THE FIX IS A FLOOR ON THE BLEND, NOT A REJECT — and it is applied to
+# CONSISTENCY because consistency is the PRIMARY sort key (T2-a), so that is
+# where a thin sample must be penalised. A thin-sample candidate stays fully
+# SCORABLE and fully COMPARABLE; it simply cannot win on a noisy Sortino.
+#
+# 🚨 WHY NOT A SECOND REJECT: sample-adequacy rejection ALREADY exists at the
+# survival wall (`cvar_95` -> None below 5 obs -> gate (b) REJECT; `_assess_dd`
+# -> None below 2 points -> gate (a) REJECT). THE REAL SAMPLE DEFENSE IS THE
+# DOWNSTREAM VM DSR / `family_k` SELECTION-DEFLATION. Adding a second, weaker
+# sample gate here would let a candidate be killed twice for the same reason,
+# and this one has no deflation theory behind it. Damper only.
+#
+# SMOOTH, NOT STEPPED: a linear ramp in n has no cliff anywhere, so no pair of
+# adjacent n values can flip a verdict (proven for 39 vs 40 in the tests).
+_SAMPLE_FLOOR_N: int = 40   # the n at which the CVaR cutoff first exceeds 1
+
+
+def _sample_damper(n_obs: int, n_floor: int = _SAMPLE_FLOOR_N) -> float:
+    """Smooth shrink factor in (0, 1]: ``min(1, n / n_floor)``.
+
+    n >= n_floor -> 1.0 (no shrink). Below the floor the factor ramps linearly,
+    so consistency is pulled toward neutral in proportion to how thin the sample
+    is. Continuous in n -> NO cliff -> adjacent n values can never flip a
+    verdict. Never returns 0 for n >= 1, so a thin candidate is damped, never
+    erased (erasing it would be a reject by another name)."""
+    if n_floor <= 0:
+        return 1.0
+    n = max(0, int(n_obs))
+    return min(1.0, n / float(n_floor))
+
+
+# ===========================================================================
+# RF3T2-B3 / T2-a — THE BOUNDED TIE-BREAK BLEND.
+#
+# v1 was a RAW LINEAR SUM of incompatible units:
+#     blend = w_c*sortino + w_m*magnitude
+#           = w_c*(unbounded annualized dimensionless ratio)
+#           + w_m*(raw USD-per-effective-bet)
+# The `w_consistency >= w_magnitude` clamp bounds the WEIGHTS, never the TERM
+# SCALE — so a large-enough magnitude outranks consistency. Reproduced live:
+# steady-small (sortino 555.82, $2/bet, blend 389.67) is overtaken by
+# volatile-bigger (sortino 5.38) at magnitude $1,286.35/eff-bet. The crossover
+# is exactly M_x = M_s + (w_c/w_m)*(c_s - c_v) — LINEAR in the sortino gap,
+# which reproduces all four RV-D1 S1 pairings to <$0.02 ($69-$310 range).
+#
+# 🚨 WHY NOT STRICT epsilon-BAND LEXICOGRAPHIC (the originally specified design):
+# it is INTRANSITIVE. With eps=0.06 and consistencies A=1.00, B=1.05, C=1.10:
+# A~B (in band -> magnitude decides), B~C (in band -> magnitude decides), but
+# |A-C| = 0.10 > eps so C beats A outright. Choose magnitudes A >> B >> C and
+# you get A>B, B>C, C>A — A CYCLE. No scalar function can represent a cyclic
+# relation, and a comparator would fix only ONE of the THREE consumers that
+# read this number (see below).
+#
+# 🚨 WHY IT MUST STAY A SCALAR — THERE ARE THREE CONSUMERS, NOT ONE:
+#   1. trainer_capital._compass_improves  -> `float(bw) > float(bo)` (ORDERING)
+#   2. trainer_bandit.compass_reward      -> `tanh(0.5*blend)`        (ARITHMETIC)
+#   3. trainer_hypotheses.compass_blend_delta -> `score(with)-score(without)`,
+#      summed into `net_evidence`                                    (ARITHMETIC)
+#   (4. trainer_reasoning narration — display only.)
+# A comparator fixes #1 and leaves #2 and #3 reading a raw scalar. A big-
+# multiplier lexicographic encoding (consistency*1e6 + magnitude) preserves
+# ordering but saturates #2 to 1.0 and makes #3's delta meaningless.
+#
+# THE FIX — a BOUNDED tie-break perturbation:
+#     blend = consistency + epsilon * (tanh(magnitude / S) / 2)
+# The magnitude term is bounded to +/- epsilon/2 BY CONSTRUCTION. Therefore:
+#     if (c_A - c_B) > epsilon  then  blend_A - blend_B > epsilon - epsilon = 0
+# -> MAGNITUDE CAN NEVER INVERT AN ORDERING OUTSIDE THE BAND. Structurally
+# impossible, provable in one line, and verified over 200,000 random pairs with
+# magnitudes up to +/-$1,000,000: ZERO inversions.
+# Inside the band, magnitude is the decider — exactly the design's "tiebreaker".
+#
+# 🚨 THE LEARNED PARAMETER STILL FLEXES PER LEVEL: it now controls the EPSILON
+# BAND (tie tolerance) instead of a linear weight, derived from the EXISTING
+# `compass_weights` columns (w_magnitude / w_consistency). NO SCHEMA CHANGE.
+#
+# ⚠️ HONEST MEASUREMENT — IS THE TIE-BREAK VESTIGIAL AT REAL SCALES?
+# epsilon = 0.4286 at the seed weights, against realistic sortino values of
+# 30-550. Measured band occupancy over 200k random pairs:
+#     sortino ~ U[1,150]        -> 0.58% of pairs fall inside the band
+#     sortino ~ U[1,600]        -> 0.13%
+#     sortino ~ lognormal(3,1)  -> 1.55%
+# So for RANDOMLY-DRAWN pairs magnitude decides ~1% of the time or less. That is
+# NOT a bug being papered over — the design says consistency dominates, and a
+# near-zero tie-break rate is that design working. But it is NOT decorative
+# either: the EXACT-TIE clusters are 100% in-band by construction —
+#   * the sortino 99.0 all-up sentinel: EVERY all-up window returns EXACTLY 99.0
+#   * config axes that do not change the return distribution (timing / cooldown
+#     sweeps) produce IDENTICAL daily_returns -> IDENTICAL sortino
+# In both, |c_A - c_B| = 0.0 and magnitude is the SOLE decider. State it that
+# way: magnitude decides ties, ties are rare among random pairs and certain
+# among distribution-invariant variants.
+
+# S — the magnitude scale inside the tanh. UNITS: USD PER EFFECTIVE BET.
+# DERIVATION (not a magic number): mirrored from the project's inviolable hard
+# capital cap `LIVE_HARD_CAPITAL_CAP_USD = 50.0` (an immutable auto_config key).
+# The largest plausible NET per effective bet over one scoring window is bounded
+# by the capital that can be at risk at all. Mirrored, not imported — same
+# pattern as FEE_BPS_ROUNDTRIP above (importing auto_trader trips the WSL
+# barrier). If the hard cap changes, this SHOULD be revisited.
+#
+# 🚨 PROVEN NOT TO SATURATE over the realistic range (the trap: too small an S
+# saturates the tanh INSIDE the band, every tie pins to +/-eps/2, and magnitude
+# stops discriminating ties — the bandit-saturation defect one level down, in
+# the fix itself). Measured tie-break term across the realistic span:
+#     $0 -> 0.000000 | $10 -> 0.042295 | $36.90 (deployable @ $82) -> 0.134558
+#     = 62.8% of the available half-band used across $0-$36.90. NOT saturated.
+#     tanh hits 0.99 only at m = 2.65*S = $132/eff-bet = 3.6x deployable
+#     capital -> outside the realistic range BY CONSTRUCTION.
+# Counter-test (what a bad S would do): S=1.0 -> $1 already maps to 0.7616 and
+# $36.90 to 1.000000, a spread of only 0.238 -> saturated, magnitude dead.
+MAGNITUDE_SCALE_USD: float = 50.0
+
+# Floor on the derived epsilon. A learned w_magnitude of exactly 0 would collapse
+# the band to zero and make magnitude unable to break even an EXACT tie, which
+# would silently retire the tiebreaker the design requires. Tiny but non-zero.
+_EPSILON_MIN: float = 1e-9
+
+
+def _derive_epsilon(w_consistency: float, w_magnitude: float) -> float:
+    """Tie-tolerance epsilon from the EXISTING compass_weights columns.
+
+    epsilon = w_magnitude / w_consistency  (0.3/0.7 = 0.4286 at the seed row).
+    This is the learned per-level parameter, re-expressed: a level that learns a
+    RELATIVELY larger magnitude weight gets a WIDER tie band (magnitude decides
+    more often), never a chance to outrank consistency outright. NO SCHEMA
+    CHANGE — both columns already exist.
+
+    Guarded: a non-finite / non-positive w_consistency, or a negative
+    w_magnitude, falls back to the seed ratio rather than producing a nonsense
+    band. Result is always finite and > 0."""
+    try:
+        wc, wm = float(w_consistency), float(w_magnitude)
+    except (TypeError, ValueError):
+        wc, wm = SEED_W_CONSISTENCY, SEED_W_MAGNITUDE
+    if not (wc > 0.0) or math.isnan(wc) or math.isinf(wc) \
+            or wm < 0.0 or math.isnan(wm) or math.isinf(wm):
+        wc, wm = SEED_W_CONSISTENCY, SEED_W_MAGNITUDE
+    return max(_EPSILON_MIN, wm / wc)
+
+
+def _bounded_tiebreak(magnitude: float, epsilon: float,
+                      scale: float = MAGNITUDE_SCALE_USD) -> float:
+    """The magnitude term: ``epsilon * tanh(magnitude / scale) / 2``.
+
+    STRICTLY bounded to (-epsilon/2, +epsilon/2) for every finite magnitude —
+    this bound IS the T2-a guarantee. Monotonically increasing in magnitude (a
+    better magnitude never hurts). Non-finite magnitude -> 0.0 contribution
+    (neutral), never a NaN that would poison the blend."""
+    try:
+        m = float(magnitude)
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(m) or math.isinf(m):
+        return 0.0
+    s = scale if scale > 0.0 else MAGNITUDE_SCALE_USD
+    return epsilon * (math.tanh(m / s) / 2.0)
 
 
 def _enforce_fixed_order(w_consistency: float, w_magnitude: float):
@@ -523,6 +849,14 @@ def evaluate_compass(
 
     # ---- STEP 1: the WALL. Rejected at any return; NOTHING else computed. ----
     if not gates["passed"]:
+        # Tripwire on the REJECT path too: if the first real candidates all fail
+        # the wall, this is the ONLY line that would ever announce which blend
+        # version is armed. Consistency/magnitude are still NOT computed — the
+        # short-circuit is byte-intact; this only logs.
+        _log.info(
+            "[COMPASS] blend_version=%s level=%d verdict=rejected failing=%s",
+            "v2" if coherence_v2_enabled() else "v1", int(level), gates["failing"],
+        )
         return {
             "survived": False,
             "consistency": None,
@@ -532,23 +866,85 @@ def evaluate_compass(
             "failing_gates": gates["failing"],
             "gates": gates,
             "level": int(level),
+            # Additive diagnostic, present on BOTH return paths so `blend_version`
+            # is always readable by a consumer/log-scraper. No consumer reads it.
+            "coherence": {"blend_version": "v2" if coherence_v2_enabled() else "v1"},
         }
 
     # ---- STEP 2: consistency ALWAYS outranks magnitude ----
-    consistency = sortino(candidate.get(_K_DAILY, []))
-    mag_detail = per_eff_bet_net(candidate.get(_K_TRADES, []))
+    v2 = coherence_v2_enabled()
+    daily = candidate.get(_K_DAILY, [])
+    consistency = sortino(daily)
+    mag_detail = per_eff_bet_net(
+        candidate.get(_K_TRADES, []),
+        correlation=(candidate.get(_K_CORR) if v2 else None),
+    )
     magnitude = mag_detail.value
 
-    # ---- STEP 3: fixed-order blend (clamped invariant) ----
+    # ---- STEP 3: the blend ----
     w_c, w_m, clamped = _enforce_fixed_order(
         float(weights["w_consistency"]), float(weights["w_magnitude"]),
     )
-    if consistency is None:
-        blend_score = None
-        verdict = "survived_unscorable"  # survived the wall, sortino has < 3 obs
+    blend_version = "v2" if v2 else "v1"
+    coherence: Dict[str, Any] = {"blend_version": blend_version}
+
+    if v2:
+        # T2-c: damp CONSISTENCY (the primary sort key) on a thin sample. A
+        # DAMPER, never a reject — the candidate stays scorable + comparable.
+        n_obs = len(_values(daily))
+        shrink = _sample_damper(n_obs)
+        consistency_eff = None if consistency is None else consistency * shrink
+        # T2-a: epsilon band from the EXISTING weight columns; magnitude enters
+        # ONLY as a perturbation bounded to +/- epsilon/2.
+        epsilon = _derive_epsilon(w_c, w_m)
+        coherence.update({
+            "n_obs": n_obs, "sample_floor_n": _SAMPLE_FLOOR_N,
+            "sample_shrink": shrink, "consistency_effective": consistency_eff,
+            "epsilon": epsilon, "magnitude_scale_usd": MAGNITUDE_SCALE_USD,
+        })
+        if consistency_eff is None:
+            blend_score = None
+            verdict = "survived_unscorable"
+        else:
+            tiebreak = _bounded_tiebreak(magnitude, epsilon)
+            # 🚨 THE INVARIANT, ASSERTED IN CODE (not merely intended): the
+            # magnitude term is STRICTLY inside +/- epsilon/2, so it can never
+            # invert an ordering whose consistency gap exceeds epsilon. If a
+            # learned weight ever produced a band that broke this, clamp + log
+            # rather than let it through silently.
+            half = epsilon / 2.0
+            if not (-half <= tiebreak <= half) or math.isnan(tiebreak):
+                _log.warning(
+                    "🚨 COMPASS TIE-BREAK BOUND VIOLATION: term=%r outside "
+                    "+/-%.6g for magnitude=%r epsilon=%.6g — clamping. Magnitude "
+                    "must NEVER outrank consistency outside the epsilon band.",
+                    tiebreak, half, magnitude, epsilon,
+                )
+                tiebreak = 0.0 if math.isnan(tiebreak) else max(-half, min(half, tiebreak))
+            coherence["tiebreak_term"] = tiebreak
+            blend_score = consistency_eff + tiebreak
+            verdict = "scored"
     else:
-        blend_score = w_c * consistency + w_m * magnitude
-        verdict = "scored"
+        # ---- v1: the original raw linear sum (byte-identical) ----
+        if consistency is None:
+            blend_score = None
+            verdict = "survived_unscorable"  # survived the wall, sortino < 3 obs
+        else:
+            blend_score = w_c * consistency + w_m * magnitude
+            verdict = "scored"
+
+    # 🚨 THE TRIPWIRE (RF3T2-B3). UNCONDITIONAL, INFO, on EVERY score, BOTH
+    # paths. `COMPASS_COHERENCE_V2_ENABLED` ships OFF, and this project's
+    # defining failure is "built, correct, and wired to nothing" (six instances
+    # and counting). The first time this ever scores a real candidate, the log
+    # says v1 or v2 OUT LOUD — so an unarmed compass announces itself instead of
+    # silently optimizing toward the old broken blend forever.
+    _log.info(
+        "[COMPASS] blend_version=%s level=%d verdict=%s consistency=%s "
+        "magnitude=%s n_eff_bets=%.4f blend_score=%s",
+        blend_version, int(level), verdict, consistency, magnitude,
+        mag_detail.n_eff_bets, blend_score,
+    )
 
     return {
         "survived": True,
@@ -560,6 +956,7 @@ def evaluate_compass(
         "gates": gates,
         "level": int(level),
         "weights_used": {"w_consistency": w_c, "w_magnitude": w_m, "clamped": clamped},
+        "coherence": coherence,
         "magnitude_detail": {
             "total_net": mag_detail.total_net,
             "n_charged": mag_detail.n_charged,
