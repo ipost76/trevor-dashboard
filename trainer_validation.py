@@ -59,9 +59,11 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import shlex
 import subprocess
+import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 # B2's Layer-2 throttle adapter — the ONLY path to alpha_budget (test() only, no reset).
@@ -351,7 +353,19 @@ def validate_candidate(
       Otherwise               → {"enabled": True, "ok": True, "leakage_reject": False,
                                  "verdict": {...promotion_verdict...},
                                  "throttle": {...throttle_test...}|None, "n_trials": K}.
-    Never raises.
+      Un-coercible n_trials/timeout (NaN / inf / non-numeric)
+                              → {"enabled": True, "ok": False, "usage_error": ...},
+                                 logged at the return site (RF3T2-B8).
+
+    Never raises to the caller — every failure mode above is returned as a dict.
+
+    🚨 RF3T2-B8 — this docstring used to read a bare "Never raises." and that was FALSE:
+    ``int(n_trials)`` / ``float(timeout)`` below sat OUTSIDE any guard, so a NaN raised
+    ValueError, an inf raised OverflowError, and a non-numeric string raised ValueError —
+    all BEFORE the VM hop, straight out to the caller. That is the same defect class as
+    T2-i (``promotion_verdict``'s own "never raises"), and it is the FIFTH+SIXTH entry in
+    this campaign's false-claim ledger. The guard below is what makes this line true; the
+    log is what stops it becoming a quiet wrong answer instead of a loud crash.
     """
     if not enabled():
         return {"enabled": False, "ok": False,
@@ -367,17 +381,60 @@ def validate_candidate(
         return {"enabled": True, "ok": False,
                 "usage_error": "provide shadow_key (real cohort) or shadow_stats"}
 
+    # ── RF3T2-B8 — the coercion guard that makes "never raises" true ────────────────
+    # int(NaN) → ValueError, int(inf) → OverflowError, int("abc") → ValueError, and this
+    # runs BEFORE the VM hop, so an un-coercible argument used to escape to the caller.
+    # 🚨 The log is NOT optional: a NaN arriving here is itself an upstream defect (a
+    # family_k / caller that produced a non-number). Returning a quiet ok=False without
+    # naming the offending key would trade a loud crash for a silent wrong answer — the
+    # exact trade this campaign keeps finding. Name the key, name the value, then return.
+    try:
+        n_trials_i = int(n_trials)
+    except (TypeError, ValueError, OverflowError) as exc:
+        print(
+            "[trainer_validation] validate_candidate: un-coercible n_trials=%r "
+            "(%s: %s) — returning NOT-OK, no VM hop. This is an UPSTREAM defect: "
+            "something produced a non-integer family K." % (n_trials, type(exc).__name__, exc),
+            file=sys.stderr,
+        )
+        return {"enabled": True, "ok": False,
+                "usage_error": f"n_trials must be an integer, got {n_trials!r} ({type(exc).__name__})"}
+
+    try:
+        to = float(timeout if timeout is not None else _DEFAULT_TIMEOUT)
+    except (TypeError, ValueError, OverflowError) as exc:
+        print(
+            "[trainer_validation] validate_candidate: un-coercible timeout=%r "
+            "(%s: %s) — returning NOT-OK, no VM hop." % (timeout, type(exc).__name__, exc),
+            file=sys.stderr,
+        )
+        return {"enabled": True, "ok": False,
+                "usage_error": f"timeout must be a number, got {timeout!r} ({type(exc).__name__})"}
+
+    # 🚨 float(nan)/float(inf) do NOT raise — but subprocess.run(timeout=nan|inf) NEVER
+    # fires (MEASURED: `sleep 1` with timeout=nan returns rc=0). A non-finite timeout
+    # therefore SILENTLY DISABLES the hard guard against a hung ssh — the loud crash is
+    # replaced by an unbounded hang. Reject it explicitly rather than coerce a default.
+    if not math.isfinite(to) or to <= 0:
+        print(
+            "[trainer_validation] validate_candidate: non-finite/non-positive timeout=%r "
+            "— returning NOT-OK, no VM hop. A NaN/inf timeout silently disables the hard "
+            "subprocess timeout (the hung-ssh guard)." % (timeout,),
+            file=sys.stderr,
+        )
+        return {"enabled": True, "ok": False,
+                "usage_error": f"timeout must be a positive finite number, got {timeout!r}"}
+
     payload: Dict[str, Any] = {
         "feature_names": list(feature_names) if feature_names is not None else None,
         "masks": masks or [],
         "shadow_key": shadow_key,
         "shadow_stats": shadow_stats,
-        "n_trials": int(n_trials),
+        "n_trials": n_trials_i,
         "min_n": min_n,
         "bh_significant": bool(bh_significant),
         "vm_db_path": _VM_TREVOR_DB,
     }
-    to = float(timeout if timeout is not None else _DEFAULT_TIMEOUT)
 
     # ── HOP 1 — VM-side verdict (leakage layers → shadow_stats → promotion_verdict) ──
     verdict = _vm_call(payload, to)
