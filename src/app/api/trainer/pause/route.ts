@@ -22,6 +22,20 @@ import { callGateway, gatewayResponse } from "@/lib/gateway-client";
 // by gw_exec._flag_on (423 when off). callGateway ALWAYS resolves: 400
 // unknown_op/validation · 401 auth · 423 locked · 500 gateway_token_missing ·
 // 502/504 VM unreachable/timeout. Auth: middleware-enforced cookie session.
+//
+// 📋 RF3T2-B8 (NIT-4 "Hub dead-button / stripped-op cluster", DOCUMENT — mostly STALE).
+// RECON-GIGANTIC-001 filed a 5-part cluster; re-verified live this run:
+//   G3  "PAUSE TRADING silently 400s"  → ALREADY-CLOSED. Not dead: HUB_PAUSE_CONTROL_ENABLED
+//       is `true` in live auto_config, this route is flag-gated with a documented 423, and
+//       the UI is wired (trainer-pause-control.tsx). It records intent by design (above).
+//   G9  ExitProfile.atr_adjustment dead field → ALREADY-CLOSED (0 hits repo-wide).
+//   G10 circular lazy import → 0 hits.
+//   G12 "~14 stripped write routes → 400 unknown_op" → COUNT STALE: only 4 callGateway
+//       routes exist today.
+//   G11 ENTRY_STOP_DISTANCE_SHADOW / EXTERNAL_CLOSE_OUTCOME_SHADOW firing by config-key
+//       absence → 0 hits on WSL; these are VM-side. MIS-ROUTED to B8 — handed off
+//       handoff-grade to the VM prompt that takes T2-i (see CLAUDE.md).
+// Nothing here needs a code change; recorded so the cluster is not re-filed as "new".
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

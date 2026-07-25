@@ -397,6 +397,15 @@ def have_we_tested(
 ) -> List[Dict[str, Any]]:
     """"Have we tested X?" — a fast INDEXED, cross-tier structured-verdict lookup.
 
+    🚨 RF3T2-B8 (NIT-5, DOCUMENT — watch-item): `agent` defaults to None, and None is
+    the CROSS-AGENT SPAN (reads watcher_memory too). The AST independence guard
+    (tests/test_watcher_independence.py denial 4) scans symbols + string literals, so it
+    is STRUCTURALLY BLIND to a runtime `agent=None` reaching here from a trainer module —
+    a future trainer prompt could leak and the suite would still read 5/5. No live code
+    exercises it today: the sole production caller, trainer_loop.py:694, passes
+    agent="trainer" as a LITERAL (verified this run). Keep it literal; never pass a
+    variable, and never call this from a trainer with agent=None or agent="watcher".
+
     Returns a list of ``{what, canonical_id, agent, level, outcome, tier, confidence,
     summary_or_prose}`` (WARM also carries ``tags``). Per effective tier: HOT → full detail,
     WARM → conclusion + tags, COLD → summary stats. Empty store / no match → ``[]`` (never an

@@ -142,6 +142,16 @@ def sortino(daily_returns: Sequence[float], ann: int = 365) -> Optional[float]:
 
     Faithful re-implementation — proven equal to the private original in the
     unit tests. The CONSISTENCY term of the compass; higher is better.
+
+    📋 RF3T2-B8 (NIT-8, DOCUMENT): RECON-GIGANTIC-001 flagged that an all-up window
+    returns EXACTLY 99.0 and so inflates the consistency term for a window that merely
+    had no down days. That is real but BOUNDED, and it is deliberately left as-is:
+    (a) the survival WALL runs first and short-circuits — an all-up window still has to
+    clear drawdown + CVaR before it is ever scored; (b) RF3T2-B3 already turned the
+    sentinel into a LOAD-BEARING documented case for the bounded tie-break (see the
+    MAGNITUDE_SCALE_USD block below — every all-up window collides at exactly 99.0, so
+    |c_A - c_B| = 0 and magnitude is the sole decider, by design). Changing the sentinel
+    would silently move that tie-break. Any revisit is a separate, gated decision.
     """
     clean = _values(daily_returns)
     if len(clean) < _SORTINO_MIN_N:
@@ -643,6 +653,14 @@ def _sample_damper(n_obs: int, n_floor: int = _SAMPLE_FLOOR_N) -> float:
 # In both, |c_A - c_B| = 0.0 and magnitude is the SOLE decider. State it that
 # way: magnitude decides ties, ties are rare among random pairs and certain
 # among distribution-invariant variants.
+
+# 📋 RF3T2-B8 (NIT-3, DOCUMENT — not a gap): this module has ZERO `regime` references
+# by design, so per-regime weighting cannot be learned INSIDE the compass. RECON-
+# GIGANTIC-001's own verdict is that this is a CLEANER design, not a defect: the
+# capability already exists one layer up in `trainer_capital.propose_regime_posture`
+# (default-declines, flag OFF, never a signal), which keeps regime posture a separate
+# gated proposal instead of a hidden weight inside the objective function. Do NOT add a
+# regime-keyed compass weight to "close" this.
 
 # S — the magnitude scale inside the tanh. UNITS: USD PER EFFECTIVE BET.
 # DERIVATION (not a magic number): mirrored from the project's inviolable hard

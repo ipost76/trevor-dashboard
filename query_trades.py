@@ -195,6 +195,17 @@ def main():
         conn.close()
 
         # SQLite deletions (read-write)
+        # 📋 RF3T2-B8 (NIT-9, DOCUMENT — destructive-in-code but DOUBLY unreachable):
+        #   (1) NO CALLER — the `delete_trade` scope (and `bulk_update`) has zero callers
+        #       anywhere; the Hub routes only ever invoke scopes active/history/watchlist.
+        #   (2) NO WRITE — db_path resolves to the litestream replica
+        #       (/home/ghost/trevor-replica/trevor.db, mode 0444), so the DELETE fails with
+        #       "attempt to write a readonly database" and touches 0 rows. VERIFIED on an
+        #       isolated file with identical ownership+mode: sqlite acquires the byte-range
+        #       lock (BEGIN IMMEDIATE succeeds) but the DELETE itself raises and 0 rows go.
+        # ⚠️ The inertness rests on a FILE PERMISSION, not on code. If tailsync ever
+        #    publishes the replica 0644, this becomes live. Do not "fix" it by relaxing the
+        #    replica mode; the additive-DB law says a row delete never belongs on this path.
         conn_rw = sqlite3.connect(db_path, timeout=10)
         try:
             cur = conn_rw.execute("DELETE FROM active_trades WHERE trade_id=? AND status='closed'", (trade_id,))

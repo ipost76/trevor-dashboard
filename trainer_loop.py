@@ -487,6 +487,13 @@ def sort_candidates_for_display(candidates: Sequence[Dict[str, Any]]) -> List[Di
     🚨 This is presentation, NOT a promotion decision — it issues no promotion and
     reorders no queue; Ghost+CC decide priority (§D.12.8). Ordering key: matched-data
     net_usd desc, then win_rate desc, then n desc — a stable, evidence-first display.
+
+    📋 RF3T2-B8 (NIT-2, DOCUMENT — do NOT wire): ZERO production callers today
+    (only tests/test_trainer_loop.py references it). RECON-GIGANTIC-001's own verdict
+    is "keep it unwired" — it exists so a Hub display has a canonical evidence order
+    the moment one is built, and wiring it to anything that RANKS would cross the
+    surfaces-never-promotes line (§D.12.8). Confirmed the sole zero-caller "canonical"
+    function on this box; leave it.
     """
     def _key(c: Dict[str, Any]):
         s = c.get("stats") or (c.get("candidate") or {}).get("stats") or {}
