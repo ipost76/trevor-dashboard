@@ -49,7 +49,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sqlite3
+import sys
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -964,26 +966,91 @@ def _read_promotions(replica_path: str, watermark: int, limit: int) -> List[Dict
     return out
 
 
+# ── the VM level chain (RF3T2-B8) ─────────────────────────────────────────────
+# Self-contained on purpose: `watcher_integrity` owns the SAME shim, but importing it
+# from the fragile review-brain would put an integrity-side module on this side of the
+# B0 independence boundary. Duplicating ~10 lines of argv is the cheaper price.
+_VM_HOST = os.environ.get("WATCHER_REVIEW_VM_HOST", "vm")
+_VM_CWD = "/home/trevor/trevor"
+_LEVEL_QUERY = "scripts/level/level_query.py"
+
+
+def _log_level_read_failure(reason: str) -> None:
+    """Make a failed level read VISIBLE on stderr.
+
+    🚨 This is the load-bearing half. A dead pipe and 'the level did not change' both
+    return None, so WITHOUT this line an unreachable VM is indistinguishable from a
+    quiet one — a daemon that stops knowing anything while still looking alive. That is
+    the silent-lifecycle-failure pattern; the reason used to be discarded entirely.
+    """
+    print(
+        "[watcher_review] level read UNKNOWN (%s) — treating as 'no change'" % reason,
+        file=sys.stderr,
+    )
+
+
 def _ssh_max_level() -> Optional[int]:
-    """Read ``MAX(level)`` from the VM's rebuild_tracker.db over the READ-ONLY ``ssh vm`` pipe
-    (verified path /home/trevor/trevor/rebuild_tracker.db; env WATCHER_REBUILD_TRACKER_DB
-    overrides). Returns None on ANY failure (VM unreachable / no levels table / bad output) —
-    the trigger treats None as 'no change', never an alarm. Read-only: a ``-readonly`` sqlite3
-    SELECT under ``sudo -u trevor``. B2 owns the integrity/apply side; B1 only DETECTS."""
+    """Read the current minted level from the VM chain over the READ-ONLY ``ssh vm`` pipe,
+    via the CANONICAL ``scripts/level/level_query.py current`` CLI.
+
+    RF3T2-B8: was a raw ``sqlite3 -readonly 'SELECT COALESCE(MAX(level),0) FROM levels'``.
+    ``watcher_integrity`` and ``memory_tiers`` both already went through the CLI — being the
+    odd one out is exactly where a level-read bug hides, and G2 makes the level chain
+    VM-only (never a WSL table). Equivalent by construction: ``level_query.current_level()``
+    is documented as ``MAX(levels.level)``, 0 on an empty chain — the same number the old
+    SELECT produced (verified side by side: both 0).
+
+    🚨 Returns None on ANY failure (spawn / timeout / nonzero / empty / malformed / non-int)
+    — NEVER 0. A daemon that refuses is correct; one that silently starts at level 0 is the
+    corruption this campaign exists to prevent. The trigger treats None as 'no change', never
+    an alarm — and every failure is now LOGGED (see ``_log_level_read_failure``).
+
+    Read-only under ``sudo -u trevor``; NEVER mints a level. B2 owns the integrity/apply
+    side; B1 only DETECTS.
+    """
     import subprocess
-    db = os.environ.get("WATCHER_REBUILD_TRACKER_DB", "/home/trevor/trevor/rebuild_tracker.db")
+
+    remote = "cd %s && sudo -u trevor python3 %s current" % (
+        shlex.quote(_VM_CWD),
+        shlex.quote(_LEVEL_QUERY),
+    )
+    argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", _VM_HOST, remote]
+
     try:
-        proc = subprocess.run(
-            ["ssh", "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", "vm",
-             f"sudo -n -u trevor sqlite3 -readonly {db} "
-             f"'SELECT COALESCE(MAX(level),0) FROM levels'"],
-            capture_output=True, text=True, timeout=20,
-        )
-        if proc.returncode != 0:
-            return None
-        return int((proc.stdout or "").strip() or 0)
-    except Exception:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        _log_level_read_failure("timeout after 20s")
         return None
+    except Exception as exc:  # ssh binary missing / OSError / bad argv
+        _log_level_read_failure("spawn failed: %s: %s" % (type(exc).__name__, exc))
+        return None
+
+    if proc.returncode != 0:
+        _log_level_read_failure(
+            "nonzero exit %s: %s" % (proc.returncode, (proc.stderr or "").strip()[:200])
+        )
+        return None
+
+    out = (proc.stdout or "").strip()
+    if not out:
+        _log_level_read_failure("empty stdout")
+        return None
+
+    try:
+        data = json.loads(out)
+    except (ValueError, TypeError) as exc:
+        _log_level_read_failure("malformed json: %s" % exc)
+        return None
+    if not isinstance(data, dict):
+        _log_level_read_failure("non-object json: %s" % type(data).__name__)
+        return None
+
+    lvl = data.get("current_level")
+    # bool is an int subclass — reject it explicitly; reject negatives.
+    if isinstance(lvl, bool) or not isinstance(lvl, int) or lvl < 0:
+        _log_level_read_failure("non-int current_level: %r" % (lvl,))
+        return None
+    return lvl
 
 
 def _gates_nonempty(failing_gates_json: Any) -> bool:
