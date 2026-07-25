@@ -173,6 +173,8 @@ Live values, verified from `auto_config` on 2026-05-16:
 
 Eight wave flags are live; `MODE` (master) and `CHAT` remain off. Note: `feature-flags.ts:readFlag()` is a leftover stub that always returns `false` — `/api/feature-flags` is the real source.
 
+🚨 **NOT EVERY TREVOR FLAG IS AN `auto_config` ROW — two are ENV VARS (measured RD-C4, 2026-07-25, on BOTH boxes).** `COMPASS_COHERENCE_V2_ENABLED` (read via `os.environ` in `compass_metrics.py` + `trainer_validation.py`, both `COMPASS_COHERENCE_V2_ENV`) and `LEVEL_CHANGE_DETECTION_ENABLED` (VM-side `scripts/level/change_detector.py` `FLAG_ENV`, default OFF; zero Hub references) return **NOT IN `auto_config`** against both the replica and the VM's live `trevor.db`. **Anyone who looks for them in the config table will correctly conclude the row does not exist and incorrectly conclude the flag does not exist.** They are not flippable by `auto_config` upsert; they need an env change + a restart of the reading process.
+
 ---
 
 ## Deploy Checklist
@@ -253,6 +255,94 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 - Locks live in `.locks/` (gitignored, native ext4 only). Stale locks auto-reclaim only when age >15min AND the owner PID is dead (`kill -0`).
 - Diagnostic: `scripts/locks/lock_status.sh`. Re-prove every guarantee anytime: `scripts/locks/selftest.sh` (8 live concurrency proofs in a scratch dir; never touches the live repo).
 - **No worktrees / no branches** — all prompts run on `master`; the per-file lock + commit serialization prevent collisions. Worktrees retired 2026-06-16; this mirrors the VM LOCK-VM contract so both boxes behave identically.
+- 🚨 **THE PATHS ABOVE ARE THE HUB-SIDE NAMES AND THEY ARE NOT THE VM'S.** Hub: `scripts/locks/_common.sh` · `scripts/locks/lock_acquire.sh` · `scripts/locks/lock_release.sh` · `scripts/locks/git_commit_serialized.sh` · `scripts/locks/lock_status.sh` · `scripts/locks/with_file_lock.sh` · `scripts/locks/selftest.sh`. The VM's shared file is `_lock_common.sh` and its tooling is not under `scripts/locks/`. **This note is PREVENTATIVE, not corrective** — verified RD-C4: outside this sentence, `_lock_common.sh` has **zero** hits anywhere in the Hub docs, and this section already had the paths right. *(Stated that way deliberately: an unqualified "zero hits" would be falsified by the sentence asserting it — the same self-invalidating-record defect this campaign exists to close.)* The wrong names appeared only in the *authored prompts*, every one of which reached for the VM's spelling. Recorded here so the next prompt copies from a measured list instead of from memory.
+
+---
+
+## WSL box operational state (measured RD-C4, 2026-07-25)
+
+**Current state of this box, not a changelog.** The canonical project record is the VM's `CLAUDE.md` (RD-C3 owns it); this section is Hub/WSL-specific only.
+
+### The death-alert spine (RD-B6)
+
+- **Six live WSL units carry `OnFailure=trevor-alert@<unit>.service`:** `trevor-dashboard` · `trevor-gateway` · `trevor-gateway-watchdog` · `trevor-tailsync` · `trevor-cost-refresh` · `trevor-funnel-watch`.
+- **`StartLimitIntervalSec=60s` was added to the three long-running daemons** (`trevor-dashboard`, `trevor-gateway`, `trevor-gateway-watchdog`; the three one-shots stay at the 10s default). **Not cosmetic:** with an unbounded restart window a crash-looping daemon could never reach terminal `failed`, so `OnFailure=` could never fire and the spine would have been *structurally* unable to alert — wired, and incapable of working.
+- 🚨 **NEW RESTART SEMANTICS — STATE THIS PLAINLY: a crash-looping daemon now STOPS being restarted and goes to `failed`.** That is the intent, and the trade is explicit: **a flapping service now stays down instead of flapping forever.** A down service that alerts beats a wedged service that looks alive.
+- **`WATCHER_ALERT_INTERVAL_SEC` raised 600 → 3600.** Trade-off, stated: **a genuine burst is now UNDER-REPORTED.** Accepted because for a death alert the *fact* beats the *count* — one true "it died" is the payload; the tally is not.
+
+### 🚨 What the spine does NOT cover — three gaps, by construction
+
+- **F2 — non-starts.** `OnFailure=` fires on the failure of a **STARTED** unit; it **never** fires for a unit that was never launched or that refuses at startup. A configured-but-never-started daemon reads as expected-empty and nothing alarms.
+- **F1 — wedged-but-not-failed.** A hung-but-alive process never exits, so nothing fails. 🚨 **DO NOT "fix" this with a bare `WatchdogSec`** — it would `SIGABRT` a healthy 900s loop every cycle. The `/healthz`-polling watchdog pattern is the correct shape; a bare timer is not.
+- **F4 — total network outage.** The alert path itself is the casualty; nothing local can report it.
+
+### 🚨 F2 IS UNCOVERED IN PRACTICE, NOT MERELY IN THEORY
+
+`scripts/watcher_arm_check.py` is the **only** cover for a non-start. Its own header says so: *"THE ONLY COVER FOR A NON-START."* **It has no timer, no cron, and no automation — it is purely manual.** Measured RD-C4: nothing in `deploy/systemd/wsl/` references it, and there is no cron anywhere on this box.
+
+> **The cover for the campaign's most-repeated defect class is itself uninvoked.** RD-B6's summary said the cover exists. It does — and nothing runs it. Until something invokes it (timer, or a genuinely enforced go-live checklist step), **treat F2 non-starts as UNCOVERED.** "A script that would catch this exists" is not coverage; being run is.
+
+### The scheduler is systemd timers — NOT cron (answers the empty-crontab question)
+
+**The WSL crontab is empty, and that is correct, not a gap.** `crontab -l` is empty for both `ghost` and `root`; `/etc/cron.d` holds only distro defaults; nothing under `scripts/` or `deploy/` references cron at all. **Scheduled work on this box runs on systemd timers**, all four verified firing or installed:
+
+| Timer | Service | State |
+|---|---|---|
+| `trevor-tailsync.timer` | `trevor-tailsync.service` | enabled, active (replica refresh) |
+| `trevor-funnel-watch.timer` | `trevor-funnel-watch.service` | enabled, active |
+| `trevor-cost-refresh.timer` | `trevor-cost-refresh.service` | enabled, active (daily 06:00) |
+| `trevor-restore.timer` | `trevor-restore.service` | installed, **disabled** |
+
+⚠️ Earlier RD prompts read the empty crontab as "the invocation path is UNKNOWN." **It was a correct reading of the wrong scheduler.** Look in `systemctl list-timers`, not `crontab -l`.
+
+### 🚨 Pre-commit guard chain: NOT INSTALLED — and the reason is the record
+
+**WSL has ZERO pre-commit guards. `.git/hooks/pre-commit` is ABSENT.** This is a **deliberate, measured decision (RD-C4)**, not an omission and not an unfinished task.
+
+**Why: the chain blocks legitimate Hub work.** Dry-run against the real Hub repo (RD-C1's repaired suite, `TREVOR_ROOT` correctly deriving to this repo):
+
+- **Empty index / TypeScript-only commit → `rc=0`**, `9 guard hooks, 19 of 41 checks effective`. Fine.
+- 🚨 **11 representative Hub Python files staged → `rc=1`, COMMIT BLOCKED, 3 guards failed, 30 violations — every one a FALSE POSITIVE.**
+- 🚨 **17 of 138 tracked Hub `.py` files** carry at least one line that trips a guard.
+
+**Three root causes — ALL are guard-suite defects on the VM (RD-C3's box), NOT Hub code to change:**
+
+1. **Docstring-body scanning.** The comment-skip is `^#` and the docstring-skip only matches lines that *begin* with `"""`. A docstring **body** line is scanned as code — so `guard_db_destructive_ops` and `guard_immutable_constraints` flag every file whose header says *"Additive-DB law: … no DROP/DELETE/TRUNCATE"*. **The guard blocks files for documenting their own compliance**, and blocks `tests/test_memory_query.py` — the test that AST-asserts no destructive SQL exists. `guard_autoclose_scanner` fails the same way on `set_killswitch.py`'s `NOTE: Rule 1 (NO AUTO-CLOSE)`: the regex `auto.close` matches `AUTO-CLOSE` because `.` matches the hyphen. **It blocks a file for citing the rule it enforces.**
+2. **`download_manager` channel-ops whitelist.** Constraint 1 flags `create_category` as a Discord channel op. It is **HUB DOCS category creation**. The guard's own comment concedes the regex is *"name-clash-unsafe"* and whitelists `scripts/backfill_*.py` — but not `download_manager.py`, where the function is **defined**, nor its caller `query_docs_categories.py`.
+3. **`ET_ZONE` constant + `tests/` scope on guard 3.** Constraint 3 demands the literal `America/New_York` on the same line, so `datetime.now(ZoneInfo(ET_ZONE))` is flagged though the code *is* ET. Constraint 4 has no `tests/` exemption, so ordinary status strings like `print("… SKIP (VM pipe unreachable)")` block.
+
+🚨 **This is self-renewing, not a one-time cleanup: the Hub's house docstring style IS the string `no DROP/DELETE/TRUNCATE`, so every new DB-touching Hub module is born blocked.**
+
+**Why not install anyway:** a chain that blocks correct work gets bypassed within a day, and a bypassed chain is worse than no chain — it looks like coverage while teaching everyone to route around it. Installing would also mint a fresh false claim, *"WSL is guarded"*, which is the exact defect class this campaign exists to close. **NOT INSTALLING IS THE CORRECT OUTCOME.**
+
+**What DOES work, and is worth keeping for whoever installs it after the three fixes land:**
+- `TREVOR_ROOT` derivation (RD-C1) is **correct on this box** — resolves to `/home/ghost/projects/trevor-dashboard`, no env override present.
+- The `[INERT]` class works: bot-only guards report `[INERT]`, never a vacuous `[PASS]` — `guard_recurring_bugs(15)`, `guard_whitelist_integrity(2)`, `guard_threshold_integrity(3)`, `guard_import_safety(2)` = **22 INERT of 41**, so **19 effective**, identical in every dry-run.
+- Rollback is genuinely one command, tested: `rm -f .git/hooks/pre-commit && rm -rf hooks`.
+- ⚠️ Two facts RD-C1 could not measure from the VM: **`gitleaks` is ABSENT** on this box (`~/.local/bin/gitleaks` does not exist, not on `PATH`) so the chain's secret-scan stage is fail-open and buys nothing here; and **`grep` on this box is `ugrep 7.5.0`, not GNU grep** (`-P` supported via pcre2jit, but it is not a GNU build).
+- ⚠️ Performance: the suite is O(added lines × subshell greps). A 38,440-line staging did not finish in 5+ minutes inside the first guard alone.
+
+🚨 **`/home/trevor/trevor` EXISTS on this box** — RD-C1's runbook §6 item 1 predicted *"expect: No such file or directory"* and **guessed wrong**. It is not a repo: it is a root-owned directory holding exactly one entry, `trevor.db -> /home/ghost/trevor-replica/trevor.db`. **So the pre-fix failure mode was "silently scans the wrong path," NOT "dies at `cd`" — the opposite failure, and the dangerous one**, because `cd` would have *succeeded* into a directory with no source files and the guards would have reported a vacuous green. RD-C1's `BASH_SOURCE` derivation neutralises it. *(That runbook is VM-side; recorded here, not edited there.)*
+
+### Hub staleness gating (RD-B7)
+
+- Gated surfaces: the **breaker card**, **`scanner.status`**, the green **"ENTRIES ALLOWED"** banner, and the **SWR-frozen age**.
+- **4h threshold, derived from measured cadence** — not a round number picked for looks.
+- 🚨 **`UNKNOWN` renders NEUTRAL, never as a fault.** The breaker is signal-driven and legitimately may not have run; painting "hasn't run" as "broken" trains people to ignore the colour.
+- ⚠️ **Premise correction — "the entry path is 100% blocked / three signals" is REFUTED.** Measured: **19 signals reached the manager in an 18h window, 13 today, 7-day average 47.6.** **Signals ARE flowing; FILLS are zero.** Those are different failures with different causes, and conflating them sends the next investigation to the wrong layer.
+
+### Bandit reward rescale (RD-B8)
+
+- **`REWARD_K` 0.5 → 1/550**, applied in **ONE location** (the other occurrence, `k: float = REWARD_K`, is a *name reference*, not a second constant).
+- Safe band **[13.76, 1614]**, with a self-proving acceptance test and the observed-range log.
+- Landed while `bandit_posteriors` was still empty — no historical rewards needed rescaling.
+- 🚨 **NECESSARY BUT MAY NOT BE SUFFICIENT — this is NOT the same claim as "the bandit is fixed."** `LAMBDA_STALE` and `LAMBDA_SAT` have **no derivation** and **OUT-VOTE** the reward term. Rescaling `REWARD_K` restores the reward's *ability to rank*; it does not establish that the reward *decides*. Anyone reading this as "closed" will skip the two underived constants that dominate it.
+
+### Other current-state facts
+
+- **`HUB_QA_WEBHOOK_URL` is ABSENT** from `.env.local`. WSL alerts fall back to **`#downloads`** (`scripts/watcher_alert.py`, `resolve_webhook()`). Minting it is **Ghost-side**; no prompt should create it or edit `.env.local`.
+- **`systemctl is-system-running` = `degraded`** — **pre-existing**, sole cause `getty@tty1.service`. Unchanged before and after RD-C4. Do not chase it.
+- **2 stray `RF2-C1` test posts in `#downloads`: UNVERIFIABLE FROM THIS BOX.** Discord-side, and there is **no local send-log** — `logs/downloads_delete.log` records deletions only, and the sole `RF2-C1` matches on disk are CC session transcripts. Recorded as unverifiable; **claiming neither way.**
 
 ## R9 Trainer — TREVOR v5 self-improvement loop (WSL-search / VM-verdict)
 
@@ -1116,7 +1206,7 @@ No service restarts mid-task — restart only at step 3, and only with Ghost app
 
 ### 2026-06-22 — B8: HEALTH page redesign — Budget dedupe + System regroup + collapsible groups + killswitch help collapse — BUILT (committed on master, restart pending)
 - **Cleans up the lower half of the HEALTH page so it's short by default.** WSL `TrevorHub` (`ghost@Ghost`), on `master`, port :3000. PARALLEL with B7 (rollup + AI hero) — shared `health-section.tsx`, serialized on its file lock; B8 touched ONLY the lower-card region, B7 the top (HealthRollup + AiFindingsPanel byte-untouched by B8). **Display-only, read-only over the existing `/api/heartbeat` surface — no new route, no `trevor.db`/`auto_config`/flag/schema write, no money path, no bot/VM touch.**
-- **⚠️ A3 seams re-verified live — Causes of drift found: 0.** Budget was shown **2× (not 3×)** — both in `heartbeat-view.tsx`: the category status-pill (`key:"budget"`) + the System ResourceBar; `ai-findings-panel.tsx:214` `cost_usd` is a per-finding cost, NOT a 3rd budget. System Resources + Quick Stats had **zero field overlap** (regroup, not dedupe).
+- **⚠️ A3 seams re-verified live — Causes of drift found: 0.** Budget was shown **2× (not 3×)** — both in `heartbeat-view.tsx`: the category status-pill (`key:"budget"`) + the System ResourceBar; `ai-findings-panel.tsx`'s `cost_usd` field (cited by SYMBOL — the old `:214` had drifted; the file is 181 lines) is a per-finding cost, NOT a 3rd budget. System Resources + Quick Stats had **zero field overlap** (regroup, not dedupe).
 - **(1) Budget dedupe** — removed the `key:"budget"` status-card from the category grid (now 5 tiles: Services/Pipeline/AutoTrader/Database/Backup); the **System-grid ResourceBar (`+breakdown`) is the single canonical Budget view**. Budget severity preserved via the bar's `warnAt={80}` color.
 - **(2) System regroup** — System Resources + Quick Stats merged into ONE collapsible **"System"** group (default OPEN). Memory/Disk/Budget stay `ResourceBar`s (utilization keeps the bar+warn-color); CPU load + the 6 former Quick Stats become `MetricTile`s in one grid. **All 10 fields survive, every `cats.*` source byte-identical** (Memory/Disk/CPU←`cats.system.*`, Budget←`cats.budget.*`, Sacred←`cats.database.sacred_*`, Killswitch/AT/Closed-today←`cats.autotrader.*`, Last/Next heartbeat←`data.timestamp`-derived). The legacy local `Stat` helper was removed (Quick Stats was its only consumer).
 - **(3) Killswitch help collapse** (`killswitch-control-card.tsx`) — the always-visible 3-line `<p>` → one-line summary ("Killswitch ON blocks ALL new signal cards + AutoTrader entries.") + a lucide `Info` ⓘ tap button (React `helpOpen` useState) revealing the rest on tap (mobile-friendly). Full text still available; the 2-tap confirm BottomSheet copy is untouched.

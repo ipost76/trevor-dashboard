@@ -263,10 +263,21 @@ worse than never having made it; none were lost.
 |---|---|---|---|
 | 1 | RV: *"every DECISION path obeys the data laws"* | **REFUTED** — 5 sites + 1 companion; three roadmaps cited the parent, treat it as void | VM `CLAUDE.md:648` |
 | 2 | Two audits: *"`circuit_breaker.py` is dead code"* | **REFUTED** — live via `discord_bot.py:2288`, blocking trades as recently as 2026-07-22. **The parent's error was MODULE CONFLATION**, not auditing dead code | `:649` |
-| 3 | RV: *"the bandit converges (87%)"* | **REFUTED AT REAL SCALE** — `0.6 + tanh(0.5·blend)·0.4`; real blends 30–550 → every scored survivor gets reward exactly 1.0. Measured on synthetic O(1) blends | WSL `CLAUDE.md` |
+| 3 | RV: *"the bandit converges (87%)"* | **REFUTED AT REAL SCALE** — `0.6 + tanh(0.5·blend)·0.4`; real blends 30–550 saturate the reward so survivors cannot be ranked. Measured on synthetic O(1) blends. ⚠️ **The "exactly 1.0" wording was itself imprecise — corrected RD-C4, see the note below the table** | WSL `CLAUDE.md` |
 | 4 | *"T2-i is LATENT (`SHADOW_FEEDER_ENABLED` OFF)"* | **REFUTED** — `promotion_verdict` has **five** callers; the flag gates only the feeder; **two live crons** consume it today (`loop_edge_sweep` `0 */6`, `shadow_readiness_gate` `0 4`). Latent on today's DATA, never by flag | `:588` |
 | 5 | B8: *"a non-finite timeout never fires"* | **CORRECTED to primitive-specific.** `subprocess.run`: nan and inf both never fire. `asyncio.wait_for`: **nan fires INSTANTLY** (the opposite failure), inf never. `futures.result`: nan instantly, inf `OverflowError`. **The table is recorded, not the slogan** | `:589` |
 | 6 | B8: *"the batch returns looking successful"* | **CORRECTED** — two paths fused into one story. The FEEDER path dies **LOUD** (`try` at `:262` has only a `finally`, no `except`) and discards both computed verdicts → **0 usable results, not 2**. The **NIGHTLY CRON** path is where the genuinely silent partial grading lives. Both real, separately | `:590` |
+
+> 🚨 **CORRECTION to refutation #3 — "reward EXACTLY 1.0" was FALSE (RD-C4, 2026-07-25; flagged by RD-B8 and left).**
+> Measured, not reasoned: `reward(30) = 0.9999999999999252`. That is **not** `1.0` — it fails `== 1.0`.
+> The first blend whose reward rounds to exactly `1.0` in float64 is **≈ 37.03**; above it the claim
+> holds, below it the reward is merely *indistinguishable*, not *identical*. Both statements matter and
+> they are different: **"saturated beyond ranking" is the true finding; "exactly 1.0" is a stronger
+> claim than the arithmetic supports.** The refutation itself stands — a bandit that cannot rank its own
+> survivors is filtering, not learning — but it was overstated at the low end of the range, and a
+> refutation that overstates is the same defect class it was written to close.
+> ⚠️ The same overstatement appears once more in this file, in the RD-B8 hazard row further down;
+> it is corrected there too. The VM sibling at `CLAUDE.md:429` is **RD-C3's** to correct, not this prompt's.
 
 **The DP-1 framing correction** — `:650`, both facts together and neither absorbed by the
 other: the breaker was **DISARMED** 20:00–23:59 ET every day, on **56 of 75 trading days**
@@ -491,7 +502,7 @@ Rebuilt from what could be verified this prompt, not copied forward.
 |---|---|---|---|
 | 1 | 🚨 `:3941` shadow executor **NOT LISTENING** | Ghost / root (Cloud Shell) | FORTRESS-C4 blocks `trevor` from `/etc` writes + `daemon-reload`. **Cutover ordering step 2 ("verify `:3941` up") would FAIL today.** Code + token + bind + auth are proven; only the unit install is missing |
 | 2 | 🚨 Alerting spine `OnFailure=` **NOT WIRED** | Ghost / root (Cloud Shell) | same wall. Handler built + proven 204; until the drop-ins land, **a unit death is invisible** |
-| 3 | 🚨 **Bandit reward saturation** | its own prompt | `compass_reward` = `0.6 + tanh(0.5·blend)·0.4`, `REWARD_K = 0.5` tuned for O(1); real blends 30–550 → reward exactly 1.0. **A bandit that cannot rank its own survivors is filtering, not learning** |
+| 3 | 🚨 **Bandit reward saturation** | its own prompt | `compass_reward` = `0.6 + tanh(0.5·blend)·0.4`, `REWARD_K = 0.5` tuned for O(1); real blends 30–550 saturate the reward past the point of ranking (measured RD-C4: `reward(30) = 0.9999999999999252` — **saturated, not literally `1.0`**; exact `1.0` begins at blend ≈ 37.03). **A bandit that cannot rank its own survivors is filtering, not learning** |
 | 4 | 🚨 **DP-1c blind log** (new, this prompt) | one-line fix prompt | the armed daily-loss breaker's only rate-limited observability emits no data |
 | 5 | 🚨 **Zero paper-window fills AND zero signals** | Ghost | the money path is unexercised and the signal path is **undiagnosed** — §15 |
 | 6 | `cutover_flip.py --revert` absent + WSL `v5-cutover-pre` tag missing | R13-B1 / Ghost (WSL) | two rollback layers incomplete; both are C1cut gate items |

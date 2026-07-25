@@ -1,11 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# TREVOR Hub — gateway health watchdog (WSL TrevorHub box)  [AUTHORED, NOT INSTALLED]
+# TREVOR Hub — gateway health watchdog (WSL TrevorHub box)  [INSTALLED, ENABLED, ACTIVE]
 #
-# STATUS: version-controlled but DELIBERATELY NOT installed/enabled yet. Goes live
-# at the Wave D cutover (when the dashboard runs on WSL as primary) — no auto-restart
-# authority for the gateway exists before then. To install at cutover:
-#   sudo cp deploy/systemd/wsl/trevor-gateway-watchdog.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now trevor-gateway-watchdog
+# STATUS: INSTALLED at /etc/systemd/system/, enabled, and active running. Verified
+# live 2026-07-25 (RD-C4).
+#
+# 🚨 THIS HEADER USED TO READ "[AUTHORED, NOT INSTALLED]" and "DELIBERATELY NOT
+# installed/enabled yet — goes live at the Wave D cutover", while the unit was
+# installed, enabled and running. RD-B6 recorded the true state in this unit's
+# drop-in but did not correct the header, so the file kept asserting the opposite of
+# its own live state. A header that contradicts `systemctl is-active` is worse than
+# no header: it is the first thing a reader trusts and the last thing anyone checks.
+# If you change this unit's installed state, change this line in the same commit.
+#
+# Rollback (returns to the pre-install state this header used to describe):
+#   sudo systemctl disable --now trevor-gateway-watchdog
+#   sudo rm /etc/systemd/system/trevor-gateway-watchdog.service && sudo systemctl daemon-reload
 #
 # WHY: trevor-gateway.service has Restart=on-failure (restarts only on process EXIT).
 # A wedged-but-alive gateway (event loop hung, still bound to :3939, never exits)
