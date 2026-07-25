@@ -616,7 +616,11 @@ def _sample_damper(n_obs: int, n_floor: int = _SAMPLE_FLOOR_N) -> float:
 #
 # 🚨 WHY IT MUST STAY A SCALAR — THERE ARE THREE CONSUMERS, NOT ONE:
 #   1. trainer_capital._compass_improves  -> `float(bw) > float(bo)` (ORDERING)
-#   2. trainer_bandit.compass_reward      -> `tanh(0.5*blend)`        (ARITHMETIC)
+#   2. trainer_bandit.compass_reward      -> `tanh(REWARD_K*blend)`   (ARITHMETIC)
+#      ⚠️ REWARD_K was 0.5 when this block was written; RD-B8 (2026-07-25)
+#      rescaled it to 1/550 because at 0.5 the reward spread over the real blend
+#      range [30,550] was 7.48e-14 — every scored survivor collapsed onto ~1.0.
+#      Cite the CONSTANT, never the literal, so this comment cannot go stale again.
 #   3. trainer_hypotheses.compass_blend_delta -> `score(with)-score(without)`,
 #      summed into `net_evidence`                                    (ARITHMETIC)
 #   (4. trainer_reasoning narration — display only.)
@@ -796,10 +800,82 @@ def survival_gates(candidate: Dict[str, Any], thresholds: Dict[str, float]) -> D
     }
 
 
+_WEIGHT_SEED_DEFAULTS = {
+    "w_consistency": SEED_W_CONSISTENCY,
+    "w_magnitude": SEED_W_MAGNITUDE,
+    "dd_ceiling": SEED_DD_CEILING,
+    "cvar_floor": SEED_CVAR_FLOOR,
+}
+
+
+def _finite_weight(raw: Any, field: str, source: str) -> float:
+    """Coerce one compass weight/threshold to a FINITE float, else the SEED value.
+
+    🚨 RD-B8 — the cfg_float-class finiteness gap on this flow. Previously these
+    were bare ``float(row[N])`` with no guard. MEASURED failure surface:
+
+      * DB, NaN   -> SQLite cannot store NaN; it lands as NULL -> ``float(None)``
+                     raised **TypeError** (NOT the AssertionError A8 reported —
+                     that is the caller-supplied path, below).
+      * DB, +-inf -> round-trips as REAL -> blend_score became inf / nan (v1),
+                     silently non-finite, NO raise.
+      * caller ``weights=``, NaN   -> **uncaught AssertionError** in
+                     ``_enforce_fixed_order`` (NaN comparisons are all False, so
+                     the post-clamp invariant assert blows up) — v1 AND v2.
+      * caller ``weights=``, +-inf -> v1 non-finite blend; v2 absorbs it to a
+                     finite value (the bounded tie-break saturates).
+
+    RD-B1 is closing ``cfg_float`` at the root ON THE VM and does NOT reach WSL,
+    so this is fixed here rather than routed to a ledger. Fail SAFE to the seed
+    constant with a loud log — never a guessed weight, never a silent non-finite
+    blend, never an AssertionError escaping into the search loop.
+    """
+    default = _WEIGHT_SEED_DEFAULTS[field]
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        _log.warning(
+            "[COMPASS] non-numeric %s=%r from %s (SQLite stores NaN as NULL) — "
+            "falling back to the seed value %.6g", field, raw, source, default,
+        )
+        return float(default)
+    if not math.isfinite(val):
+        _log.warning(
+            "[COMPASS] non-finite %s=%r from %s — falling back to the seed "
+            "value %.6g", field, val, source, default,
+        )
+        return float(default)
+    return val
+
+
+def _sanitize_weights(weights: Dict[str, Any], source: str) -> Dict[str, Any]:
+    """Finiteness-guard every weight/threshold, whatever path delivered it.
+
+    Applied to BOTH the DB read AND a caller-supplied ``weights=`` dict, because
+    the two paths fail differently (see ``_finite_weight``) and guarding only the
+    DB read would leave the AssertionError path wide open. A dict of already-finite
+    weights passes through byte-identical."""
+    out = dict(weights)
+    for field in _WEIGHT_SEED_DEFAULTS:
+        if field in out:
+            out[field] = _finite_weight(out[field], field, source)
+    try:
+        out["learned"] = int(out.get("learned", 0) or 0)
+    except (TypeError, ValueError):
+        _log.warning(
+            "[COMPASS] non-integer learned=%r from %s — treating as 0 (unlearned)",
+            out.get("learned"), source,
+        )
+        out["learned"] = 0
+    return out
+
+
 def _read_compass_weights(conn, level: int) -> Dict[str, Any]:
     """Read the per-level blend + gate thresholds from compass_weights, falling
     back to level 0, then to the SEED_* constants (so an unseeded DB never
-    crashes evaluate_compass). Returns a dict of the 5 columns."""
+    crashes evaluate_compass). Returns a dict of the 5 columns.
+
+    Every returned value is finiteness-guarded (RD-B8) — see ``_finite_weight``."""
     row = None
     if conn is not None:
         row = conn.execute(
@@ -812,14 +888,17 @@ def _read_compass_weights(conn, level: int) -> Dict[str, Any]:
                 "FROM compass_weights WHERE level_id = 0",
             ).fetchone()
     if row is not None:
-        return {
-            "w_consistency": float(row[0]),
-            "w_magnitude": float(row[1]),
-            "dd_ceiling": float(row[2]),
-            "cvar_floor": float(row[3]),
-            "learned": int(row[4]),
-            "source": "db",
-        }
+        return _sanitize_weights(
+            {
+                "w_consistency": row[0],
+                "w_magnitude": row[1],
+                "dd_ceiling": row[2],
+                "cvar_floor": row[3],
+                "learned": row[4],
+                "source": "db",
+            },
+            f"compass_weights[level={int(level)}]",
+        )
     # No row anywhere — fall back to the seed constants (never crash).
     return {
         "w_consistency": SEED_W_CONSISTENCY,
@@ -862,9 +941,14 @@ def evaluate_compass(
             from lib.trainer_db import get_connection  # B0 — stdlib sqlite3 only
             conn = get_connection()
             own_conn = True
-        weights = _read_compass_weights(conn, level)
+        weights = _read_compass_weights(conn, level)   # already finiteness-guarded
         if own_conn:
             conn.close()
+    else:
+        # 🚨 RD-B8: the caller-supplied path needs the SAME guard. This is the
+        # route that produced an UNCAUGHT AssertionError on a NaN weight (in both
+        # v1 and v2) — guarding only the DB read would have left it wide open.
+        weights = _sanitize_weights(weights, "caller-supplied weights=")
 
     thresholds = {"dd_ceiling": weights["dd_ceiling"], "cvar_floor": weights["cvar_floor"]}
     gates = survival_gates(candidate, thresholds)

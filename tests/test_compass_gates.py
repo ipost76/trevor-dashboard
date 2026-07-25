@@ -226,6 +226,90 @@ def test_survived_unscorable_when_sortino_insufficient():
     print("  survived-but-unscorable (sortino < 3 obs): PASS")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# RD-B8 — WEIGHT FINITENESS (the cfg_float-class gap on the compass flow)
+#
+# Before RD-B8 these were bare ``float(row[N])`` with no guard. MEASURED surface:
+#   * caller ``weights=`` NaN   -> uncaught AssertionError in _enforce_fixed_order
+#                                  (NaN comparisons are all False) — v1 AND v2
+#   * caller ``weights=`` +-inf -> v1 non-finite blend_score; v2 absorbed it
+#   * DB NaN   -> SQLite stores NaN as NULL -> float(None) -> TypeError
+#   * DB +-inf -> round-tripped -> non-finite blend_score, silently
+# RD-B1 closes cfg_float at the root ON THE VM and does not reach WSL, so this is
+# guarded here. Every path must now degrade to the seed weight with a log.
+# ═══════════════════════════════════════════════════════════════════════════
+def _bad_weight_variants():
+    return [("NaN", float("nan")), ("+inf", float("inf")), ("-inf", float("-inf")),
+            ("None", None), ("str", "abc")]
+
+
+def test_rd_b8_caller_weights_finiteness_guarded():
+    """A non-finite caller-supplied weight must NEVER raise and must NEVER
+    produce a non-finite blend_score — in either blend version."""
+    import math
+    for label, bad in _bad_weight_variants():
+        for flag_on in (False, True):
+            prev = os.environ.pop(COMPASS_COHERENCE_V2_ENV, None)
+            if flag_on:
+                os.environ[COMPASS_COHERENCE_V2_ENV] = "true"
+            try:
+                bad_w = dict(W)
+                bad_w["w_consistency"] = bad
+                v = evaluate_compass(_survivor(), 0, weights=bad_w)
+                blend = v.get("blend_score")
+                assert v.get("verdict") in ("scored", "survived_unscorable", "rejected"), v
+                if isinstance(blend, float):
+                    assert math.isfinite(blend), (label, flag_on, blend)
+            finally:
+                os.environ.pop(COMPASS_COHERENCE_V2_ENV, None)
+                if prev is not None:
+                    os.environ[COMPASS_COHERENCE_V2_ENV] = prev
+    print("  RD-B8 caller weights= finiteness-guarded "
+          "(NaN/+-inf/None/str x v1,v2 -> no raise, finite blend): PASS")
+
+
+def test_rd_b8_db_weights_finiteness_guarded():
+    """The DB read path must degrade to the seed weights, not raise.
+
+    ⚠️ NaN is written but SQLite stores it as NULL — that is exactly why a bare
+    ``float(row[N])`` raised TypeError rather than the AssertionError the caller
+    path produced. Both are covered by the same guard."""
+    import math
+    import sqlite3
+    import tempfile
+    from compass_metrics import _read_compass_weights
+    for label, bad in [("NaN", float("nan")), ("+inf", float("inf")),
+                       ("-inf", float("-inf")), ("None", None)]:
+        with tempfile.TemporaryDirectory() as d:
+            conn = sqlite3.connect(os.path.join(d, "t.db"))
+            conn.execute(
+                "CREATE TABLE compass_weights (level_id INTEGER PRIMARY KEY, "
+                "w_consistency REAL, w_magnitude REAL, dd_ceiling REAL, "
+                "cvar_floor REAL, learned INTEGER)")
+            conn.execute("INSERT INTO compass_weights VALUES (0,?,0.3,0.35,-0.15,0)", (bad,))
+            conn.commit()
+            w = _read_compass_weights(conn, 0)
+            assert math.isfinite(float(w["w_consistency"])), (label, w)
+            with _flag_off():
+                v = evaluate_compass(_survivor(), 0, conn=conn)
+            blend = v.get("blend_score")
+            if isinstance(blend, float):
+                assert math.isfinite(blend), (label, blend)
+            conn.close()
+    print("  RD-B8 DB weights finiteness-guarded "
+          "(NaN->NULL/+-inf/None -> seed fallback, finite blend): PASS")
+
+
+def test_rd_b8_valid_weights_pass_through_unchanged():
+    """The guard must be a NO-OP on healthy weights — a fix that silently moved a
+    valid weight would be worse than the defect."""
+    from compass_metrics import _sanitize_weights
+    out = _sanitize_weights(dict(W), "test")
+    for key, val in W.items():
+        assert out[key] == val, (key, val, out[key])
+    print("  RD-B8 finiteness guard is a no-op on valid weights: PASS")
+
+
 ALL = [
     test_dd_gate_rejects,
     test_cvar_gate_rejects,
@@ -242,6 +326,10 @@ ALL = [
     test_fixed_order_clamps_inversion,
     test_evaluate_clamps_inverted_weights,
     test_survived_unscorable_when_sortino_insufficient,
+    # RD-B8 weight finiteness (cfg_float-class gap on the compass flow)
+    test_rd_b8_caller_weights_finiteness_guarded,
+    test_rd_b8_db_weights_finiteness_guarded,
+    test_rd_b8_valid_weights_pass_through_unchanged,
 ]
 
 

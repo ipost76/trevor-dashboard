@@ -12,8 +12,10 @@ they are deterministic, never flaky.
 Dependency-free: ``python3 tests/test_trainer_bandit.py``. pytest-compatible too.
 Uses a throwaway TRAINER_DB_PATH — never touches data/trainer.db.
 """
+import math
 import os
 import random
+import sqlite3
 import sys
 import tempfile
 
@@ -300,6 +302,167 @@ def test_run_search_step_dormant_when_flag_off():
     print("  run_search_step dormant (byte-identical inert) when flag off: PASS")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# RD-B8 — REWARD SCALE / DISCRIMINATION REGRESSION
+#
+# 🚨 THE PROPERTY THIS FILE EXISTS TO PROTECT: the bandit must be able to RANK
+# ITS OWN SURVIVORS at the REAL blend scale. With REWARD_K = 0.5 it could not —
+# the reward spread over blend [30,550] was 7.48e-14, every scored survivor
+# collapsed onto ~1.0, and the BEST arm was the most-pulled arm in only 3/20
+# seeds against a CHANCE rate of 4/20 (worse than chance) while "concentration"
+# read 48.3% and looked exactly like convergence.
+#
+# 🚨 THIS TEST IS SELF-PROVING. It asserts the property HOLDS at the module's
+# REWARD_K *and* that it FAILS at the old k=0.5 — driven through the same helper
+# via compass_reward's `k=` kwarg, so no code is mutated and no isolated copy is
+# needed. A test that would not have caught the original defect is decoration;
+# this one demonstrates it catches it, permanently, and cannot rot.
+# ═══════════════════════════════════════════════════════════════════════════
+_REAL_SCALE_ARMS = [19.57, 80.0, 250.0, 600.0, 1295.20]   # A8's modelled range
+_BEST_ARM = 4          # index of the highest-blend arm
+_SCALE_SEEDS = 20
+_SCALE_STEPS = 120
+
+
+def _run_reward_scale_bandit(k, seed):
+    """One bandit run over the 5 real-scale arms -> per-arm pull counts.
+
+    Uses the REAL ``_thompson_theta`` and the REAL ``compass_reward`` (via its
+    ``k=`` kwarg) — this is the production sampler, not a re-implementation."""
+    rng = random.Random(seed)
+    alpha = [1.0] * len(_REAL_SCALE_ARMS)
+    beta = [1.0] * len(_REAL_SCALE_ARMS)
+    pulls = [0] * len(_REAL_SCALE_ARMS)
+    for _ in range(_SCALE_STEPS):
+        best_i, best_score = 0, None
+        for i in range(len(_REAL_SCALE_ARMS)):
+            theta = tb._thompson_theta(alpha[i], beta[i], rng)
+            if best_score is None or theta > best_score:
+                best_i, best_score = i, theta
+        r = tb.compass_reward(
+            {"verdict": "scored", "blend_score": _REAL_SCALE_ARMS[best_i]}, k=k)
+        alpha[best_i] += r
+        beta[best_i] += 1.0 - r
+        pulls[best_i] += 1
+    return pulls
+
+
+def _best_arm_wins(k):
+    """How many of the 20 seeds end with the BEST arm as the most-pulled arm."""
+    wins = 0
+    for seed in range(_SCALE_SEEDS):
+        pulls = _run_reward_scale_bandit(k, seed)
+        if max(range(len(pulls)), key=lambda i: pulls[i]) == _BEST_ARM:
+            wins += 1
+    return wins
+
+
+def test_reward_scale_best_arm_wins_at_module_k():
+    """THE ACCEPTANCE TEST: best of 5 real-scale arms wins >= 18/20 seeds."""
+    wins = _best_arm_wins(tb.REWARD_K)
+    assert wins >= 18, (
+        f"bandit cannot rank real-scale survivors: best arm won {wins}/20 seeds "
+        f"at REWARD_K={tb.REWARD_K!r} (need >=18/20). If REWARD_K was retuned, "
+        f"re-derive it as 1/observed_operative_max — see the derivation block."
+    )
+    print(f"  RD-B8 discrimination: best arm wins {wins}/{_SCALE_SEEDS} "
+          f"at REWARD_K=1/{1.0/tb.REWARD_K:.6g}: PASS")
+
+
+def test_reward_scale_test_would_have_caught_the_old_constant():
+    """SELF-PROVING: the SAME property FAILS at the old k=0.5.
+
+    This is what makes the test above non-decorative — it demonstrates, on every
+    run, that the acceptance bar actually discriminates the defect it exists for."""
+    old_wins = _best_arm_wins(0.5)
+    assert old_wins < 18, (
+        f"the old constant k=0.5 scored {old_wins}/20 — this test can no longer "
+        f"detect the saturation defect it exists to catch"
+    )
+    chance = _SCALE_SEEDS // len(_REAL_SCALE_ARMS)
+    assert old_wins <= chance, (
+        f"expected the saturated bandit to be at-or-worse-than chance "
+        f"({chance}/20); got {old_wins}/20"
+    )
+    print(f"  RD-B8 self-proof: old k=0.5 scores {old_wins}/{_SCALE_SEEDS} "
+          f"(<= chance {chance}/{_SCALE_SEEDS}) — the bar catches the defect: PASS")
+
+
+def test_reward_scale_monotone_and_unsaturated_over_real_range():
+    """Reward must stay strictly increasing AND strictly below 1.0 across the
+    modelled range — no float-equality assertions anywhere (reward(30) is
+    0.9999999999999252, NOT 1.0, so an equality test would assert an untruth)."""
+    lo, hi = tb.MODELLED_BLEND_MIN, tb.MODELLED_BLEND_MAX
+    xs = [lo + i * (hi - lo) / 500.0 for i in range(501)]
+    ys = [tb.compass_reward({"verdict": "scored", "blend_score": x}) for x in xs]
+    assert all(ys[i + 1] > ys[i] for i in range(len(ys) - 1)), "reward not monotone"
+    assert all(y < 1.0 for y in ys), "reward saturated to 1.0 inside the real range"
+    assert all(y > 0.6 for y in ys), "positive blend must reward above the 0.6 floor"
+    spread = ys[-1] - ys[0]
+    assert spread > 0.2, f"reward spread {spread!r} too small to rank survivors"
+    print(f"  RD-B8 monotone + unsaturated over [{lo}, {hi}], "
+          f"spread {spread:.6f}: PASS")
+
+
+def test_reward_scale_observed_range_is_recorded():
+    """The observed-blend-range instrumentation must actually record, so the
+    MODELLED range can validate (or contradict) itself the moment anything real
+    scores. Uses inequalities only."""
+    tb._observed_blend_min = None
+    tb._observed_blend_max = None
+    for b in (42.0, 900.0, 7.5):
+        tb.compass_reward({"verdict": "scored", "blend_score": b})
+    lo, hi = tb.observed_blend_range()
+    assert lo is not None and hi is not None, "observed range never recorded"
+    assert lo < 8.0 and hi > 899.0, (lo, hi)
+    # a non-scored verdict must NOT pollute the range
+    before = tb.observed_blend_range()
+    tb.compass_reward({"verdict": "rejected"})
+    tb.compass_reward({"verdict": "scored", "blend_score": -5.0})
+    assert tb.observed_blend_range() == before, "non-positive blend polluted the range"
+    tb._observed_blend_min = None
+    tb._observed_blend_max = None
+    print(f"  RD-B8 observed range recorded [{lo:.6g}, {hi:.6g}], "
+          f"non-scored verdicts excluded: PASS")
+
+
+def test_posterior_params_finiteness_guarded():
+    """RD-B8: a corrupt stored alpha/beta must fall back to the (1,1) prior with
+    a log, never reach ``betavariate``.
+
+    ⚠️ MEASURED, and it narrows the surface: ``bandit_posteriors.alpha``/``beta``
+    are **NOT NULL** in the B0 schema, and SQLite cannot store NaN at all (it
+    coerces to NULL, which the constraint then rejects). So NULL and NaN are
+    SCHEMA-BLOCKED — the reachable corruptions are +-inf, zero/negative, and a
+    type-affinity string. The guard covers those; the constraint covers the rest.
+    """
+    conn = _fresh_db()
+    arm = {"direction.mode": "LONG"}
+    ahash = tb.arm_hash(arm)
+    tb.update_posterior(ahash, 0, 0.9, conn=conn, axes_json="{}")
+
+    # NULL is schema-blocked — assert that, rather than pretending to guard it.
+    try:
+        conn.execute("UPDATE bandit_posteriors SET alpha=NULL WHERE arm_hash=? AND level_id=0",
+                     (ahash,))
+        conn.commit()
+        raise AssertionError("expected NOT NULL constraint on bandit_posteriors.alpha")
+    except sqlite3.IntegrityError:
+        conn.rollback()
+
+    for bad in (float("inf"), float("-inf"), 0.0, -3.0, "abc"):
+        conn.execute("UPDATE bandit_posteriors SET alpha=? WHERE arm_hash=? AND level_id=0",
+                     (bad, ahash))
+        conn.commit()
+        a, b, _n = tb.get_posterior(ahash, 0, conn=conn)
+        assert isinstance(a, float) and math.isfinite(a) and a > 0.0, (bad, a)
+        # and it must be samplable without raising
+        tb._thompson_theta(a, b, random.Random(1))
+    conn.close()
+    print("  RD-B8 posterior alpha/beta finiteness-guarded "
+          "(inf/-inf/0/negative/str; NULL+NaN schema-blocked): PASS")
+
+
 _TESTS = [
     test_arm_hash_stable_across_key_reorder,
     test_arm_hash_subset_order_invariant,
@@ -317,6 +480,12 @@ _TESTS = [
     test_balance_rule_saturation_penalty,
     test_callable_axis_samples_enumerated_policies,
     test_run_search_step_dormant_when_flag_off,
+    # RD-B8 reward-scale / discrimination regression
+    test_reward_scale_best_arm_wins_at_module_k,
+    test_reward_scale_test_would_have_caught_the_old_constant,
+    test_reward_scale_monotone_and_unsaturated_over_real_range,
+    test_reward_scale_observed_range_is_recorded,
+    test_posterior_params_finiteness_guarded,
 ]
 
 

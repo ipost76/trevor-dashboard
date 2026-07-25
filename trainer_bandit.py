@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import random
@@ -86,12 +87,87 @@ _EPS = 1e-9                  # exclude-min / degenerate-posterior floor
 # Reward mapping (compass verdict -> Beta success mass r∈[0,1]; α+=r, β+=1-r).
 # FRACTIONAL is the default (Ghost-locked): it handles the survival wall's many
 # "survived but not scored" outcomes honestly instead of forcing a binary.
-REWARD_K = 0.5               # tanh steepness for a positive blend_score -> reward
+#
+# ── REWARD_K: DERIVATION (RD-B8, 2026-07-25) ────────────────────────────────
+# K = 1 / OPERATIVE_BLEND_MAX, where the operative max is 550 — the top of the
+# [30, 550] band A8 scored the reward over. The tanh argument is `K·blend`, so K
+# is fixed by the largest blend we expect to rank ROUTINELY: at blend = 1/K the
+# argument is 1.0 and tanh is 0.7616, i.e. the operative top lands at ~76% of
+# tanh's rise, well short of the flat tail. That is the whole rule.
+#
+# ⚠️ STATED PLAINLY: 550 is NOT the top of the modelled range (1295.20), so this
+# is `1/operative_max`, NOT `1/modelled_max`. The modelled EXTREME 1295.20 maps
+# to reward 0.992859 under K=1/550 — still strictly monotone, still inside the
+# safe band, NOT saturated — so the choice holds; but the re-derivation rule
+# below names WHICH max it keys on, because "1/max_blend" alone is ambiguous
+# and an ambiguous rule is how an unrecorded assumption gets here in the first
+# place. (For reference K=1/1295.20 would also work — spread 0.2986 vs 0.2828 —
+# it simply shifts the safe band up; 1/550 is the A8-verified, 20/20 choice.)
+#
+# 🚨 WAS 0.5 — tuned for O(1) blends and catastrophic at the real O(100) scale.
+# At K=0.5 the total reward spread over blend [30, 550] measured 7.482903e-14:
+# EVERY scored survivor collapsed onto ~1.0 and the Beta posterior could not rank
+# them. Discrimination (a +10% better blend still moving reward >= 1e-3) died at
+# blend 5.8681 — 6.31x earlier than the "saturates at 37.02" framing suggests.
+# Measured consequence: over 20 seeds x 5 real-scale arms the BEST arm was the
+# most-pulled arm in 3/20 seeds against a chance rate of 4/20 — WORSE THAN CHANCE
+# — while "concentration" read 48.3% and looked exactly like convergence.
+#
+# ⚠️ THE RANGE IS MODELLED, NOT MEASURED. `bandit_posteriors` had ZERO rows when
+# this was derived — nothing had ever scored. [19.57, 1295.20] comes from A8's
+# modelling, so this constant inherits that uncertainty. The SAFE BAND below and
+# the unconditional observed-range log in `compass_reward` exist precisely so the
+# assumption validates (or contradicts) itself the moment anything real scores.
+#
+# SAFE BAND (measured, same >=1e-3-per-+10% criterion): blend ~[13.76, 1614].
+#   * BELOW ~13.76 the reward saturates at the BOTTOM — the mirror of the old
+#     failure. If real blends land an order of magnitude SMALLER than modelled
+#     ([1.96, 129.52]) the bottom half of the range falls out of the band.
+#   * ABOVE ~1614 it saturates at the top again.
+#   * The modelled range sits inside the band, but with only ~1.4x headroom at
+#     the bottom and ~1.25x at the top. It is NOT comfortably centred.
+#
+# 🚨 RE-DERIVATION RULE: if the OBSERVED blend range (see the `[BANDIT-SCALE]`
+# log in `compass_reward`) differs materially from [19.57, 1295.20], REWARD_K
+# MUST be re-derived as `1 / observed_operative_max` — the ROUTINE upper blend,
+# i.e. the top of the bulk of scored survivors, NOT a lone outlier. Do not
+# hand-tune it. Two hard triggers, either one forces the re-derivation:
+#   * the observed max exceeds SAFE_BAND_HI (top saturation is live), or
+#   * the observed min falls below SAFE_BAND_LO (bottom saturation is live).
+MODELLED_BLEND_MIN = 19.57   # A8's modelled real blend range — MODELLED, NOT measured
+MODELLED_BLEND_MAX = 1295.20 # ^ the modelled extreme (K keys on 550, see above)
+OPERATIVE_BLEND_MAX = 550.0  # the routine upper blend REWARD_K is derived from
+SAFE_BAND_LO = 13.76         # below this, reward saturates at the BOTTOM
+SAFE_BAND_HI = 1614.0        # above this, reward saturates at the TOP
+REWARD_K = 1.0 / OPERATIVE_BLEND_MAX   # = 1/550; tanh steepness for blend>0
 
 # Exploration policy (§D.12.4 one-axis-then-broaden + the balance rule).
+#
+# 🚨🚨 OPEN FINDING — LAMBDA_STALE / LAMBDA_SAT HAVE NO RECORDED DERIVATION, AND
+# THEY ARE PRECISELY THE CONSTANTS THAT OUT-VOTE THE REWARD (RD-B8, 2026-07-25).
+# `sample_arm` picks argmax(theta + bonus), so these two lambdas set the bonus
+# swing (+/-0.05, total 0.10) that competes DIRECTLY with the reward signal.
+# Measured: once arms saturate at r=1.0 the theta spread across near-equal arms
+# crosses BELOW the 0.10 bonus swing at n~10 (0.1801 @ n=5 -> 0.1101 @ n=10 ->
+# 0.0643 @ n=20 -> 0.0340 @ n=40). At the OLD K=0.5 a static +0.05 on the WORST
+# arm took 76.6% of pulls and became the most-pulled arm in 19/20 seeds.
+#
+# 🚨 THEREFORE, STATED PRECISELY: rescaling REWARD_K is NECESSARY BUT MAY NOT BE
+# SUFFICIENT. It is NOT the same claim as "the bandit is fixed." The rescale
+# restores the reward's ability to rank (post-fix the same static +0.05 takes
+# only 1.4% of pulls and wins 0/20 — so at the MODELLED scale the bonus is now
+# proportionate at 17.7% of the 0.2828 spread). But if the observed blend range
+# turns out narrower than modelled, the reward spread shrinks and these two
+# underived constants can out-vote it again — the failure mode simply returns by
+# a different door. That is a live risk, not a closed item.
+#
+# ⚠️ DELIBERATELY NOT CHANGED HERE (Ghost, RD-B8 gate): a constant with no
+# recorded derivation needs its DERIVATION before its VALUE. Deriving these two
+# is its own item; guessing a new number here would just re-create the exact
+# defect this prompt exists to fix, one level down.
 BROADEN_STEP = 8             # every +8 total observations, allow +1 axis in a proposal
-LAMBDA_STALE = 0.05          # staleness bonus weight (untested-axis opportunity)
-LAMBDA_SAT = 0.05            # saturation penalty weight (over-focus damping)
+LAMBDA_STALE = 0.05          # staleness bonus weight — ⚠️ NO DERIVATION (see above)
+LAMBDA_SAT = 0.05            # saturation penalty weight — ⚠️ NO DERIVATION (see above)
 
 # Value-sampler caps for unbounded (hi=None) numeric domains (documented).
 _INT_UNBOUNDED_SPAN = 200
@@ -115,6 +191,30 @@ _SKIP_AXES = frozenset({"cost", "signal"})
 # In production the caller passes surface_as_dict()'s real ``subset_of``; this is
 # only the standalone/test default (the bot's config_surface can't import on WSL).
 _DEFAULT_UNIVERSE = ("BTC", "ETH", "SOL", "HYPE", "ZEC", "PAXG", "XMR")
+
+# Module logger. STDLIB logging, mirroring compass_metrics.py:536 — NOT loguru.
+# 🚨 Every log call in this module uses an F-STRING, never `%s` positional args
+# and never `{}`: `%s` is correct under stdlib logging but is emitted LITERALLY by
+# loguru (which formats via str.format()), and `{}` is the exact inverse. An
+# f-string is pre-interpolated by Python and is therefore the ONLY form that
+# renders correctly under BOTH loggers — so this cannot become another blind site
+# if the module's logger is ever swapped.
+_log = logging.getLogger("trainer_bandit")
+
+# Running observed blend range (process-local, reset on import). The bandit has
+# NEVER scored a real candidate, so REWARD_K rests on a MODELLED range; these two
+# are what turn that assumption into a measurement the moment anything real
+# scores. Updated unconditionally in `compass_reward`.
+_observed_blend_min: Optional[float] = None
+_observed_blend_max: Optional[float] = None
+
+
+def observed_blend_range() -> Tuple[Optional[float], Optional[float]]:
+    """The (min, max) positive blend this process has actually scored.
+
+    ``(None, None)`` until the first scored survivor with blend > 0 — which, as of
+    RD-B8, has never happened in production (`bandit_posteriors` = 0 rows)."""
+    return _observed_blend_min, _observed_blend_max
 
 
 def enabled() -> bool:
@@ -341,8 +441,41 @@ def _seed_arm(conn, ahash: str, level: int, axes_json: str) -> None:
     )
 
 
+def _finite_beta_param(raw: Any, field: str, ahash: str, level: int) -> float:
+    """Coerce a stored Beta parameter to a FINITE positive float, or fall back to
+    the (1,1) prior value with a loud log.
+
+    🚨 RD-B8: a NULL / NaN / +-inf / non-numeric alpha or beta reaching
+    ``_thompson_theta`` -> ``random.betavariate`` is the SAME cfg_float-class
+    finiteness gap as ``compass_metrics._read_compass_weights`` — on the same
+    flow, one call later. ``float(None)`` raises TypeError; a non-finite param
+    makes the sampler meaningless or raises. Note SQLite cannot even store NaN
+    (it coerces to NULL), so the realistic corruptions are NULL and +-inf.
+    Fail SAFE to the uninformative prior — never a guessed posterior, never a
+    silent crash inside the sampler.
+    """
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        _log.warning(
+            f"[BANDIT-POSTERIOR] non-numeric {field}={raw!r} for arm={ahash[:12]} "
+            f"level={level} — falling back to the (1,1) prior value 1.0"
+        )
+        return 1.0
+    if not math.isfinite(val) or val <= 0.0:
+        _log.warning(
+            f"[BANDIT-POSTERIOR] non-finite/non-positive {field}={val!r} for "
+            f"arm={ahash[:12]} level={level} — falling back to the (1,1) prior value 1.0"
+        )
+        return 1.0
+    return val
+
+
 def get_posterior(ahash: str, level: int, *, conn=None) -> Tuple[float, float, int]:
-    """Return ``(alpha, beta, n_obs)`` for an arm; unseeded -> the (1,1) prior."""
+    """Return ``(alpha, beta, n_obs)`` for an arm; unseeded -> the (1,1) prior.
+
+    Alpha/beta are finiteness-guarded (RD-B8): a corrupt stored parameter falls
+    back to the prior with a loud log rather than reaching ``betavariate``."""
     own = conn is None
     if own:
         conn = get_connection()
@@ -356,7 +489,17 @@ def get_posterior(ahash: str, level: int, *, conn=None) -> Tuple[float, float, i
             conn.close()
     if row is None:
         return (1.0, 1.0, 0)
-    return (float(row[0]), float(row[1]), int(row[2]))
+    alpha = _finite_beta_param(row[0], "alpha", ahash, int(level))
+    beta = _finite_beta_param(row[1], "beta", ahash, int(level))
+    try:
+        n_obs = int(row[2])
+    except (TypeError, ValueError):
+        _log.warning(
+            f"[BANDIT-POSTERIOR] non-integer n_obs={row[2]!r} for arm={ahash[:12]} "
+            f"level={int(level)} — falling back to 0"
+        )
+        n_obs = 0
+    return (alpha, beta, n_obs)
 
 
 def update_posterior(ahash: str, level: int, reward: float, *,
@@ -395,6 +538,65 @@ def update_posterior(ahash: str, level: int, reward: float, *,
 # ═══════════════════════════════════════════════════════════════════════════
 # Reward mapping: compass verdict -> Beta success mass (FRACTIONAL default)
 # ═══════════════════════════════════════════════════════════════════════════
+def _record_observed_blend(blend: float, reward: float, k: float) -> None:
+    """Fold one scored blend into the running observed range and LOG IT.
+
+    🚨 THE POINT: `REWARD_K` is derived from a MODELLED blend range that has never
+    been measured (`bandit_posteriors` = 0 rows at RD-B8). This is the line that
+    converts that assumption into a measurement — the moment anything real scores,
+    the modelled range either validates or contradicts itself IN THE LOG, without
+    anyone remembering to go looking. Without it, REWARD_K is a hardcoded constant
+    resting on a model nobody revisits, which is exactly how REWARD_K = 0.5 got
+    here in the first place.
+
+    Unconditional (every scored survivor), and NOT a hot path: `compass_reward`
+    fires ~1-2x per loop iteration at a 60s default cadence (~2/min worst case).
+    The running min/max is self-bounding — it does not grow with call count.
+
+    NEVER raises: a logging or bookkeeping failure must not be able to change a
+    reward or break the search loop.
+    """
+    global _observed_blend_min, _observed_blend_max
+    try:
+        if not math.isfinite(blend):
+            # A non-finite blend should never reach here (the compass guards it),
+            # but if it ever does, say so LOUDLY rather than poisoning the range.
+            _log.warning(
+                f"[BANDIT-SCALE] non-finite blend_score={blend!r} reached compass_reward "
+                f"— NOT folded into the observed range; upstream compass defect"
+            )
+            return
+        if _observed_blend_min is None or blend < _observed_blend_min:
+            _observed_blend_min = blend
+        if _observed_blend_max is None or blend > _observed_blend_max:
+            _observed_blend_max = blend
+
+        lo, hi = _observed_blend_min, _observed_blend_max
+        in_band = SAFE_BAND_LO <= blend <= SAFE_BAND_HI
+        _log.info(
+            f"[BANDIT-SCALE] blend={blend:.6g} reward={reward:.6f} k={k:.8g} "
+            f"observed_range=[{lo:.6g}, {hi:.6g}] "
+            f"modelled_range=[{MODELLED_BLEND_MIN:.6g}, {MODELLED_BLEND_MAX:.6g}] "
+            f"safe_band=[{SAFE_BAND_LO:.6g}, {SAFE_BAND_HI:.6g}] in_band={in_band}"
+        )
+        # The two hard re-derivation triggers, surfaced the instant they fire.
+        if hi > SAFE_BAND_HI:
+            _log.warning(
+                f"[BANDIT-SCALE] 🚨 observed max {hi:.6g} EXCEEDS safe band top "
+                f"{SAFE_BAND_HI:.6g} — reward is saturating at the TOP. REWARD_K must be "
+                f"re-derived as 1/observed_operative_max (currently 1/{OPERATIVE_BLEND_MAX:.6g})."
+            )
+        if lo < SAFE_BAND_LO:
+            _log.warning(
+                f"[BANDIT-SCALE] 🚨 observed min {lo:.6g} BELOW safe band floor "
+                f"{SAFE_BAND_LO:.6g} — reward is saturating at the BOTTOM (the symmetric "
+                f"failure). REWARD_K must be re-derived as 1/observed_operative_max "
+                f"(currently 1/{OPERATIVE_BLEND_MAX:.6g})."
+            )
+    except Exception:  # pragma: no cover — observability must never break scoring
+        pass
+
+
 def compass_reward(verdict: Dict[str, Any], *, mode: str = "fractional",
                    k: float = REWARD_K) -> float:
     """Map B1's ``evaluate_compass`` verdict -> reward r∈[0,1].
@@ -423,7 +625,9 @@ def compass_reward(verdict: Dict[str, Any], *, mode: str = "fractional",
     if v == "scored":
         if blend_num is None or blend_num <= 0:
             return 0.40
-        return min(1.0, max(0.6, 0.6 + math.tanh(k * blend_num) * 0.4))
+        r = min(1.0, max(0.6, 0.6 + math.tanh(k * blend_num) * 0.4))
+        _record_observed_blend(blend_num, r, k)
+        return r
     return 0.0  # unknown verdict -> conservative failure
 
 
