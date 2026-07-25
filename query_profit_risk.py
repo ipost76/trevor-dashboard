@@ -34,9 +34,15 @@ JSON output:
         risk_pct: float|null }
     ],
     "breakers": {
-      "overall_status": "GREEN|YELLOW|RED|UNKNOWN",
+      "overall_status": "OK|YELLOW|RED|OFF|UNKNOWN",
       "override_active": bool,
       "entries_allowed": bool,      # derived: overall != RED (or override)
+      # RD-B7 freshness of the EVALUATION (signal-driven — see BREAKER_EVAL_STALE_S).
+      # UNKNOWN = "the breaker has not been asked", NOT "the breaker failed".
+      "last_eval_at": <iso_utc>|null,      # absolute; consumers recompute age off this
+      "last_eval_age_s": <int>|null,       # server snapshot (can freeze behind SWR)
+      "last_eval_stale": bool,             # age > last_eval_stale_after_s
+      "last_eval_stale_after_s": <int>,    # the bound itself, so the UI can explain it
       "active": [ {key,label,status,detail} ],   # only non-OK breakers
       "all":    [ {key,label,status,value,limit,unit} ],  # every gauge
       "error": <str?>               # present iff breaker read failed
@@ -57,11 +63,33 @@ import json
 import sqlite3
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, "/home/trevor/trevor")
 
 DB = "/home/trevor/trevor/trevor.db"
+
+UTC = timezone.utc
+
+# RD-B7 (2026-07-25): staleness ceiling for the consolidated breaker readout.
+# Matches query_auto_state.py's LIVE_ACCOUNT_VALUE_STALE_S pattern (documented
+# constant → `*_age_s` + `*_stale`), NOT a second convention.
+#
+# DERIVATION — the breaker is SIGNAL-DRIVEN, not timer-driven. evaluate_breakers()
+# runs at Gate 0.5 inside the per-signal handler (auto_trader/manager.py:933-941)
+# and risk_breakers._persist_state writes RISK_BREAKERS_LAST_EVAL on each
+# evaluation. So "how stale is abnormal" is really "how long without a SIGNAL is
+# abnormal". Measured over 14 days of trade_insights (n=870 inter-signal gaps):
+#   p50 718s · p90 3422s · p95 4861s · p99 9720s · max 36539s
+#   median daily-max quiet stretch 9720s (2.7h), range 4858-36539s
+# 14400s (4h) is ~3x p95 and ~1.5x the median daily worst-case quiet, so routine
+# quiet never trips it; it is also >=24x the measured read-replica data lag
+# (~600s; <=1800s worst case per the continuous-restore runbook), so replica lag
+# alone can never trip it either. Wall-clock UNKNOWN rate at this bound: 3.0%
+# over the last 14 days (vs 38.7% at 30min, 19.6% at 1h, 7.3% at 2h) — rare
+# enough to mean something, frequent enough to actually be exercised.
+BREAKER_EVAL_STALE_S = 14400
 
 
 def _connect_ro() -> sqlite3.Connection:
@@ -178,22 +206,93 @@ def _breaker_gauge(code: str, info: dict) -> dict:
             "value": value, "limit": limit, "unit": unit}
 
 
+def _parse_last_eval(raw_value, raw_updated_at) -> tuple[str | None, int | None, bool]:
+    """Freshness of the breaker's LAST EVALUATION → (iso_utc, age_s, stale).
+
+    RD-B7. `RISK_BREAKERS_LAST_EVAL` is written by risk_breakers._persist_state as
+    `datetime.utcnow().isoformat() + "Z"` — real UTC, explicit. The auto_config
+    row's `updated_at` ('YYYY-MM-DD HH:MM:SS', also real UTC) is the fallback when
+    the value is missing/unparseable. Age is UTC-vs-UTC — no clock crossing.
+
+    The read-replica lag (~10min measured, <=30min per the continuous-restore
+    runbook) means the newest LAST_EVAL we can SEE may trail the VM's, so the age
+    returned is an UPPER BOUND on the true age: we may report stale slightly early,
+    NEVER fresh late. That is the fail-safe direction.
+
+    Fail-safe: missing / unparseable / unreadable → stale=True. A breaker readout
+    we cannot date is UNKNOWN, never a silent OK.
+    """
+    now_utc = datetime.now(UTC)
+    for raw, fmt in ((raw_value, "iso"), (raw_updated_at, "%Y-%m-%d %H:%M:%S")):
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        try:
+            if fmt == "iso":
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                parsed = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+            else:
+                parsed = datetime.strptime(text, fmt).replace(tzinfo=UTC)
+        except (ValueError, TypeError):
+            continue
+        age = int((now_utc - parsed).total_seconds())
+        return (
+            parsed.isoformat().replace("+00:00", "Z"),
+            age,
+            age > BREAKER_EVAL_STALE_S,
+        )
+    return (None, None, True)
+
+
 def build_breakers() -> dict:
     """Live circuit-breaker state via auto_config.RISK_BREAKERS_STATE_JSON
-    (the risk_breakers.py consolidated mirror — NOT legacy circuit_breaker.py)."""
+    (the risk_breakers.py consolidated mirror — NOT legacy circuit_breaker.py).
+
+    RD-B7 (2026-07-25): also carries the EVALUATION's freshness. Previously this
+    read only STATE_JSON + ENABLED, so a frozen breaker was pixel-identical to a
+    healthy one — the card said OK against an evaluation of any age. It now emits
+    `last_eval_at` / `last_eval_age_s` / `last_eval_stale`, and a stale evaluation
+    renders overall_status="UNKNOWN".
+
+    UNKNOWN means UNKNOWN — NOT failed. The breaker only evaluates when a signal
+    reaches Gate 0.5, so a quiet stretch legitimately leaves it un-run. `active`
+    and `entries_allowed` therefore pass through the last known reading UNCHANGED;
+    the caller decides how to present them against `last_eval_stale`. Turning a
+    stale readout into a RED halt would be the same defect with the opposite
+    colour.
+    """
     try:
         with _connect_ro() as conn:
-            rows = dict(conn.execute(
-                "SELECT key, value FROM auto_config "
-                "WHERE key IN ('RISK_BREAKERS_STATE_JSON','RISK_BREAKERS_ENABLED')"
-            ).fetchall())
-        state = json.loads(rows.get("RISK_BREAKERS_STATE_JSON") or "{}")
-        enabled = (rows.get("RISK_BREAKERS_ENABLED") or "true").strip().lower() in ("true", "1", "yes")
+            rows = {
+                key: (value, updated_at)
+                for key, value, updated_at in conn.execute(
+                    "SELECT key, value, updated_at FROM auto_config "
+                    "WHERE key IN ('RISK_BREAKERS_STATE_JSON','RISK_BREAKERS_ENABLED',"
+                    "'RISK_BREAKERS_LAST_EVAL')"
+                ).fetchall()
+            }
+        state = json.loads((rows.get("RISK_BREAKERS_STATE_JSON") or (None, None))[0] or "{}")
+        enabled_raw = (rows.get("RISK_BREAKERS_ENABLED") or (None, None))[0]
+        enabled = (enabled_raw or "true").strip().lower() in ("true", "1", "yes")
+        # Prefer LAST_EVAL's own value; fall back to the STATE_JSON row's
+        # updated_at (written in the same _persist_state call).
+        eval_value, eval_updated_at = rows.get("RISK_BREAKERS_LAST_EVAL") or (None, None)
+        if eval_value is None:
+            eval_updated_at = (rows.get("RISK_BREAKERS_STATE_JSON") or (None, None))[1]
+        last_eval_at, last_eval_age_s, last_eval_stale = _parse_last_eval(
+            eval_value, eval_updated_at
+        )
     except Exception as exc:  # DB/parse failure — degrade, don't crash
         return {
             "overall_status": "UNKNOWN",
             "override_active": False,
             "entries_allowed": False,
+            "last_eval_at": None,
+            "last_eval_age_s": None,
+            "last_eval_stale": True,
+            "last_eval_stale_after_s": BREAKER_EVAL_STALE_S,
             "active": [],
             "all": [],
             "error": f"{type(exc).__name__}: {exc}",
@@ -217,11 +316,30 @@ def build_breakers() -> dict:
         for b in all_breakers if b["key"] in active_codes or b["status"] != "OK"
     ]
 
+    # master flag OFF → breakers don't gate (override); else RED iff halted.
+    # RD-B7: a stale EVALUATION outranks OK — we cannot vouch for a reading we
+    # cannot date. It does NOT outrank RED or OFF: a halt already latched is
+    # still a halt, and an explicit override is still an override. Only the
+    # all-clear degrades, because only the all-clear is the green lie.
+    status = "OFF" if not enabled else ("RED" if not entries_allowed else "OK")
+    if status == "OK" and last_eval_stale:
+        status = "UNKNOWN"
+
     return {
-        # master flag OFF → breakers don't gate (override); else RED iff halted.
-        "overall_status": "OFF" if not enabled else ("RED" if not entries_allowed else "OK"),
+        "overall_status": status,
         "override_active": (not enabled),
         "entries_allowed": entries_allowed,
+        # RD-B7 freshness of the EVALUATION itself. `last_eval_at` is the absolute
+        # UTC instant and is the load-bearing field: this payload is served through
+        # a stale-while-revalidate cache (auto/profit-risk/route.ts), so a
+        # server-computed age can FREEZE and keep looking fresh — a 16h48m-old body
+        # was observed being served as current. Consumers recompute the displayed
+        # age from `last_eval_at` against their own clock; `last_eval_age_s` is the
+        # server's snapshot, kept for query_auto_state.py convention parity.
+        "last_eval_at": last_eval_at,
+        "last_eval_age_s": last_eval_age_s,
+        "last_eval_stale": last_eval_stale,
+        "last_eval_stale_after_s": BREAKER_EVAL_STALE_S,
         "active": active,
         "all": all_breakers,
     }
@@ -237,6 +355,9 @@ def main() -> int:
             "breakers": {
                 "overall_status": "UNKNOWN", "override_active": False,
                 "entries_allowed": False, "active": [], "all": [],
+                "last_eval_at": None, "last_eval_age_s": None,
+                "last_eval_stale": True,
+                "last_eval_stale_after_s": BREAKER_EVAL_STALE_S,
                 "error": f"DB not found: {DB}",
             },
             "error": f"DB not found: {DB}",
@@ -280,6 +401,9 @@ if __name__ == "__main__":
             "data_available": False, "ts": int(time.time()),
             "open_count": 0, "open_trades": [],
             "breakers": {"overall_status": "UNKNOWN", "override_active": False,
-                         "entries_allowed": False, "active": [], "all": []},
+                         "entries_allowed": False, "active": [], "all": [],
+                         "last_eval_at": None, "last_eval_age_s": None,
+                         "last_eval_stale": True,
+                         "last_eval_stale_after_s": BREAKER_EVAL_STALE_S},
         }))
         _sys_wrap.exit(0)

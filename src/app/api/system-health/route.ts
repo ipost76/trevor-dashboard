@@ -86,16 +86,57 @@ result = {}
 
 conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
 
-# Scanner status — last signal time
+# Scanner status — last signal time, AGE-BOUNDED (RD-B7, 2026-07-25).
+#
+# This previously read: "running" if last_signal else "unknown" — a liveness claim
+# asserted from mere EXISTENCE, with no age bound at all. Any row in trade_insights,
+# of any age, yielded "running". A scanner dead for a week looked identical to a
+# healthy one. Now "running" is claimed only when a signal is recent enough to
+# vouch for; otherwise "unknown" (the enum's existing third value) — never "down".
+#
+# THRESHOLD (14400s / 4h) is the SAME bound and the SAME derivation as
+# query_profit_risk.BREAKER_EVAL_STALE_S, because it is the same underlying event:
+# RISK_BREAKERS_LAST_EVAL and this last_signal_at are written from the same signal
+# arriving at the manager (observed identical to the second). Measured over 14 days
+# of trade_insights (n=870 gaps): p50 718s, p90 3422s, p95 4861s, p99 9720s. 4h is
+# ~3x p95; UNKNOWN wall-clock rate 3.0%.
+#
+# NOT derived from the ~3-min scan-loop cycle: trade_insights records signal
+# EMISSIONS, not cycles — a cycle that finds nothing writes no row — and no
+# scan-cycle heartbeat is readable from the replica. A 15-min (5x cycle) bound
+# would read "unknown" 59% of wall-clock. So the honest claim narrows from "the
+# scanner is running" to "a signal arrived recently enough to vouch for this".
+#
+# Age is UTC-vs-UTC (trade_insights.created_at is real UTC, matching auto_config).
+# Fail-safe: no row / unparseable / read error -> stale, status "unknown", never a
+# silent "running".
+SIGNAL_STALE_S = 14400
 try:
     row = conn.execute("SELECT created_at FROM trade_insights ORDER BY id DESC LIMIT 1").fetchone()
     last_signal = row[0] if row else None
+    age_s = None
+    if last_signal:
+        try:
+            from datetime import datetime, timezone
+            _parsed = datetime.strptime(str(last_signal).strip(), "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+            age_s = int((datetime.now(timezone.utc) - _parsed).total_seconds())
+        except Exception:
+            age_s = None  # present but undatable -> cannot prove freshness
+    stale = age_s is None or age_s > SIGNAL_STALE_S
     result["scanner"] = {
         "last_signal_at": last_signal,
-        "status": "running" if last_signal else "unknown",
+        "last_signal_age_s": age_s,
+        "last_signal_stale": stale,
+        "last_signal_stale_after_s": SIGNAL_STALE_S,
+        "status": "unknown" if stale else "running",
     }
 except:
-    result["scanner"] = {"status": "unknown", "last_signal_at": None}
+    result["scanner"] = {
+        "status": "unknown", "last_signal_at": None, "last_signal_age_s": None,
+        "last_signal_stale": True, "last_signal_stale_after_s": SIGNAL_STALE_S,
+    }
 
 # Signal volume
 try:

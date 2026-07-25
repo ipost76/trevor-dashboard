@@ -17,6 +17,7 @@ import {
   Anchor,
   Scissors,
   Lock,
+  HelpCircle,
 } from "lucide-react";
 import { useLiveTerminal } from "@/lib/live-terminal";
 
@@ -76,9 +77,15 @@ interface ActiveBreaker {
 }
 
 interface BreakerState {
-  overall_status: "GREEN" | "YELLOW" | "RED" | "UNKNOWN";
+  overall_status: "OK" | "YELLOW" | "RED" | "OFF" | "UNKNOWN";
   override_active: boolean;
   entries_allowed: boolean;
+  // RD-B7 (2026-07-25): freshness of the breaker's EVALUATION — see fmtEvalAge /
+  // the "not asked" banner below.
+  last_eval_at?: string | null;
+  last_eval_age_s?: number | null;
+  last_eval_stale?: boolean;
+  last_eval_stale_after_s?: number;
   active: ActiveBreaker[];
   all: BreakerGauge[];
   error?: string;
@@ -128,6 +135,52 @@ function fmtRiskPct(p: number | null): string {
 // B4 — compact replica-age formatter for the freshness badge.
 function fmtReplicaAge(seconds: number): string {
   if (seconds < 90) return `${seconds}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+
+// RD-B7 — DEFAULT_EVAL_STALE_S mirrors query_profit_risk.BREAKER_EVAL_STALE_S; it
+// is only the fallback for a payload predating the field (the server publishes the
+// real bound as last_eval_stale_after_s).
+const DEFAULT_EVAL_STALE_S = 14400;
+
+// RD-B7 — breaker-evaluation freshness, recomputed HERE rather than trusted from
+// the server's snapshot. /api/auto/profit-risk is served through a
+// stale-while-revalidate cache, so on the first hit after an idle period the whole
+// body can be arbitrarily old (a 16h48m-old body was observed served as current).
+// A server-computed age freezes with it and keeps looking fresh — a stale number
+// wearing a freshness label, which is worse than no age at all. Deriving the age
+// from the ABSOLUTE `last_eval_at` against the browser clock means a frozen body
+// shows a growing age and trips the bound on its own.
+//
+// Falls back to the server's `last_eval_age_s` / `last_eval_stale` only when
+// `last_eval_at` is absent. Undatable → stale (fail-safe), never a silent OK.
+function evalFreshness(b: BreakerState): { ageS: number | null; stale: boolean } {
+  const boundS = b.last_eval_stale_after_s ?? DEFAULT_EVAL_STALE_S;
+  if (b.last_eval_at) {
+    const parsed = Date.parse(b.last_eval_at);
+    if (Number.isFinite(parsed)) {
+      const ageS = Math.max(0, Math.round((Date.now() - parsed) / 1000));
+      return { ageS, stale: ageS > boundS };
+    }
+  }
+  if (typeof b.last_eval_age_s === "number" && Number.isFinite(b.last_eval_age_s)) {
+    return { ageS: b.last_eval_age_s, stale: b.last_eval_age_s > boundS };
+  }
+  return { ageS: null, stale: b.last_eval_stale ?? true };
+}
+
+// RD-B7 — "3m ago" / "7h ago" / "—" for the evaluation age.
+function fmtEvalAge(seconds: number | null): string {
+  if (seconds === null) return "unknown";
+  if (seconds < 90) return `${seconds}s ago`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
+// RD-B7 — the bound, in words, for the explanatory line.
+function fmtBound(seconds: number): string {
   if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
   return `${Math.round(seconds / 3600)}h`;
 }
@@ -189,8 +242,38 @@ export function ProfitRiskPanel() {
     };
   }, []);
 
+  // RD-B7 — tick so the evaluation age keeps growing even while fetches are
+  // FAILING. A successful poll re-renders on its own (setData), which is what
+  // defeats a frozen SWR body; this covers the other case — endpoint down, last
+  // good state retained — where an age that stopped advancing would itself be a
+  // small frozen-number lie.
+  const [, setAgeTick] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setAgeTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const breakers = data?.breakers;
   const trades = data?.open_trades ?? [];
+
+  // RD-B7 — recomputed every render off the ABSOLUTE last_eval_at (see
+  // evalFreshness). `data` is intentionally in the dependency chain via render,
+  // not memoized on it, so a frozen body still yields a growing age.
+  const evalBoundS = breakers?.last_eval_stale_after_s ?? DEFAULT_EVAL_STALE_S;
+  const { ageS: evalAgeS, stale: evalStale } = breakers
+    ? evalFreshness(breakers)
+    : { ageS: null, stale: true };
+
+  // RD-B7 — `overall_status` is computed server-side and therefore FREEZES with a
+  // cached body: a body cached while fresh keeps serving "OK" no matter how old the
+  // evaluation it describes has since become. So the all-clear is re-derived here
+  // against the locally-recomputed staleness, exactly as the server does it. Only
+  // OK degrades — RED (a latched halt) and OFF (an explicit override) are facts
+  // that staleness does not erase.
+  const overallStatus =
+    breakers && evalStale && breakers.overall_status === "OK"
+      ? "UNKNOWN"
+      : breakers?.overall_status;
 
   return (
     <div className="flex flex-col gap-4">
@@ -403,24 +486,64 @@ export function ProfitRiskPanel() {
 
         {breakers && (
           <div className="flex flex-col gap-3">
-            {/* Entries gate banner — the headline "can the bot trade?" state. */}
-            {breakers.entries_allowed ? (
-              <div className="flex items-center gap-2 rounded-md border border-accent-green/30 bg-accent-green/10 px-3 py-2">
-                <ShieldCheck size={16} className="text-accent-green" aria-hidden />
-                <span className="text-caption font-semibold uppercase tracking-wider text-accent-green">
-                  Entries Allowed
-                </span>
-                {breakers.override_active && (
-                  <Pill tone="amber" size="sm">
-                    OVERRIDE ACTIVE
-                  </Pill>
-                )}
-              </div>
-            ) : (
+            {/* RD-B7 — Entries gate banner. A HALT (entries_allowed=false) is a
+                latched fact and still renders red even when the evaluation is
+                stale. The ALL-CLEAR is the one that degrades: an "Entries
+                Allowed" green banner sourced from an undatable evaluation was
+                half of the green lie. When stale it becomes a NEUTRAL "not
+                asked" banner — never green (that was the lie), never red (a
+                fault we cannot prove; the same defect with the opposite colour,
+                and a card that screams a fault on no-data gets ignored). */}
+            {!breakers.entries_allowed ? (
               <div className="flex items-center gap-2 rounded-md border border-accent-red/40 bg-accent-red/15 px-3 py-2 shadow-glow-subtle-red">
                 <ShieldX size={16} className="text-accent-red" aria-hidden />
                 <span className="text-caption font-bold uppercase tracking-wider text-accent-red">
                   ⛔ Entries Halted
+                </span>
+              </div>
+            ) : evalStale ? (
+              <div className="flex flex-col gap-1 rounded-md border border-border-subtle bg-bg-subtle px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <HelpCircle size={16} className="text-fg-muted" aria-hidden />
+                  <span className="text-caption font-semibold uppercase tracking-wider text-fg-muted">
+                    Entries — Unknown
+                  </span>
+                  <Pill tone="neutral" size="sm">
+                    NOT EVALUATED
+                  </Pill>
+                  {breakers.override_active && (
+                    <Pill tone="amber" size="sm">
+                      OVERRIDE ACTIVE
+                    </Pill>
+                  )}
+                </div>
+                <span className="text-micro leading-snug text-fg-muted">
+                  The breaker has not been asked — it only runs when a signal reaches
+                  the entry gate, and none has in {fmtEvalAge(evalAgeS).replace(" ago", "")}
+                  {" "}(over the {fmtBound(evalBoundS)} freshness bound). This is
+                  &ldquo;no recent answer&rdquo;, NOT a fault. Last answer was{" "}
+                  <span className="text-fg-default">
+                    {breakers.entries_allowed ? "entries allowed" : "entries halted"}
+                  </span>
+                  , {fmtEvalAge(evalAgeS)}.
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1 rounded-md border border-accent-green/30 bg-accent-green/10 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ShieldCheck size={16} className="text-accent-green" aria-hidden />
+                  <span className="text-caption font-semibold uppercase tracking-wider text-accent-green">
+                    Entries Allowed
+                  </span>
+                  {breakers.override_active && (
+                    <Pill tone="amber" size="sm">
+                      OVERRIDE ACTIVE
+                    </Pill>
+                  )}
+                </div>
+                <span className="text-micro text-fg-muted">
+                  Evaluated {fmtEvalAge(evalAgeS)} — the breaker was asked and
+                  answered.
                 </span>
               </div>
             )}
@@ -430,9 +553,21 @@ export function ProfitRiskPanel() {
               <span className="text-micro uppercase tracking-wider text-fg-muted">
                 overall
               </span>
-              <Pill tone={statusTone(breakers.overall_status)} size="sm">
-                {breakers.overall_status}
+              <Pill tone={statusTone(overallStatus ?? "UNKNOWN")} size="sm">
+                {overallStatus ?? "UNKNOWN"}
               </Pill>
+              {/* RD-B7 — the evaluation's age rides alongside the status pill, so
+                  the reading is never presented undated. */}
+              <span
+                className="text-micro tabular-nums text-fg-muted"
+                title={
+                  breakers.last_eval_at
+                    ? `Breaker last evaluated ${breakers.last_eval_at} (UTC); stale after ${fmtBound(evalBoundS)}`
+                    : "Breaker evaluation time unavailable"
+                }
+              >
+                evaluated {fmtEvalAge(evalAgeS)}
+              </span>
               {breakers.active.map((a) => (
                 <Pill key={a.key} tone={statusTone(a.status)} size="sm">
                   <ShieldAlert size={10} aria-hidden />
@@ -441,32 +576,51 @@ export function ProfitRiskPanel() {
               ))}
             </div>
 
-            {/* Per-breaker gauges: reading vs limit, color-coded by status. */}
+            {/* Per-breaker gauges: reading vs limit, color-coded by status.
+                RD-B7 — when the evaluation is stale these readings are just as
+                undated as the headline, so they go NEUTRAL rather than keep
+                showing a confident green dot. Greyed, not reddened: the reading
+                is unverified, not bad. A tripped gauge keeps its red. */}
             <ul className="flex flex-col divide-y divide-border-subtle">
-              {breakers.all.map((g) => (
-                <li
-                  key={g.key}
-                  className="flex items-center justify-between gap-3 py-2"
-                >
-                  <span className="text-caption text-fg-muted">{g.label}</span>
-                  <span className="flex items-center gap-2">
-                    <span className={`text-caption tabular-nums ${statusText(g.status)}`}>
-                      {fmtGauge(g)}
+              {breakers.all.map((g) => {
+                const muted = evalStale && g.status !== "RED";
+                return (
+                  <li
+                    key={g.key}
+                    className="flex items-center justify-between gap-3 py-2"
+                  >
+                    <span className="text-caption text-fg-muted">{g.label}</span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={`text-caption tabular-nums ${
+                          muted ? "text-fg-muted" : statusText(g.status)
+                        }`}
+                      >
+                        {fmtGauge(g)}
+                      </span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          g.status === "RED"
+                            ? "bg-accent-red"
+                            : muted
+                              ? "bg-fg-muted/40"
+                              : g.status === "YELLOW"
+                                ? "bg-accent-amber"
+                                : "bg-accent-green"
+                        }`}
+                        aria-hidden
+                      />
                     </span>
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        g.status === "RED"
-                          ? "bg-accent-red"
-                          : g.status === "YELLOW"
-                            ? "bg-accent-amber"
-                            : "bg-accent-green"
-                      }`}
-                      aria-hidden
-                    />
-                  </span>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
+            {evalStale && breakers.all.length > 0 && (
+              <span className="text-micro text-fg-muted">
+                Readings shown are the last recorded values, {fmtEvalAge(evalAgeS)} —
+                not a current measurement.
+              </span>
+            )}
 
             {breakers.error && (
               <div className="text-micro text-accent-amber">

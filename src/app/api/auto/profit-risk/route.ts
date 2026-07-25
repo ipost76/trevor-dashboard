@@ -73,9 +73,19 @@ interface ActiveBreaker {
 }
 
 interface BreakerState {
-  overall_status: "GREEN" | "YELLOW" | "RED" | "UNKNOWN";
+  overall_status: "OK" | "YELLOW" | "RED" | "OFF" | "UNKNOWN";
   override_active: boolean;
   entries_allowed: boolean;
+  // RD-B7 (2026-07-25): freshness of the breaker's EVALUATION. The breaker is
+  // signal-driven (Gate 0.5, per-signal), so a stale evaluation means UNKNOWN —
+  // "not asked" — never FAILED. `last_eval_at` is the load-bearing field: this
+  // response is served through the SWR cache below, so a server-computed age can
+  // freeze while still looking fresh (a 16h48m-old body was observed served as
+  // current). The panel recomputes the displayed age from `last_eval_at`.
+  last_eval_at?: string | null;
+  last_eval_age_s?: number | null;
+  last_eval_stale?: boolean;
+  last_eval_stale_after_s?: number;
   active: ActiveBreaker[];
   all: BreakerGauge[];
   error?: string;
@@ -105,6 +115,10 @@ const FALLBACK: ProfitRiskResponse = {
     overall_status: "UNKNOWN",
     override_active: false,
     entries_allowed: false,
+    // RD-B7 fail-safe: a fallback shape can never claim a datable evaluation.
+    last_eval_at: null,
+    last_eval_age_s: null,
+    last_eval_stale: true,
     active: [],
     all: [],
   },
