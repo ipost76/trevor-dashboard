@@ -17,8 +17,10 @@ every read goes over the read-only ``ssh vm`` pipe, invoking a ``sudo -u trevor 
 
   * ``ssh -o BatchMode=yes -o ConnectTimeout=10`` + a HARD subprocess timeout (a dead
     host can outlive ssh's own ConnectTimeout; the subprocess timeout turns a hang into
-    UNKNOWN). ``HOME=/home/ghost`` is reset in the child env so the ssh key/``~/.ssh/config``
-    lookup resolves even if a parent forced ``HOME=/home/trevor`` (the R12-B2 gotcha).
+    UNKNOWN). ``HOME=/home/ghost`` is set in the child env DEFENSIVELY ONLY: ssh resolves the
+    key/``~/.ssh/config`` from the process UID (getpwuid), NOT $HOME, so a parent forcing
+    ``HOME=/home/trevor`` does NOT break it — the "R12-B2 gotcha" was a wrong mechanism
+    (RF3T2-B8, measured).
 
   * READ-ONLY BY CONSTRUCTION: ``sqlite3 -readonly`` opens the VM db read-only (a write
     attempt fails ``attempt to write a readonly database``); the SQL is a fixed SELECT with
@@ -129,8 +131,8 @@ def _build_argv() -> list:
 
 def _exec(argv: list, timeout: float) -> Dict[str, Any]:
     """Run the ssh subprocess, normalizing EVERY outcome to a plain dict — never raises.
-    ``HOME=/home/ghost`` is set so the ssh key lookup resolves regardless of the parent's
-    HOME (the runPython ``HOME=/home/trevor`` gotcha)."""
+    ``HOME=/home/ghost`` is set DEFENSIVELY ONLY — the ssh key lookup resolves from the
+    process UID (getpwuid), NOT $HOME, regardless of the parent's HOME (RF3T2-B8)."""
     env = dict(os.environ)
     env["HOME"] = "/home/ghost"
     try:

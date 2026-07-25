@@ -135,7 +135,8 @@ except Exception as exc:
 def _vm_python(program: str, args_json: str, timeout: float = _RPC_TIMEOUT) -> Dict[str, Any]:
     """Run a VM-side python program over ssh (as trevor); parse its last JSON line. NEVER
     raises — a transport/parse failure surfaces as ``{"ok": False, "error": ...}`` so a broken
-    pipe can't crash the watcher. HOME is reset so ssh finds ~/.ssh/config under any HOME."""
+    pipe can't crash the watcher. HOME is set DEFENSIVELY ONLY — ssh resolves ~/.ssh from the
+    process UID (getpwuid), NOT $HOME, so a foreign HOME does not break it (RF3T2-B8)."""
     b64_prog = base64.b64encode(program.encode()).decode()
     b64_args = base64.b64encode(args_json.encode()).decode()
     remote = (

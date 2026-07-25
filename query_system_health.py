@@ -49,7 +49,7 @@ def _vm_probe() -> dict:
         proc = subprocess.run(
             SSH_BASE + [cmd],
             capture_output=True, text=True, timeout=6,
-            env={**os.environ, "HOME": "/home/ghost"},  # runPython sets HOME=/home/trevor
+            env={**os.environ, "HOME": "/home/ghost"},  # defensive only: ssh resolves ~/.ssh from the UID (getpwuid), not $HOME [RF3T2-B8]
         )
     except subprocess.TimeoutExpired:
         result["error"] = "ssh timeout"

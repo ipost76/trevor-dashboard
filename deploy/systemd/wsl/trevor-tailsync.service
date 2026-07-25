@@ -11,7 +11,9 @@ After=network-online.target tailscaled.service
 [Service]
 Type=oneshot
 User=ghost
-# HOME so ssh finds ~/.ssh/config (the `vm` alias), the passphraseless key, and known_hosts.
+# HOME is DEFENSIVE ONLY for ssh: ssh resolves ~/.ssh (the `vm` alias, the passphraseless
+# key, known_hosts) from the UID via getpwuid, NOT $HOME (RF3T2-B8, measured). User=ghost
+# is what actually makes it resolve. Kept — harmless, and other tools do read $HOME.
 Environment=HOME=/home/ghost
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/ghost/projects/trevor-dashboard/deploy/scripts/trevor-tailsync.sh

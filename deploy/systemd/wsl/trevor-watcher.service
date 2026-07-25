@@ -28,8 +28,13 @@ WorkingDirectory=/home/ghost/projects/trevor-dashboard
 # 🚨 EnvironmentFile is how the WATCHER_* flags AND ANTHROPIC_API_KEY reach the process.
 #    Omitting it = the daemon starts with no flags/key: inert + silently under-powered.
 EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
-# 🚨 HOME so run_watcher_loop's heartbeat.pre_register() ssh-pipe write to the VM loop_heartbeat
-#    resolves the `vm` alias + key (tailsync precedent). Without it the heartbeat silently degrades.
+# HOME for run_watcher_loop's heartbeat.pre_register() ssh-pipe write to the VM loop_heartbeat.
+# 🚨 RF3T2-B8 CORRECTION: the old comment here claimed "Without it the heartbeat silently
+#    degrades" — that is FALSE and it is what generated the T2-h roadmap item. ssh resolves the
+#    `vm` alias + key from the UID via getpwuid, NOT $HOME (measured: foreign/empty/unset HOME
+#    and `env -i` all authenticate; as root WITH HOME=/home/ghost it FAILS). `User=ghost` is what
+#    makes it resolve. This line is DEFENSIVE ONLY — harmless, and other tools do read $HOME.
+#    The silent-degradation CONCLUSION was right; the MECHANISM was wrong.
 Environment=HOME=/home/ghost
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/python3 watcher_health.py

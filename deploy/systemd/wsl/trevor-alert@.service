@@ -17,7 +17,8 @@ Type=oneshot
 User=ghost
 WorkingDirectory=/home/ghost/projects/trevor-dashboard
 # EnvironmentFile so resolve_webhook() sees HUB_QA_WEBHOOK_URL / HUB_DOWNLOADS_WEBHOOK_URL;
-# HOME so any ssh/config lookups resolve (parity with the daemons + tailsync precedent).
+# HOME for parity with the daemons + tailsync. DEFENSIVE ONLY for ssh — ssh resolves ~/.ssh
+# from the UID via getpwuid, NOT $HOME (RF3T2-B8, measured); User=ghost is what resolves it.
 EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
 Environment=HOME=/home/ghost
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

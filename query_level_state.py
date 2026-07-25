@@ -29,9 +29,11 @@ CONFIG-TESTED is scaffolded (`config-tested-at` always returns
 `{populated:false, r8_dependency:"awaiting R8..."}`) — surfaced as expected-empty,
 NOT a fault.
 
-HOME reset: runPython spawns children with HOME=/home/trevor, which breaks the
-ssh key lookup — the subprocess env resets HOME=/home/ghost (the proven
-query_memory_daily.py / query_wedge_metrics.py discipline).
+HOME reset: runPython does spawn children with HOME=/home/trevor, but that does NOT
+break the ssh key lookup — ssh resolves ~/.ssh from the process UID (getpwuid), NOT
+$HOME (RF3T2-B8, measured: foreign/empty/unset HOME and `env -i` all authenticate; as
+root WITH HOME=/home/ghost it FAILS). The reset is kept as harmless defence-in-depth,
+matching the query_memory_daily.py / query_wedge_metrics.py convention.
 
 The route wraps this in safeJsonParse + a fallback so a Python error can never
 become an HTTP 500; the component renders `status:"unknown"` as
@@ -83,7 +85,7 @@ def _run_level(cmd: str) -> tuple[Optional[Any], Optional[str]]:
             capture_output=True,
             text=True,
             timeout=_PROC_TIMEOUT,
-            env={**os.environ, "HOME": "/home/ghost"},  # runPython sets HOME=/home/trevor
+            env={**os.environ, "HOME": "/home/ghost"},  # defensive only: ssh resolves ~/.ssh from the UID (getpwuid), not $HOME [RF3T2-B8]
         )
     except subprocess.TimeoutExpired:
         return None, f"{cmd}: ssh/level_query timeout ({_PROC_TIMEOUT}s)"

@@ -73,7 +73,7 @@ def fetch(date: str) -> dict:
             capture_output=True,
             text=True,
             timeout=8,
-            env={**os.environ, "HOME": "/home/ghost"},  # runPython sets HOME=/home/trevor
+            env={**os.environ, "HOME": "/home/ghost"},  # defensive only: ssh resolves ~/.ssh from the UID (getpwuid), not $HOME [RF3T2-B8]
         )
     except subprocess.TimeoutExpired:
         return {"status": "error", "date": date, "error": "VM unreachable: ssh timeout"}

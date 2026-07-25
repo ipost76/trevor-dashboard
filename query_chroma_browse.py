@@ -184,8 +184,8 @@ def run_remote(params: dict[str, Any]) -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=45,
-            # runPython forces HOME=/home/trevor; reset it so ssh finds ghost's
-            # ~/.ssh/config + GCE key.
+            # runPython does force HOME=/home/trevor, but ssh resolves ~/.ssh from the
+            # process UID (getpwuid), NOT $HOME — this reset is DEFENSIVE ONLY (RF3T2-B8).
             env={**__import__("os").environ, "HOME": "/home/ghost"},
         )
     except subprocess.TimeoutExpired:

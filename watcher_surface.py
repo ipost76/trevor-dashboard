@@ -60,8 +60,9 @@ from lib.watcher_db import get_connection, utc_now
 # NEVER writes trevor.db (the one heartbeat write lives in watcher_health.py, VM-side).
 _REPLICA_PATH = os.environ.get("WATCHER_REPLICA_PATH", "/home/ghost/trevor-replica/trevor.db")
 _REPLICA_TIMEOUT = 15
-# read-only ssh pipe to the VM (systemctl state). HOME is reset so ssh finds ~/.ssh/config
-# even if the process was spawned with a foreign HOME (e.g. via runPython's HOME=/home/trevor).
+# read-only ssh pipe to the VM (systemctl state). HOME is set DEFENSIVELY ONLY: ssh resolves
+# ~/.ssh from the process UID (getpwuid), NOT $HOME — a foreign/unset HOME does not break it
+# (RF3T2-B8, measured). Kept because it is harmless and other tools DO read $HOME.
 _VM_HOST = os.environ.get("WATCHER_VM_HOST", "vm")
 _WSL_HOME = os.environ.get("WATCHER_WSL_HOME", "/home/ghost")
 _VM_TIMEOUT = float(os.environ.get("WATCHER_VM_TIMEOUT", "20"))

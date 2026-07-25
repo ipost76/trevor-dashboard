@@ -1036,8 +1036,10 @@ def _read_vm_level() -> Tuple[Optional[int], str]:
     transport/parse failure — spawn / timeout / nonzero / empty / malformed /
     non-object / non-int / bool. NEVER raises, NEVER a guessed level, NEVER a VM
     mutation (allowlist = the 'current' reader subcommand only; ``sudo -u trevor``
-    opens a mode=ro handle). ``HOME=/home/ghost`` so the child ssh resolves its
-    key/config regardless of the spawning runtime (the R12-B2 gotcha)."""
+    opens a mode=ro handle). ``HOME=/home/ghost`` is DEFENSIVE ONLY — the child ssh
+    resolves its key/config from the process UID (getpwuid), NOT $HOME, regardless of
+    the spawning runtime; the "R12-B2 gotcha" named a mechanism that does not apply to
+    ssh (RF3T2-B8, measured)."""
     remote = "cd %s && sudo -u trevor python3 %s current" % (
         shlex.quote(_VM_DIR), shlex.quote(_LEVEL_QUERY),
     )

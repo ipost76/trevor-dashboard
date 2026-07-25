@@ -110,9 +110,10 @@ def _fetch_vm_config() -> dict | None:
 
     Returns the parsed dict on success, or None on any ssh/parse failure — logged
     to stderr, never swallowed silently. 10s subprocess timeout sits below the
-    route's 12s runPython budget so the helper self-bounds first. HOME is reset to
-    /home/ghost because runPython sets HOME=/home/trevor, and ssh needs ghost's
-    ~/.ssh (the `vm` alias + GCE key).
+    route's 12s runPython budget so the helper self-bounds first. HOME is set to
+    /home/ghost DEFENSIVELY ONLY: runPython does force HOME=/home/trevor, but ssh
+    resolves ~/.ssh from the process UID (getpwuid), NOT $HOME, so this reset is a
+    no-op for ssh. Kept (harmless, and other tools DO read $HOME). RF3T2-B8.
     """
     try:
         proc = subprocess.run(

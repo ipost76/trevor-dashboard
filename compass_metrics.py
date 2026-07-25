@@ -456,7 +456,11 @@ def per_eff_bet_net(
     computed as ``1 / HHI`` over the CHARGED trades' per-ticker notional weights,
     so a concentrated book earns fewer effective bets. Trades missing a ticker
     are bucketed under a synthetic per-trade key (each counts as its own name),
-    which is the conservative (higher-HHI) treatment.
+    which is the CONSERVATIVE treatment — splitting one bucket's weight across N
+    synthetic names LOWERS HHI (``Σw²`` falls from ``w²`` to ``w²/N``), so ``1/HHI``
+    RISES: more effective bets, a bigger denominator, a SMALLER $/bet. RF3T2-B8:
+    the effect is conservative exactly as RECON-GIGANTIC-001 said, but this comment
+    described the mechanism BACKWARDS — it read "(higher-HHI)", and the HHI falls.
 
     ``correlation`` (RF3T2-B3) is passed straight through to ``n_eff_bets`` — see
     that docstring for the v2 form, the conservative fallback, and the PENDING
