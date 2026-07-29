@@ -98,6 +98,9 @@ MEMORY_QUERY_FLAG = "MEMORY_QUERY_ENABLED"          # RF2-B2/W9: have_we_tested 
 # the level only at main() start). One flag makes the detect-but-don't-sweep state UNREACHABLE.
 LEVEL_DETECTOR_FLAG = "TRAINER_LEVEL_DETECTOR_ENABLED"  # RF2-B3/W5: detector + SL6 sweep (default OFF)
 TEACH_FLAG = "TRAINER_TEACH_ENABLED"               # RF2-B3/W3: WSL-side teach arm (default OFF)
+# RP-C2: names the optional compass pre-score simulator as "module:attr" (default ABSENT).
+# 🚨 THIS IS THE SOCKET, NOT THE SIMULATOR — see `_resolve_backtest_fn`.
+BACKTEST_PROVIDER_ENV = "TRAINER_BACKTEST_PROVIDER"
 
 
 def _truthy(name: str) -> bool:
@@ -1183,12 +1186,59 @@ class LevelDetector:
         self.last_swept_level = self.current_level
 
 
+# ── RP-C2: the backtest_fn socket ────────────────────────────────────────────
+def _resolve_backtest_fn() -> Optional[Callable[[Dict[str, Any], int], Dict[str, Any]]]:
+    """Resolve the optional compass pre-score simulator named by
+    ``TRAINER_BACKTEST_PROVIDER`` as ``"module:attr"``. Returns ``None`` when unset.
+
+    🚨 THIS IS THE SOCKET, NOT THE SIMULATOR. Building `backtest_fn` is D-5 / RF-BACKTEST
+    (contract: docs/design/BACKTEST_FN_SPEC.md); this only DELIVERS one to
+    ``run_trainer_loop``. Before RP-C2 there was no delivery path at all: ``main`` called
+    ``run_trainer_loop(level=level)``, ``backtest_fn`` defaulted to ``None``, and the
+    ``if backtest_fn is not None`` branch in ``_run_one_iteration`` — the ONLY route to
+    ``trainer_bandit.compass_reward`` and therefore to ``REWARD_K`` — could never be taken.
+    A correct constant nothing reaches is this codebase's signature defect; this is the wire.
+
+    ⚠️ ``attr`` must BE the ``backtest_fn(arm: dict, level: int) -> dict`` callable itself
+    (no factory protocol — an ambiguous one is how unrecorded assumptions get in).
+
+    🚨 A SET-BUT-UNRESOLVABLE provider REFUSES (raises) rather than falling back to ``None``.
+    Silently running without the simulator the operator explicitly named would make the
+    survival gates blind exactly as BACKTEST_FN_SPEC.md §0 warns — and silence is the
+    failure mode this campaign exists to kill. Same posture as the below-L1 refusal: a loud
+    stop is the fix WORKING. Unset is the default and can never reach this path.
+    """
+    spec = os.environ.get(BACKTEST_PROVIDER_ENV, "").strip()
+    if not spec:
+        return None  # byte-identical to the pre-RP-C2 call
+    if ":" not in spec:
+        raise ValueError(
+            f"{BACKTEST_PROVIDER_ENV}={spec!r} is malformed — expected 'module:attr'")
+    mod_name, _, attr_name = spec.partition(":")
+    try:
+        import importlib
+        mod = importlib.import_module(mod_name.strip())
+        fn = getattr(mod, attr_name.strip())
+    except Exception as exc:
+        raise ValueError(
+            f"{BACKTEST_PROVIDER_ENV}={spec!r} did not resolve: {exc!r}") from exc
+    if not callable(fn):
+        raise ValueError(
+            f"{BACKTEST_PROVIDER_ENV}={spec!r} resolved to a non-callable {type(fn).__name__}")
+    return fn
+
+
 # ── explicit entrypoint (NO import-time execution; flag-gated) ───────────────
-def main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None) -> int:
+def main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
+         backtest_fn: Optional[Callable[[Dict[str, Any], int], Dict[str, Any]]] = None) -> int:
     """The R13 daemon entrypoint. Refuses to run unless ``TRAINER_LOOP_ENABLED`` AND the
     live level resolves to >= 1 from the VM chain (RF1-B2). ``reader`` is a test seam
     injected by the isolated-copy acceptance gate; production passes nothing (the real
-    read-only ssh shim). NEVER passes a numeric default to ``run_trainer_loop``."""
+    read-only ssh shim). NEVER passes a numeric default to ``run_trainer_loop``.
+
+    ``backtest_fn`` (RP-C2) is the compass pre-score simulator, injected the same way
+    ``reader`` is; when omitted it is resolved from ``TRAINER_BACKTEST_PROVIDER``
+    (see ``_resolve_backtest_fn``). Both absent → ``None`` → byte-identical to R9-B6."""
     if not loop_enabled():
         print(json.dumps({"enabled": False,
                           "reason": f"{LOOP_FLAG} off — the trainer daemon does not start"}))
@@ -1210,7 +1260,12 @@ def main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None) -> in
         print(json.dumps({"enabled": True, "started": False,
                           "reason": "level_unresolved", "detail": why}))
         return 1
-    result = run_trainer_loop(level=level)
+    # RP-C2: deliver the compass pre-score simulator. An explicit `backtest_fn` argument
+    # (the injection seam, mirroring `reader`) wins; otherwise resolve the env-named
+    # provider. Both absent → None → byte-identical to the pre-RP-C2 `run_trainer_loop(
+    # level=level)`. THIS LINE is what makes `REWARD_K` reachable from the entrypoint at all.
+    result = run_trainer_loop(level=level,
+                              backtest_fn=backtest_fn or _resolve_backtest_fn())
     print(json.dumps(result))
     return 0
 

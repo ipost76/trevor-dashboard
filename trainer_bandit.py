@@ -165,9 +165,56 @@ REWARD_K = 1.0 / OPERATIVE_BLEND_MAX   # = 1/550; tanh steepness for blend>0
 # recorded derivation needs its DERIVATION before its VALUE. Deriving these two
 # is its own item; guessing a new number here would just re-create the exact
 # defect this prompt exists to fix, one level down.
+#
+# ── λ: THE RE-DERIVATION RULE (RP-C2, 2026-07-28) ───────────────────────────
+# RP-C2 did NOT change either value (see the paragraph above — that bar is
+# unchanged). What it adds is the missing RULE + a measured ceiling, so the next
+# reader inherits a derivation procedure instead of a bare "no derivation" note.
+#
+# THE RULE:  λ_stale = λ_sat = λ ≤ f · observed_reward_spread
+#   observed_reward_spread = compass_reward(observed_operative_max)
+#                          − compass_reward(observed_operative_min)
+#   f is fixed by an ACCEPTANCE CRITERION, not taste: under the adversarial bonus
+#   the best observed arm must remain the most-pulled arm in ≥18/20 seeds — the
+#   SAME bar `test_reward_scale_best_arm_wins_at_module_k` already applies to
+#   REWARD_K. Re-run that harness with the bonus applied; do not hand-tune λ.
+#
+# MEASURED at the modelled range [19.57, 1295.20] with the REAL `_thompson_theta`
+# + `compass_reward` (5 arms, 20 seeds, 120 steps), reward spread = 0.378632:
+#   one-sided (+λ on the WORST arm only — the form RD-B8 measured):
+#     λ=0.05 → best arm wins 20/20, worst arm wins 0/20.  ✅ RD-B8 CONFIRMED.
+#   two-sided (+λ worst AND −λ best — the adversarial extreme of the ±λ swing):
+#     λ=0.03 → 19/20 (passes) · λ=0.04 → 17/20 (fails) · λ=0.05 → 12/20 (fails)
+#   ⇒ ceiling f ≈ 0.08 of spread ⇒ λ ≈ 0.030 at the modelled spread, vs 0.05 live.
+#
+# 🚨 WHAT THAT DOES AND DOES NOT SAY. It does NOT say a bad arm can win: the WORST
+# arm wins 0/20 in EVERY configuration tested. The 8/20 losses at λ=0.05 all go to
+# arm idx 3 (blend 600, reward 0.9189) — the best arm's NEAREST neighbour (blend
+# 1295.20, reward 0.9929). So λ=0.05 can cost the bandit the distinction between
+# the top TWO near-equal arms under a maximal saturation penalty; it does not make
+# it choose garbage. ⚠️ And the two-sided case is an UPPER BOUND, not the operating
+# point: a −λ penalty needs mean(saturation)=1.0, which requires the arm to hold
+# ALL observations across its axes — with 5 arms live the best arm's share runs
+# ~0.6–0.8, so the real penalty is ~−0.03..−0.04. Truth sits between 20/20 and 12/20.
+#
+# 🚨 THE VALUE STAYS **UNKNOWN**, AND THIS IS WHY: every number above rests on the
+# MODELLED range. `bandit_posteriors` = 0 rows — nothing has ever scored — so the
+# reward spread, which is the DENOMINATOR of the rule, is itself modelled. The
+# sensitivity is not academic (same K, same λ=0.05, spread recomputed):
+#     blend [19.57, 1295.20] (A8 modelled)  spread 0.378632  λ =  13.2% of spread
+#     blend [30.00,  550.00] (operative)    spread 0.282841  λ =  17.7% of spread
+#     blend [ 1.96,  129.52] (10× smaller)  spread 0.091067  λ =  54.9% of spread
+#     blend [ 1.00,   10.00] (weak-edge)    spread 0.006545  λ = 764.0% of spread
+# In the last row the bonus outweighs the entire reward signal by ~7.6×. So λ is
+# not derivable until a real observed range exists.
+#
+# 🚨 THE EXACT MISSING INPUT: the OBSERVED blend range over real scored survivors
+# — the same `[BANDIT-SCALE]` observed-range log `compass_reward` already emits.
+# It needs n ≥ ~10–20 scored survivors, which requires the trainer to actually run
+# (L1 minted + a real `backtest_fn`). Until then: λ = UNKNOWN, values unchanged.
 BROADEN_STEP = 8             # every +8 total observations, allow +1 axis in a proposal
-LAMBDA_STALE = 0.05          # staleness bonus weight — ⚠️ NO DERIVATION (see above)
-LAMBDA_SAT = 0.05            # saturation penalty weight — ⚠️ NO DERIVATION (see above)
+LAMBDA_STALE = 0.05          # staleness bonus weight  — ⚠️ VALUE UNDERIVED; rule above (RP-C2)
+LAMBDA_SAT = 0.05            # saturation penalty weight — ⚠️ VALUE UNDERIVED; rule above (RP-C2)
 
 # Value-sampler caps for unbounded (hi=None) numeric domains (documented).
 _INT_UNBOUNDED_SPAN = 200
