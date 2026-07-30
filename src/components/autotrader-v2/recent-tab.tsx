@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { ReplicaAge } from "@/lib/replica-age";
+import { SignalsCard } from "./signals-card";
 import { History, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 interface ClosedTrade {
@@ -354,6 +355,13 @@ export function RecentTab() {
 
   return (
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
+      {/* W4b: signals FIRST. A signal precedes its trade, and during a quiet
+          stretch this is the card that answers "is anything happening at all?"
+          — the question an empty trades list cannot distinguish from a broken
+          Hub. It carries its own data-age line and its own three-state empty
+          message; see signals-card.tsx. */}
+      <SignalsCard />
+
       <Card padding="md">
         <CardHeader>
           {/* B1-COLLAPSE-FILTERS: the header is the single control+status bar —
