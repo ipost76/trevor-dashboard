@@ -127,14 +127,19 @@ def _as_float(v, default: float | None = None):
 
 
 def fetch_open_trades(conn, liq_buffer_k: float) -> list[dict]:
-    """Open LIVE positions with the Stage-2 dynamic-leverage columns."""
+    """Open positions (ALL modes) with the Stage-2 dynamic-leverage columns.
+
+    W4a (2026-07-30): was live-only. Under PAPER_WINDOW_ENABLED every open row
+    is trade_mode='paper', so this returned nothing and the panel showed no
+    leverage or liq-safety reading for the position actually on the book.
+    """
     cur = conn.execute(
         """
         SELECT id, ticker, direction, entry_price, stop_price, notional_usd,
                leverage, leverage_at_entry, liq_distance_at_entry,
                lev_weight_breakdown_json, regime_at_entry, opened_at
         FROM auto_trades
-        WHERE status='open' AND trade_mode='live'
+        WHERE status='open'
         ORDER BY opened_at DESC
         """
     )
@@ -306,13 +311,16 @@ def fetch_margin(conn) -> dict:
     degraded block, NEVER a silent 0% (a margin panel showing 0% when it actually
     cannot read is a lie that hides risk).
     """
-    # margin_used = Σ posted margin over open LIVE trades, deduped by DISTINCT id
+    # margin_used = Σ posted margin over open trades, deduped by DISTINCT id
     # (phantom-bleeder law — defensive no-op since `id` is the PK, but a duplicated
     # row must never inflate the margin figure / understate risk).
+    # W4a (2026-07-30): mode-blind. Live-only made utilization read a flat 0%
+    # while a paper position held real margin on the book — a risk figure that
+    # understates by omission is worse than one that is merely stale.
     try:
         cur = conn.execute(
             "SELECT id, notional_usd, leverage FROM auto_trades "
-            "WHERE status='open' AND trade_mode='live'"
+            "WHERE status='open'"
         )
         seen = set()
         margin_used = 0.0

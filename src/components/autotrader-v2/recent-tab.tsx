@@ -13,6 +13,7 @@ import {
   HapticButton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { ReplicaAge } from "@/lib/replica-age";
 import { History, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 interface ClosedTrade {
@@ -29,12 +30,17 @@ interface ClosedTrade {
   closed_at: string;
   trade_mode: "live" | "paper";
   exit_reason?: string | null;
+  // W4a: the Smart-Exit layer that fired. INTEGER with fractional layers ×10 —
+  // layer 6.5 is stored 65, 6.2 is 62. See fmtExitLayer.
+  exit_layer?: number | null;
 }
 
 interface ClosedTradesResponse {
   type: "closed";
   count: number;
   trades: ClosedTrade[];
+  /** W4a: age of the replica this list came from. null => render no age claim. */
+  replica_age_seconds?: number | null;
   // B2: present on ANY failure path (the route's runPython-throw catch, the
   // Python script's own error payloads, and the route's parse-failure fallback),
   // so the client can tell "fetch broke" from "no trades this day".
@@ -152,6 +158,27 @@ function fmtWindow(opened: string | null | undefined, closed: string): string {
   return open === "--:--" ? close : `${open} → ${close}`;
 }
 
+// ─── W4a (2026-07-30): WHICH EXIT LAYER FIRED ───────────────────────────────
+// `auto_trades.exit_layer` stores fractional layers ×10 — 6.5 is 65, 6.2 is 62
+// — so a bare render would print "L65". Measured all-time on the WSL replica
+// 2026-07-30: 0(129) 1(46) 4(36) 6(747) 7(20) 62(12) 65(99), plus one -1.
+// Two-digit values divide; anything else prints as-is. Purely a display
+// transform — never do arithmetic on this column.
+function fmtExitLayer(n: number | null | undefined): string | null {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  if (n >= 10) return `L${n / 10}`;
+  return `L${n}`;
+}
+
+// 🚨 Layers 3 (breakeven) and 4.5 (ratchet) have NEVER fired — zero rows in the
+// entire table as of 2026-07-30. Their first appearance is a first-ever event
+// in this system and Ghost should not have to notice it from a P&L number
+// alone. Stored as 3 and 45 respectively.
+const FIRST_EVER_LAYERS: ReadonlyArray<number> = [3, 45];
+function isFirstEverLayer(n: number | null | undefined): boolean {
+  return typeof n === "number" && FIRST_EVER_LAYERS.includes(n);
+}
+
 export function RecentTab() {
   const [trades, setTrades] = React.useState<ClosedTrade[] | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -181,6 +208,8 @@ export function RecentTab() {
   // so B2's tradesUrl-as-effect-dep stale-closure fix is fully preserved.
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [customExpanded, setCustomExpanded] = React.useState(false);
+  // W4a: age of the replica the current list was read from.
+  const [replicaAge, setReplicaAge] = React.useState<number | null>(null);
 
   // B2: derive the fetch URL from the CURRENT range. This URL is the effect's SOLE
   // dependency (mirroring capital-hero's stateUrl), so a range change re-runs the
@@ -214,6 +243,9 @@ export function RecentTab() {
           return;
         }
         setTrades(j.trades ?? []);
+        // W4a: capture the replica's age alongside the rows. undefined (an older
+        // payload) => null => <ReplicaAge> renders nothing, never a false claim.
+        setReplicaAge(j.replica_age_seconds ?? null);
         setError(null); // most recent fetch succeeded — clear any prior error
       } catch (e) {
         // B2: network / parse failure → honest error, NEVER a silent "no trades".
@@ -332,7 +364,12 @@ export function RecentTab() {
             <CardTitle>
               <span className="flex items-center gap-2 uppercase tracking-wider">
                 <History size={14} aria-hidden />
-                Recent Signals
+                {/* 🚨 W4a: was "Recent Signals". This card has only ever rendered
+                    closed TRADES — the count beside it is filteredTrades/trades.
+                    Reading "RECENT SIGNALS 0/0" as "zero signals fired" is exactly
+                    the wrong conclusion: 28 signals posted in the preceding 18h.
+                    (The real signal surface is W4b.) */}
+                Recent Trades
                 {trades && (
                   <span className="ml-1 font-mono text-micro text-fg-muted">
                     {filteredTrades.length}/{trades.length}
@@ -370,6 +407,12 @@ export function RecentTab() {
             </button>
           </div>
         </CardHeader>
+
+        {/* 🚨 W4a: the data's AGE, above the list and visible whether or not the
+            list is empty. This is the line that stops an empty window reading as
+            "nothing happened" when the truth is "the replica has not caught up".
+            Always rendered here, never only in the empty state. */}
+        <ReplicaAge ageSeconds={replicaAge} className="mb-3 block" />
 
         {/* B2: transient refresh failure while last-good data is still shown. */}
         {error != null && trades !== null && (
@@ -418,7 +461,9 @@ export function RecentTab() {
             body={
               trades.length > 0
                 ? "Try widening the ticker / direction / outcome filters."
-                : "Nothing closed in the selected window."
+                : // W4a: name BOTH readings so an empty screen is unambiguous.
+                  // The age line above resolves which one it is.
+                  "Nothing closed in the selected window. The data's age is shown above — if it looks current, the bot genuinely hasn't closed a trade."
             }
             className="min-h-[80px]"
           />
@@ -446,17 +491,36 @@ export function RecentTab() {
                   >
                     {/* left column — line 1 identity (bold), line 2 meta (one line, never wraps) */}
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-body font-bold tabular-nums text-fg-primary">
-                        {t.ticker}{" "}
-                        <span
-                          className={
-                            t.direction === "LONG"
-                              ? "text-accent-mint-strong"
-                              : "text-accent-red"
-                          }
-                        >
-                          {t.direction}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-body font-bold tabular-nums text-fg-primary">
+                          {t.ticker}{" "}
+                          <span
+                            className={
+                              t.direction === "LONG"
+                                ? "text-accent-mint-strong"
+                                : "text-accent-red"
+                            }
+                          >
+                            {t.direction}
+                          </span>
                         </span>
+                        {/* 🚨 W4a: the PAPER marker. This pill was REMOVED in
+                            B1 (2026-07-15) as "constant, since the SQL hard-filters
+                            trade_mode='live'". That premise died when the paper
+                            window opened: the list is now mode-blind and mixes
+                            both, so the label is load-bearing again. It renders
+                            ONLY for paper, so a live-only list stays visually
+                            quiet and the marker keeps its meaning. */}
+                        {t.trade_mode === "paper" && (
+                          <Pill
+                            intent="warn"
+                            size="sm"
+                            className="shrink-0"
+                            title="Simulated trade — no order was sent to the exchange"
+                          >
+                            PAPER
+                          </Pill>
+                        )}
                       </div>
                       {/* HH:MM → HH:MM (raw Eastern held window) · exit_reason —
                           single line, long reason ellipses (never wraps). min-w-0 is
@@ -477,6 +541,29 @@ export function RecentTab() {
                           <>
                             <span className="shrink-0 text-fg-faint">·</span>
                             <span className="min-w-0 truncate">{t.exit_reason}</span>
+                          </>
+                        )}
+                        {/* W4a: WHICH exit layer fired. The P&L alone cannot tell
+                            a breakeven exit from a stop; the layer can. */}
+                        {fmtExitLayer(t.exit_layer) && (
+                          <>
+                            <span className="shrink-0 text-fg-faint">·</span>
+                            <span
+                              className={cn(
+                                "shrink-0",
+                                isFirstEverLayer(t.exit_layer)
+                                  ? "font-bold text-accent-cyan-soft-strong"
+                                  : "text-fg-faint",
+                              )}
+                              title={
+                                isFirstEverLayer(t.exit_layer)
+                                  ? "FIRST EVER — this exit layer had never fired before"
+                                  : "Smart Exit layer that closed this trade"
+                              }
+                            >
+                              {fmtExitLayer(t.exit_layer)}
+                              {isFirstEverLayer(t.exit_layer) && " ★ 1st ever"}
+                            </span>
                           </>
                         )}
                       </div>

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { runPython, safeJsonParse } from "@/lib/api-helpers";
+import {
+  normalizePaperWindowState,
+  isPaperMode,
+  type PaperWindowState,
+} from "@/lib/trading-mode";
 import { createSwrCache } from "@/lib/single-flight";
 
 // GET /api/auto/state — consolidated AUTO state.
@@ -74,9 +79,29 @@ interface AutoStateResponse {
   pnl_today_pct: number;
   trades_today: number;
   trades_total: number;
+  /** W4a: how many of `trades_total` are trade_mode='paper'. */
+  trades_paper_count: number;
   open_positions_count: number;
   auto_enabled: boolean;
+  /**
+   * CONFIGURED execution flag (auto_config AUTO_LIVE_ENABLED). Gates NOTHING on
+   * the bot. 🚨 Never source a mode badge from this — doing so is what rendered
+   * a LIVE badge through the entire paper window. Use `paper_window_state`.
+   */
   live_enabled: boolean;
+  /**
+   * W4a: the EFFECTIVE mode — the three-state read of PAPER_WINDOW_ENABLED,
+   * which is what auto_trader/live_executor actually branches on.
+   *   "on"     paper-gated            -> PAPER
+   *   "off"    executing live         -> LIVE
+   *   "absent" row missing, UNKNOWN   -> PAPER?  (never a bare LIVE)
+   *   "error"  read failed            -> PAPER   (never a bare LIVE)
+   */
+  paper_window_state: PaperWindowState;
+  paper_window_enabled: boolean;
+  /** W4a: age of the read-only replica this payload came from. null => no claim. */
+  replica_age_seconds: number | null;
+  replica_mtime_utc: string | null;
   killswitch_on: boolean;
   per_ticker_thresholds_enabled: boolean;
   data_available: boolean;
@@ -111,9 +136,18 @@ const FALLBACK: AutoStateResponse = {
   pnl_today_pct: 0,
   trades_today: 0,
   trades_total: 0,
+  trades_paper_count: 0,
   open_positions_count: 0,
   auto_enabled: false,
   live_enabled: false,
+  // 🚨 W4a FAIL DIRECTION: the route-level fallback (Python threw, spawn failed,
+  // JSON unparseable) is a FAILED READ, so it resolves to "error" -> the badge
+  // renders PAPER. A failed read must never render LIVE. This mirrors the
+  // Python fail-safe default so the two layers cannot disagree.
+  paper_window_state: "error",
+  paper_window_enabled: true,
+  replica_age_seconds: null,
+  replica_mtime_utc: null,
   killswitch_on: false,
   per_ticker_thresholds_enabled: false,
   data_available: false,
@@ -343,6 +377,16 @@ export async function GET(request: Request) {
     const available = equity.value !== null;
     const realHlEquity = equity.value ?? 0;
 
+    // 🚨 W4a — the fail-direction is enforced HERE, at the boundary, not trusted
+    // from upstream. `safeJsonParse` does not validate shape: an older
+    // query_auto_state.py, a truncated payload, or any future edit that drops the
+    // key would leave `paper_window_state` undefined, and an undefined that the
+    // client treats as "not paper" renders LIVE — the exact bug this closes.
+    // `normalizePaperWindowState` collapses anything unrecognised to "error",
+    // which renders PAPER. It is the SAME function the client uses, so the two
+    // layers cannot drift apart. Never replace this with a passthrough.
+    const paperWindowState = normalizePaperWindowState(value.paper_window_state);
+
     // PCT-DENOM-FIX B1 (2026-07-03): the per-window realized-% is now computed
     // entirely by query_auto_state.py — each window divides its realized $ by the
     // account equity at that window's START (floored at the cutover epoch), and
@@ -356,6 +400,9 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ...value,
       ts: state.ts,
+      // W4a: normalized above — must override the `...value` passthrough.
+      paper_window_state: paperWindowState,
+      paper_window_enabled: isPaperMode(paperWindowState),
       // ── real-HL equity: single source of truth, never the DB realized sum ──
       equity_usd: realHlEquity,
       equity: realHlEquity, // legacy alias kept in sync
@@ -370,6 +417,12 @@ export async function GET(request: Request) {
       // open_positions[].notional_usd. Closed history / realized stay on the replica
       // (fine at 15min). Fall back to the replica value only when the heartbeat was
       // never observed (openCount/openMargin null).
+      // ⚠️ W4a NOTE (not a W4a change): the heartbeat's `open_count` is LIVE-ONLY
+      // upstream. It is null today — the Observatory was decommissioned in
+      // RM-DECOM (~2026-07-08) and `equity_source` reads "unavailable" — so this
+      // falls through to the replica value, which W4a made mode-blind. If the
+      // heartbeat is ever resurrected it would re-hide paper opens here. Widen
+      // the heartbeat's own count before trusting it again.
       open_count: equity.openCount ?? value.open_count,
       open_positions_count: equity.openCount ?? value.open_positions_count,
       open_margin_usd: equity.openMargin ?? value.open_margin_usd,

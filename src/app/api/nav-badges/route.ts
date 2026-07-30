@@ -15,7 +15,10 @@ import sqlite3, json, os
 db = os.environ.get("TREVOR_DB_PATH", "/home/trevor/trevor/trevor.db")
 conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
 cur = conn.cursor()
-active = cur.execute("SELECT COUNT(*) FROM auto_trades WHERE status='open' AND trade_mode='live'").fetchone()[0]
+# W4a (2026-07-30): mode-blind. Under PAPER_WINDOW_ENABLED every open row is
+# trade_mode='paper', so the live-only count pinned this badge at 0 and the
+# nav could never move 0 -> 1 on the first entry.
+active = cur.execute("SELECT COUNT(*) FROM auto_trades WHERE status='open'").fetchone()[0]
 signals = cur.execute("SELECT COUNT(*) FROM trade_insights WHERE created_at > datetime('now', '-30 minutes')").fetchone()[0]
 filters = []
 try:
@@ -36,7 +39,7 @@ if outcomes:
         else:
             break
     if d == 'loss': streak = -streak
-activeDetails = [{"ticker": r[0], "direction": r[1]} for r in cur.execute("SELECT ticker, direction FROM auto_trades WHERE status='open' AND trade_mode='live'").fetchall()]
+activeDetails = [{"ticker": r[0], "direction": r[1], "trade_mode": r[2]} for r in cur.execute("SELECT ticker, direction, trade_mode FROM auto_trades WHERE status='open'").fetchall()]
 conn.close()
 print(json.dumps({"activeTrades": active, "recentSignals": signals, "filters": filters, "filterCount": len(filters), "streak": streak, "lastPnl": lastPnl, "activeTradeDetails": activeDetails}))
 `;

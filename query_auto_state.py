@@ -380,6 +380,73 @@ def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
+def _paper_window_state(cfg: dict) -> tuple[str, bool]:
+    """W4a: resolve the EFFECTIVE trading mode into (state, is_paper).
+
+    `cfg` is the already-fetched auto_config map, so a successful query with no
+    `PAPER_WINDOW_ENABLED` row is distinguishable from a query that never ran.
+    The caller supplies "error" on the exception path (the fail-safe out dict);
+    this function only ever sees a SUCCESSFUL read.
+
+      "on"     -> True   row present and EXACTLY 'true': the bot is paper-gated
+      "off"    -> False  row present and EXACTLY 'false': the bot executes live
+      "absent" -> True   NO USABLE VALUE — the row is missing, empty, or holds
+                         something that is neither literal. UNCONFIRMABLE,
+                         shown as PAPER? (never a bare LIVE, never a bare PAPER)
+
+    🚨 ONLY THE TWO EXACT LITERALS ARE RECOGNISED. An earlier draft of this
+    function mapped "anything not 'true'" to "off" — so a blank row, a 'yes', a
+    '1', or a stray 'None' would have rendered a CONFIDENT LIVE badge off a
+    value nobody could parse. That is the same false-confidence this whole
+    change exists to remove, reintroduced one `else` clause deep. A value we
+    cannot read is not evidence that the paper window is closed.
+
+    🚨 "absent" deliberately does NOT mirror the VM's DEFAULTS (config.py:410
+    maps an absent key to 'false' => the bot executes LIVE). Mirroring it here
+    would let a silently-deleted row render a confident LIVE badge. It also must
+    not render a confident PAPER: that would claim safety we cannot prove while
+    real money moves. It renders as UNCONFIRMED, which is the only honest answer.
+
+    NEVER hardcode a mode string against this — derive it (RP-C13's precedent).
+    """
+    raw = cfg.get("PAPER_WINDOW_ENABLED")
+    if raw is None:
+        return ("absent", True)
+    normalized = str(raw).strip().lower()
+    if normalized == "true":
+        return ("on", True)
+    if normalized == "false":
+        return ("off", False)
+    # Present but unreadable. Same honest answer as a missing row.
+    return ("absent", True)
+
+
+def _replica_age(now_utc: datetime) -> tuple[int | None, str | None]:
+    """W4a: age of the published read-only replica, from the mtime of the file
+    `DB` resolves to (on WSL, /home/trevor/trevor/trevor.db is a symlink to
+    /home/ghost/trevor-replica/trevor.db — the tailsync-published copy).
+
+    mtime is the right clock here, NOT MAX(created_at): the newest row answers
+    "when did the bot last trade", which on a quiet day is legitimately hours
+    old and would libel a perfectly fresh replica as stale. mtime answers "when
+    was this data published", which is the question an empty screen raises.
+
+    Mirrors the `_replica_age` idiom already used by drift-state/route.ts and
+    query_shadow_registry. Fails to (None, None) — the Hub then renders no age
+    claim at all, never a fabricated one.
+    """
+    try:
+        st = os.stat(os.path.realpath(DB))
+        return (
+            max(0, int(now_utc.timestamp() - st.st_mtime)),
+            datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+        )
+    except Exception:
+        return (None, None)
+
+
 def _cutover_epoch(conn: sqlite3.Connection) -> str:
     """V2 cutover epoch (B3): UTC 'YYYY-MM-DD HH:MM:SS' floor for every
     historical (closed-trade) read. Reads the SAME `auto_config` key B2 set
@@ -554,6 +621,34 @@ def main() -> int:
         "open_positions_count": 0,
         "auto_enabled": False,
         "live_enabled": False,
+        # W4a (2026-07-30): the EFFECTIVE trading mode. `live_enabled`
+        # (AUTO_LIVE_ENABLED) is the CONFIGURED execution flag and gates nothing
+        # on the bot; `PAPER_WINDOW_ENABLED` is the load-bearing v5 boundary gate
+        # (VM auto_trader/config.py:398 — "the load-bearing boundary gate for the
+        # v5 cutover"; live_executor._paper_window_on() branches on it). These are
+        # DIFFERENT facts and must never be collapsed into one badge.
+        #
+        # `paper_window_state` is the three-state authority the Hub badge derives
+        # from — a broken read and a deliberate state are different things:
+        #   "on"     row present, true      -> the bot is paper-gated   -> PAPER
+        #   "off"    row present, false     -> the bot executes live    -> LIVE
+        #   "absent" row missing            -> UNCONFIRMABLE            -> PAPER?
+        #   "error"  read threw / DB gone   -> UNKNOWN                  -> PAPER
+        # 🚨 "absent" is NOT "off". The VM's DEFAULTS
+        # (auto_trader/config.py:410) map an absent key to 'false' => the bot
+        # would execute LIVE, so rendering a confident PAPER there would be the
+        # inverse of the bug this fixes. It renders as unconfirmed instead.
+        # Default here is "error": this dict is what ships on the DB-missing and
+        # exception paths, and a failed read must never present as LIVE.
+        "paper_window_state": "error",
+        "paper_window_enabled": True,
+        # W4a: age of the read-only litestream replica this payload was built
+        # from (mtime of the published file, ~20 min lag by design). Surfaced so
+        # an empty screen never reads as "nothing happened" when the truth is
+        # "the replica has not caught up". None => the Hub renders no age claim
+        # rather than a false one.
+        "replica_age_seconds": None,
+        "replica_mtime_utc": None,
         "killswitch_on": False,
         "per_ticker_thresholds_enabled": False,
         "data_available": False,
@@ -573,7 +668,7 @@ def main() -> int:
                 SELECT key, value FROM auto_config
                 WHERE key IN (
                     'AUTO_TRADER_ENABLED', 'AUTO_LIVE_ENABLED',
-                    'EMERGENCY_KILLSWITCH'
+                    'EMERGENCY_KILLSWITCH', 'PAPER_WINDOW_ENABLED'
                 )
                 """
             ).fetchall()
@@ -598,12 +693,24 @@ def main() -> int:
             # stored state. None (empty table) → route renders "—" (fail-open).
             cutover_base = _cutover_starting_capital(conn, epoch)
 
-            # REALIZED source: every closed LIVE trade (closed_at naive EASTERN +
+            # REALIZED source: every closed trade (closed_at naive EASTERN +
             # pnl_usd). Bucketed in Python on ET-calendar boundaries (raw ET string
-            # compare, _et_window_starts). Paper trades excluded.
+            # compare, _et_window_starts).
+            #
+            # 🚨 W4a (2026-07-30): the `trade_mode='live'` filter is REMOVED. It
+            # was added by R2 (B1-ET-DAY-BOUNDARY) whose own comment read "Benign
+            # today (0 paper rows past the cutover)" — true when written, FALSE
+            # since PAPER_WINDOW_ENABLED went true on 2026-07-23. Measured on the
+            # WSL replica 2026-07-30: 11 closed trades past the cutover, 7 live +
+            # 4 paper, and the Hub was reporting 7. The filter was silently
+            # deleting a third of the record during a multi-week paper run.
+            #
+            # The window is now MODE-BLIND and every consumer LABELS instead. The
+            # AUTO_CUTOVER_EPOCH floor is deliberate and UNCHANGED (Ghost's law);
+            # measured, it excludes 0 of the 11 — it was never the cause.
             closed_rows = conn.execute(
                 "SELECT closed_at, pnl_usd, partial_pnl_realized FROM auto_trades "
-                "WHERE trade_mode='live' AND status='closed' AND closed_at >= ?",
+                "WHERE status='closed' AND closed_at >= ?",
                 (epoch,),
             ).fetchall()
 
@@ -618,13 +725,20 @@ def main() -> int:
                 "FROM auto_trades WHERE status='open'"
             ).fetchone()
 
-            # R2 (B1-ET-DAY-BOUNDARY): trade_mode='live' matches the window queries
-            # (closed_rows) — the only window query that was missing it. Benign
-            # today (0 paper rows past the cutover) but a paper trade would silently
-            # inflate the 'total' otherwise.
+            # W4a: mode-blind, matching closed_rows above. This is the query that
+            # rendered "7 total" on the capital hero while 11 trades existed.
             total_count_row = conn.execute(
                 "SELECT COUNT(*) AS n FROM auto_trades "
-                "WHERE trade_mode='live' AND status='closed' AND closed_at >= ?",
+                "WHERE status='closed' AND closed_at >= ?",
+                (epoch,),
+            ).fetchone()
+
+            # W4a: how many of that window are PAPER — drives the hero's PAPER
+            # label. Counted from the SAME epoch-floored window so the label can
+            # never disagree with the number it sits beside.
+            paper_count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM auto_trades "
+                "WHERE status='closed' AND closed_at >= ? AND trade_mode='paper'",
                 (epoch,),
             ).fetchone()
 
@@ -644,6 +758,12 @@ def main() -> int:
             #     real start-of-day equity via get_equity_at — untouched.
             # None for any window whose base is missing → UI renders "—".
             now_utc = datetime.now(UTC)
+
+            # W4a: the EFFECTIVE trading mode + the replica's publish age. Both
+            # derive here, inside the successful-read branch, so the fail-safe
+            # `out` defaults ("error"/None) survive untouched on any throw.
+            _pw_state, _pw_is_paper = _paper_window_state(cfg)
+            _replica_age_s, _replica_mtime = _replica_age(now_utc)
 
             # RM-EQUITY-RESTORE B1: true live account value + freshness, read from
             # the SAME mode=ro connection (display-only, no HL call, never writes).
@@ -764,9 +884,20 @@ def main() -> int:
             "pnl_today_pct": realized_pct["today"] if realized_pct["today"] is not None else 0.0,
             "trades_today": win["realized_count"]["today"],
             "trades_total": int(total_count_row["n"] or 0),
+            # W4a: how many of `trades_total` are paper — the hero's PAPER label.
+            "trades_paper_count": int(paper_count_row["n"] or 0),
             "open_positions_count": open_count,
             "auto_enabled":  str(cfg.get("AUTO_TRADER_ENABLED", "false")).lower() == "true",
+            # CONFIGURED execution flag. Deliberately kept and deliberately named
+            # apart from the effective mode below — it gates nothing on the bot,
+            # and conflating the two is what rendered a LIVE badge over 1,524
+            # [PAPER-BLOCK] lines. Do not source a mode badge from this.
             "live_enabled":  str(cfg.get("AUTO_LIVE_ENABLED", "false")).lower() == "true",
+            # W4a: the EFFECTIVE mode — what the bot actually gates on.
+            "paper_window_state": _pw_state,
+            "paper_window_enabled": _pw_is_paper,
+            "replica_age_seconds": _replica_age_s,
+            "replica_mtime_utc": _replica_mtime,
             "killswitch_on": str(cfg.get("EMERGENCY_KILLSWITCH", "false")).lower() == "true",
             "per_ticker_thresholds_enabled": _per_ticker_enabled(),
             "data_available": True,

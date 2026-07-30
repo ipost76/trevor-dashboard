@@ -29,7 +29,9 @@ interface OpenPosition {
   opened_at: string | null;
   peak_pnl_pct?: number | null;
   exit_signals_log?: string | null;
-  trade_mode?: "live" | "paper";
+  // W4a: null on a THIN card — heartbeat-only, the replica row carrying the
+  // mode has not arrived. Genuinely unknown, and rendered as such.
+  trade_mode?: "live" | "paper" | null;
   // KPI-RECON: true ⇒ live-from-heartbeat but not yet in the replica (thin card).
   thin?: boolean;
 }
@@ -204,14 +206,29 @@ function PositionRow({ p, live }: { p: EnrichedPosition; live: boolean }) {
     <li className="flex flex-col gap-2 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          {p.trade_mode && (
-            <Pill
-              intent={p.trade_mode === "live" ? "live" : "warn"}
-              size="sm"
-            >
-              {p.trade_mode}
-            </Pill>
-          )}
+          {/* 🚨 W4a: the mode marker on the open position — the card Ghost will
+              be staring at when the first entry lands. Three renders, and the
+              absent case is NOT silent: an unlabelled position card reads as
+              real money, so a card whose mode we could not resolve says so
+              explicitly rather than showing nothing. `live` is the only value
+              that renders the confident LIVE pill. */}
+          <Pill
+            intent={p.trade_mode === "live" ? "live" : "warn"}
+            size="sm"
+            title={
+              p.trade_mode === "live"
+                ? "Real order placed on the exchange"
+                : p.trade_mode === "paper"
+                  ? "Simulated position — no order was sent to the exchange"
+                  : "Mode not yet known for this position — its detail has not replicated. Treat as unconfirmed."
+            }
+          >
+            {p.trade_mode === "live"
+              ? "LIVE"
+              : p.trade_mode === "paper"
+                ? "PAPER"
+                : "MODE?"}
+          </Pill>
           {/* KPI-RECON: live-but-not-yet-replicated — its detail is still syncing. */}
           {p.thin && (
             <Pill intent="warn" size="sm">

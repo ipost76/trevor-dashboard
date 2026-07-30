@@ -169,7 +169,13 @@ export async function GET(req: NextRequest) {
             opened_at: null,
             peak_pnl_pct: null,
             exit_signals_log: null,
-            trade_mode: "live",
+            // 🚨 W4a: was hardcoded `"live"`. A thin card is built from heartbeat
+            // fields ONLY — the replica row that carries `trade_mode` has not
+            // arrived yet, so the mode is genuinely unknown here and asserting
+            // "live" was a fabricated claim that would have labelled a paper
+            // position as real money. null => the card renders an explicit
+            // unconfirmed pill, never a confident LIVE. NEVER hardcode a mode.
+            trade_mode: null,
             thin: true,
           };
         });

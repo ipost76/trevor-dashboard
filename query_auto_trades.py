@@ -25,14 +25,28 @@ JSON output for type='closed':
     "count": <N>,
     "trades": [
       { id, ticker, direction, pnl_pct, pnl_usd, hold_duration_minutes,
-        opened_at, closed_at, exit_reason, trade_mode }
+        opened_at, closed_at, exit_reason, trade_mode, exit_layer }
     ]
   }
 
+🚨 `exit_layer` (W4a, additive) is the Smart-Exit layer that fired, stored as
+an INTEGER with FRACTIONAL layers ×10: layer 6.5 is stored `65`, layer 6.2 is
+`62`. Measured all-time on the WSL replica 2026-07-30: 0(129) 1(46) 4(36)
+6(747) 7(20) 62(12) 65(99) — and layers 3 (breakeven) and 45 (=4.5, ratchet)
+have NEVER fired, so their first appearance is a first-ever event. Render it,
+do not arithmetic on it, and never divide by 10 without checking for a real
+sub-10 layer first.
+
 Notes:
 - READ-ONLY (`file:...?mode=ro`).
-- Both queries filter by `trade_mode='live'` per D3 spec — paper trades
-  are not surfaced through the new AUTO endpoints.
+- 🚨 W4a (2026-07-30): the `trade_mode='live'` filter is REMOVED from BOTH
+  queries. The D3 spec it implemented ("paper trades are not surfaced through
+  the new AUTO endpoints") predates the v5 paper window and is superseded:
+  while `PAPER_WINDOW_ENABLED` is true EVERY new trade is written
+  `trade_mode='paper'`, so that filter made the entire live run invisible —
+  the open-position card could never render a position at all, and the RECENT
+  list showed 7 of 11 closed trades. Both queries are now MODE-BLIND and
+  return `trade_mode` per row so the surface LABELS instead of hiding.
 - `confidence` and stop/target prices are preserved on open positions so
   D1's ActivePositionCard fmtPrice + future PositionCards keep their data.
 
@@ -60,6 +74,25 @@ DB = "/home/trevor/trevor/trevor.db"
 
 def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
+
+
+def _replica_age_seconds() -> int | None:
+    """W4a: age of the published read-only replica, from the mtime of the file
+    `DB` resolves to. Mirrors query_auto_state._replica_age (same idiom as
+    drift-state/route.ts) so the two surfaces cannot report different ages for
+    the same file. Returns None on any failure — the Hub then renders no
+    freshness claim at all, rather than a fabricated one.
+    """
+    try:
+        import os
+
+        st = os.stat(os.path.realpath(DB))
+        return max(
+            0,
+            int(datetime.now(timezone.utc).timestamp() - st.st_mtime),
+        )
+    except Exception:
+        return None
 
 
 def _cutover_epoch(conn: sqlite3.Connection) -> str:
@@ -124,13 +157,18 @@ def fetch_open(limit: int) -> dict:
                    leverage, confidence, notional_usd, opened_at,
                    exit_signals_log, peak_pnl_pct, trade_mode
             FROM auto_trades
-            WHERE status='open' AND trade_mode='live'
+            WHERE status='open'
             ORDER BY opened_at DESC
             LIMIT {limit}
             """
         )
         rows = _rows_to_dicts(cur)
-    return {"type": "open", "count": len(rows), "positions": rows}
+    return {
+        "type": "open",
+        "count": len(rows),
+        "positions": rows,
+        "replica_age_seconds": _replica_age_seconds(),
+    }
 
 
 def fetch_closed(
@@ -151,7 +189,8 @@ def fetch_closed(
         # opened_at + exactly 4h on every row, and UTC = EDT + 4h, so
         # opened_at/closed_at are EDT. Lexical >= / < on the fixed-width string is
         # therefore chronological ET comparison — no timezone conversion.
-        where = "status='closed' AND trade_mode='live' AND closed_at >= ?"
+        # W4a: mode-blind (see the module docstring). The cutover floor stays.
+        where = "status='closed' AND closed_at >= ?"
         params: list = [epoch]
 
         # B2: OPTIONAL inclusive ET date range -> half-open [lo, hi) ET-string
@@ -176,7 +215,7 @@ def fetch_closed(
             f"""
             SELECT id, ticker, direction, pnl_pct, pnl_usd,
                    hold_duration_minutes, opened_at, closed_at, exit_reason,
-                   trade_mode
+                   trade_mode, exit_layer
             FROM auto_trades
             WHERE {where}
             GROUP BY id
@@ -196,7 +235,12 @@ def fetch_closed(
         # distinct trades (would merge & hide one), violating "never drop a real
         # closed trade".
         rows = _rows_to_dicts(cur)
-    return {"type": "closed", "count": len(rows), "trades": rows}
+    return {
+        "type": "closed",
+        "count": len(rows),
+        "trades": rows,
+        "replica_age_seconds": _replica_age_seconds(),
+    }
 
 
 def main() -> int:

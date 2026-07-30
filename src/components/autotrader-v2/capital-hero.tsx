@@ -10,6 +10,13 @@ import {
   BottomSheet,
   HapticButton,
 } from "@/components/ui";
+import { ReplicaAge } from "@/lib/replica-age";
+import {
+  normalizePaperWindowState,
+  isPaperMode,
+  isModeConfirmed,
+  type PaperWindowState,
+} from "@/lib/trading-mode";
 import { TrendingUp } from "lucide-react";
 
 // RM-PNL P01 (2026-05-29): Auto Capital = REALIZED-only headline.
@@ -69,6 +76,12 @@ interface AutoState {
   // legacy back-compat (still read for the equity figure if equity_usd absent)
   equity?: number;
   trades_total?: number;
+  // W4a: how many of trades_total are trade_mode='paper', and the EFFECTIVE
+  // mode. Drive the PAPER label from these — never from `live_enabled`.
+  trades_paper_count?: number;
+  paper_window_state?: PaperWindowState;
+  // W4a: age of the replica these figures were read from.
+  replica_age_seconds?: number | null;
   data_available: boolean;
 }
 
@@ -300,6 +313,15 @@ export function CapitalHero() {
   const openMargin = data?.open_margin_usd ?? 0;
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
+  // 🚨 W4a: this headline blends paper and live P&L (correct — mode-blind
+  // windows are what make a paper run visible at all), so it MUST carry a label
+  // or a paper figure reads as real cash. Same fail direction as the badge:
+  // an absent field is a failed read and lands in a paper-coloured state, never
+  // a silent "this is real money".
+  const paperCount = data?.trades_paper_count ?? 0;
+  const pwState = normalizePaperWindowState(data?.paper_window_state);
+  const paperMode = isPaperMode(pwState);
+  const modeConfirmed = isModeConfirmed(pwState);
 
   // WA-P2: `custom` is absent on a preset payload (and momentarily while a custom
   // fetch is in flight) — guard so a hero number is never undefined. A missing
@@ -331,13 +353,22 @@ export function CapitalHero() {
           <TrendingUp size={12} aria-hidden />
           Auto Capital
         </span>
-        <Pill
-          tone="cyan"
-          size="sm"
-          className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
-        >
-          REALIZED
-        </Pill>
+        <div className="flex items-center gap-2">
+          {/* W4a: the PAPER marker sits ON the money card, beside REALIZED, so
+              the headline $ can never be read as real cash during the run. */}
+          {!loading && data && paperMode && (
+            <Pill intent="warn" size="sm">
+              {modeConfirmed ? "PAPER" : "PAPER?"}
+            </Pill>
+          )}
+          <Pill
+            tone="cyan"
+            size="sm"
+            className="bg-accent-cyan-soft/10 text-accent-cyan-soft-strong border-accent-cyan-soft/30"
+          >
+            REALIZED
+          </Pill>
+        </div>
       </div>
 
       {loading && <Skeleton className="h-40 w-full" />}
@@ -383,6 +414,21 @@ export function CapitalHero() {
               {headlineCount} closed {headlineCount === 1 ? "trade" : "trades"} · open
               positions count $0 until closed
             </span>
+            {/* W4a: says plainly that the figure above is not money. Shown only
+                while paper trades are actually in the window — once the window
+                closes and live trades age past it, this disappears by itself. */}
+            {paperMode && paperCount > 0 && (
+              <span className="block font-sans text-micro text-accent-gold">
+                Includes {paperCount} paper{" "}
+                {paperCount === 1 ? "trade" : "trades"} — simulated, not money.
+              </span>
+            )}
+            {/* W4a: the data's age. An empty window must never be mistaken for a
+                stale one — see src/lib/replica-age.tsx. */}
+            <ReplicaAge
+              ageSeconds={data.replica_age_seconds}
+              className="block pt-0.5"
+            />
             {/* WA-P2: the applied custom span, so the headline's scope is legible. */}
             {isCustomActive && customStart && customEnd && (
               <span className="block font-sans text-micro text-accent-cyan-soft-strong">
@@ -470,7 +516,9 @@ export function CapitalHero() {
                 isCustomActive && customStart && customEnd
                   ? `${fmtDay(customStart)}–${fmtDay(customEnd)}`
                   : windowLabel.toLowerCase()
-              } · ${totalCount.toLocaleString()} total`}
+              } · ${totalCount.toLocaleString()} total${
+                paperCount > 0 ? ` (${paperCount} paper)` : ""
+              }`}
             />
             <MetricTile label="Open" value={String(openCount)} sub="positions" />
           </div>

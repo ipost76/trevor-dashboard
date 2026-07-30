@@ -112,7 +112,12 @@ def fetch_open_trades() -> list[dict]:
                    partial_exits_taken, partial_pnl_realized,
                    risk_dollars_at_entry, risk_pct_at_entry
             FROM auto_trades
-            WHERE status='open' AND trade_mode='live'
+            -- W4a (2026-07-30): mode-blind. Under PAPER_WINDOW_ENABLED every
+            -- open position is trade_mode='paper', so the live-only filter left
+            -- this panel permanently empty and Ghost with no exit posture
+            -- (breakeven armed? ratchet floor? partials taken?) for the trade
+            -- he is actually running.
+            WHERE status='open'
             ORDER BY opened_at DESC
             """
         )
