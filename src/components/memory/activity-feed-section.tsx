@@ -10,15 +10,29 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Download, Newspaper } from "lucide-react";
+import { ChevronDown, Download, Newspaper, Trash2 } from "lucide-react";
 import { DigestMarkdown } from "./digest-markdown";
 import { DigestDownloadSheet } from "./digest-download-sheet";
 
-// Activity feed [B7] — READ-ONLY per-day nightly-digest cards.
+// Activity feed [B7] — per-day nightly-digest cards. READ-ONLY except for the
+// D2 delete control (below).
 //
 // The nightly digest is generated ON THE VM (B1-B6) and written to the
 // `digest` table in the live trevor.db; litestream replicates it to the
-// read-only replica this Hub reads. Nothing here writes anything, anywhere.
+// read-only replica this Hub READS.
+//
+// 🚨 D2 (2026-07-31) — THE ONE WRITE. Every read on this surface still comes
+// from the read-only replica. The per-card delete is the sole exception: it
+// calls DELETE /api/health/digests/<date>, which reaches the VM LIVE db (a
+// replica write is refused outright and would silently revert on the next
+// ~20-min tailsync). Authority: BEHAVIOR_RULES Rule 15 exception #2
+// (Ghost-directed, 2026-07-31, D1) — `digest` only, bounded to one named
+// digest_date. It NEVER GENERALIZES; do not add a second delete here.
+//
+// 🚨 THE DELETE IS HARD (Ghost's explicit choice — not a soft-hide) and the
+// confirm is TWO-STEP by position, not just by count: the confirm bar renders
+// BELOW the header and puts Cancel where the trash icon was, so a double-tap on
+// the same spot lands on Cancel. Confirm is never under the first click.
 //
 // One card per digest_date, newest first. The card face is the flat preview
 // columns (no JSON parsing); expanding a card fetches body_md and renders it
@@ -178,29 +192,91 @@ function replicaLabel(seconds: number | null | undefined): string | null {
   return mins < 1 ? "REPLICA <1m" : `REPLICA ~${mins}m`;
 }
 
+/* ---------------------------------------------------------------- delete -- */
+
+// 🚨 The UI owns its own copy, keyed on the route's structured `outcome`. The
+// helper's `error` string is NEVER rendered — a helper string reaching
+// user-facing copy is the F1 defect class, and this is the one surface where a
+// misleading sentence could make someone believe data is gone when it is not.
+// An unrecognised outcome falls through to the honest unknown-state sentence
+// rather than to a reassuring default.
+function deleteFailureCopy(outcome: string | undefined): string {
+  switch (outcome) {
+    case "not_found":
+      return "That digest was already gone — nothing was deleted. The list will refresh.";
+    case "refused_multi":
+    case "refused_rowcount":
+      return "Refused: the delete would not have matched exactly one digest, so it was rolled back. Nothing was deleted.";
+    case "invalid_date":
+      return "That date was rejected before it reached the database. Nothing was deleted.";
+    case "vm_unreachable":
+      return "Couldn't reach the live database, so nothing was deleted. The digest is still there — try again shortly.";
+    default:
+      return "The delete did not complete. Treat this digest as still present until the list refreshes and shows otherwise.";
+  }
+}
+
+type DeletePhase = "idle" | "confirming" | "deleting" | "error";
+
+interface DeleteState {
+  phase: DeletePhase;
+  outcome?: string;
+}
+
+// Shared frozen default so an un-touched card does not get a fresh object every
+// render (which would defeat the effect's dependency check).
+const IDLE_DELETE: DeleteState = { phase: "idle" };
+
 /* ------------------------------------------------------------------ card -- */
 
 function DigestCard({
   d,
   expanded,
   detail,
+  del,
   onToggle,
   onDownload,
+  onDeleteRequest,
+  onDeleteConfirm,
+  onDeleteCancel,
 }: {
   d: DigestPreview;
   expanded: boolean;
   detail: DetailState | undefined;
+  del: DeleteState;
   onToggle: () => void;
   onDownload: () => void;
+  onDeleteRequest: () => void;
+  onDeleteConfirm: () => void;
+  onDeleteCancel: () => void;
 }) {
   const meta = severityMeta(d.top_severity);
   const panelId = `digest-panel-${d.digest_date}`;
   const errors = d.errors_24h;
 
+  const confirmId = `digest-confirm-${d.digest_date}`;
+  const trashRef = React.useRef<HTMLButtonElement>(null);
+  const cancelRef = React.useRef<HTMLButtonElement>(null);
+  const confirming = del.phase === "confirming" || del.phase === "deleting";
+  const busy = del.phase === "deleting";
+
+  // Cancel takes focus when the confirm bar opens — the safe action is the
+  // default for the keyboard exactly as it is for the pointer.
+  React.useEffect(() => {
+    if (del.phase === "confirming") cancelRef.current?.focus();
+  }, [del.phase]);
+
+  const cancel = React.useCallback(() => {
+    onDeleteCancel();
+    // Return focus to where the interaction started.
+    trashRef.current?.focus();
+  }, [onDeleteCancel]);
+
   return (
     <Card padding="md" className={cn("border-l-4", meta.border)}>
-      {/* Header row — the toggle and the download control are siblings, never
-          nested (a button inside a button is invalid and breaks keyboard nav). */}
+      {/* Header row — the toggle, download and delete controls are siblings,
+          never nested (a button inside a button is invalid and breaks keyboard
+          nav). */}
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -232,7 +308,79 @@ function DigestCard({
         >
           <Download size={14} aria-hidden />
         </button>
+        {/* STEP 1. Deliberately gold-bordered, so it reads as destructive and
+            cannot be mistaken for the cyan download control beside it. It only
+            ever OPENS the confirm bar — this button never deletes anything. */}
+        <button
+          ref={trashRef}
+          type="button"
+          onClick={onDeleteRequest}
+          disabled={confirming}
+          aria-expanded={confirming}
+          aria-controls={confirmId}
+          aria-label={`Delete the ${d.digest_date} digest`}
+          className="tap-target shrink-0 rounded-md border border-accent-gold/40 px-2 py-1.5 text-accent-gold transition-colors duration-fast hover:border-accent-gold hover:text-accent-gold-strong focus-visible:outline-2 focus-visible:outline-accent-gold/60 focus-visible:outline-offset-2 disabled:opacity-40"
+        >
+          <Trash2 size={14} aria-hidden />
+        </button>
       </div>
+
+      {/* STEP 2 — the confirm bar. Rendered BELOW the header, never over it, so
+          the destructive button is not where the first click landed. Cancel sits
+          on the RIGHT, under the trash icon: a double-tap in the same spot hits
+          Cancel. Escape cancels. */}
+      {confirming && (
+        <div
+          id={confirmId}
+          role="group"
+          aria-label={`Confirm deleting the ${d.digest_date} digest`}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !busy) {
+              e.stopPropagation();
+              cancel();
+            }
+          }}
+          className="mt-3 rounded-md border border-accent-gold/40 bg-accent-gold/5 p-3"
+        >
+          <p className="font-sans text-caption text-fg-primary">
+            Delete the {fmtDate(d.digest_date)} digest?
+          </p>
+          <p className="mt-1 font-sans text-micro text-fg-muted">
+            This removes it from the live database for good. It cannot be undone
+            from here.
+          </p>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={onDeleteConfirm}
+              disabled={busy}
+              className="tap-target rounded-md border border-accent-red/60 px-3 py-1.5 font-sans text-caption text-accent-red transition-colors duration-fast hover:border-accent-red hover:bg-accent-red/10 focus-visible:outline-2 focus-visible:outline-accent-red/60 focus-visible:outline-offset-2 disabled:opacity-50"
+            >
+              {busy ? "Deleting…" : "Confirm delete"}
+            </button>
+            <button
+              ref={cancelRef}
+              type="button"
+              onClick={cancel}
+              disabled={busy}
+              className="tap-target rounded-md border border-border-strong px-3 py-1.5 font-sans text-caption text-fg-primary transition-colors duration-fast hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-accent-cyan/60 focus-visible:outline-offset-2 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* A failed delete is stated on the card, and the card STAYS. A card that
+          vanishes on a delete that did not happen is the worst outcome here. */}
+      {del.phase === "error" && (
+        <p
+          role="alert"
+          className="mt-3 rounded-md border border-accent-gold/40 bg-accent-gold/5 p-3 font-sans text-caption leading-relaxed text-accent-gold-strong"
+        >
+          {deleteFailureCopy(del.outcome)}
+        </p>
+      )}
 
       {/* Preview metrics — straight from the flat card columns, no JSON parse. */}
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -333,6 +481,9 @@ export function ActivityFeedSection() {
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState<Record<string, DetailState>>({});
   const [sheetDate, setSheetDate] = React.useState<string | null>(null);
+  // Keyed by digest_date. Holds the route's structured `outcome`, never a
+  // message — the copy is chosen at render time by deleteFailureCopy().
+  const [deletes, setDeletes] = React.useState<Record<string, DeleteState>>({});
   // Print source. Deliberately NOT the expanded card's DOM: a user can hit
   // Download on a collapsed card, so the printable copy is rendered off-screen
   // for whichever digest the sheet is open on, independent of expansion.
@@ -410,6 +561,67 @@ export function ActivityFeedSection() {
     },
     [details, loadDetail],
   );
+
+  /* ---------------------------------------------------------------- delete -- */
+
+  // 🚨 Only ONE card may be in a confirm/deleting state at a time. Opening a
+  // second confirm closes the first, so there is never an armed delete sitting
+  // off-screen waiting for a stray Enter.
+  const requestDelete = React.useCallback((date: string) => {
+    setDeletes({ [date]: { phase: "confirming" } });
+  }, []);
+
+  const cancelDelete = React.useCallback((date: string) => {
+    setDeletes((prev) => {
+      if (prev[date]?.phase === "deleting") return prev; // in flight — not cancellable
+      const next = { ...prev };
+      delete next[date];
+      return next;
+    });
+  }, []);
+
+  const confirmDelete = React.useCallback(async (date: string) => {
+    setDeletes({ [date]: { phase: "deleting" } });
+    try {
+      const res = await fetch(
+        `/api/health/digests/${encodeURIComponent(date)}`,
+        { method: "DELETE", cache: "no-store" },
+      );
+      let outcome: string | undefined;
+      try {
+        const j = (await res.json()) as { outcome?: string };
+        outcome = typeof j?.outcome === "string" ? j.outcome : undefined;
+      } catch {
+        outcome = undefined;
+      }
+
+      // 🚨 SUCCESS IS NARROW ON PURPOSE: HTTP 200 *and* outcome==="deleted".
+      // Anything else — including a 200 whose body we could not read — keeps the
+      // card and shows an error. Never remove a card on an unconfirmed delete.
+      if (res.ok && outcome === "deleted") {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                digests: (prev.digests ?? []).filter(
+                  (x) => x.digest_date !== date,
+                ),
+                total: Math.max(0, (prev.total ?? 1) - 1),
+                returned: Math.max(0, (prev.returned ?? 1) - 1),
+              }
+            : prev,
+        );
+        setExpanded((cur) => (cur === date ? null : cur));
+        setDeletes({});
+        return;
+      }
+      setDeletes({ [date]: { phase: "error", outcome } });
+    } catch {
+      // Transport failure — the delete may or may not have landed. Say exactly
+      // that (the default copy branch) rather than guessing either way.
+      setDeletes({ [date]: { phase: "error", outcome: undefined } });
+    }
+  }, []);
 
   const digests = data?.digests ?? [];
   const sheetDetail = sheetDate ? details[sheetDate] : undefined;
@@ -504,8 +716,12 @@ export function ActivityFeedSection() {
             d={d}
             expanded={expanded === d.digest_date}
             detail={details[d.digest_date]}
+            del={deletes[d.digest_date] ?? IDLE_DELETE}
             onToggle={() => toggle(d.digest_date)}
             onDownload={() => openDownload(d.digest_date)}
+            onDeleteRequest={() => requestDelete(d.digest_date)}
+            onDeleteConfirm={() => void confirmDelete(d.digest_date)}
+            onDeleteCancel={() => cancelDelete(d.digest_date)}
           />
         ))}
       </div>
