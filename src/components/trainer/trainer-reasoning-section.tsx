@@ -2,6 +2,7 @@
 import * as React from "react";
 import { EmptyState, Pill, Skeleton } from "@/components/ui";
 import { fmtAge } from "@/components/watcher/watcher-format";
+import { plainGate } from "@/lib/plain-labels";
 
 // TRAINER · "reasoning" sub-tab. The "why it was rejected" narrative from
 // /api/trainer/reasoning (trainer.db rejection_log): the checks that failed, the
@@ -42,23 +43,34 @@ function chance(v: number | null | undefined): string {
   return p < 0.1 && p > 0 ? "<0.1%" : `${p.toFixed(1)}%`;
 }
 /** snake_case / kebab-case → Title Case English. */
-function titleCase(raw: string): string {
-  const words = raw.replace(/[_-]+/g, " ").trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  return words
-    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(" ");
-}
 // failing_gates may be an array of names or an object {gate: bool} — render as chips.
-function gateNames(g: unknown): string[] {
-  if (Array.isArray(g)) return g.map((x) => String(x));
-  if (g && typeof g === "object") {
-    return Object.entries(g as Record<string, unknown>)
-      .filter(([, v]) => v === true || v === 1 || v === "fail")
-      .map(([k]) => k);
+//
+// 🚨 F1: ALLOWLISTED. These were rendered through a titleCase() that only
+// swapped separators and capitalised, so a gate arrived on screen as "Dd
+// ceiling" — a raw identifier wearing a capital letter. Gate names come from
+// compass_metrics.py / trainer_validation.py and may carry a parenthesised
+// reason, which plainGate() strips before lookup. Labels are de-duplicated
+// because two variants of one gate collapse to a single label (and would
+// otherwise collide as React keys).
+function gateNames(g: unknown): { names: string[]; dropped: number } {
+  const raw: string[] = [];
+  if (Array.isArray(g)) raw.push(...g.map((x) => String(x)));
+  else if (g && typeof g === "object") {
+    raw.push(
+      ...Object.entries(g as Record<string, unknown>)
+        .filter(([, v]) => v === true || v === 1 || v === "fail")
+        .map(([k]) => k),
+    );
+  } else if (typeof g === "string" && g.trim()) raw.push(g);
+
+  const names: string[] = [];
+  let dropped = 0;
+  for (const r of raw) {
+    const label = plainGate(r);
+    if (label === null) dropped++;
+    else if (!names.includes(label)) names.push(label);
   }
-  if (typeof g === "string" && g.trim()) return [g];
-  return [];
+  return { names, dropped };
 }
 
 export function TrainerReasoningSection() {
@@ -116,11 +128,14 @@ export function TrainerReasoningSection() {
                 <span className="font-sans text-caption leading-relaxed text-fg-primary">
                   {r.rationale ?? "—"}
                 </span>
-                {gates.length > 0 && (
+                {(gates.names.length > 0 || gates.dropped > 0) && (
                   <div className="flex flex-wrap items-center gap-1">
-                    {gates.map((g) => (
-                      <Pill key={g} intent="warn" size="sm">{titleCase(g)}</Pill>
+                    {gates.names.map((g) => (
+                      <Pill key={g} intent="warn" size="sm">{g}</Pill>
                     ))}
+                    {gates.dropped > 0 && (
+                      <Pill tone="neutral" size="sm">{`+${gates.dropped} more`}</Pill>
+                    )}
                   </div>
                 )}
                 <span className="font-sans text-micro text-fg-faint">

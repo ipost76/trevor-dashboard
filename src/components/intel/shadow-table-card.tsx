@@ -2,6 +2,7 @@
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { plainMetric } from "@/lib/plain-labels";
 
 export type ShadowStatus = "ACTIVE" | "BROKEN" | "STALE" | "DORMANT";
 
@@ -40,10 +41,6 @@ function fmtAge(iso: string | null | undefined): string {
   return `${Math.floor(ageSec / 86400)}d ago`;
 }
 
-function fmtKey(k: string): string {
-  return k.replace(/_/g, " ");
-}
-
 function fmtVal(v: string | number): string {
   if (typeof v === "number") {
     if (Number.isInteger(v)) return v.toLocaleString();
@@ -66,7 +63,21 @@ function StatusPill({ status }: { status: ShadowStatus }) {
 }
 
 export function ShadowTableCard({ info }: { info: ShadowTableInfo }) {
-  const keyEntries = Object.entries(info.key_stat ?? {}).slice(0, 4);
+  // 🚨 F1: ALLOWLISTED. This walked an arbitrary per-table `key_stat` dict and
+  // labelled each row with fmtKey() — which only swapped underscores for spaces,
+  // so "total_48h" became "total 48h". A de-underscored identifier is still an
+  // identifier. Keys come from query_shadow_status.py's `_ks_*` functions; the
+  // complete set of 29 is mapped in plain-labels.ts, and anything else is
+  // counted rather than named.
+  const named: Array<[string, string | number]> = [];
+  let droppedKeys = 0;
+  for (const [k, v] of Object.entries(info.key_stat ?? {})) {
+    const label = plainMetric(k);
+    if (label === null) droppedKeys++;
+    else named.push([label, v]);
+  }
+  const keyEntries = named.slice(0, 4);
+  droppedKeys += Math.max(0, named.length - 4);
 
   return (
     <Card padding="md" className={cn(CARD_CLASS[info.status], "flex flex-col gap-3")}>
@@ -110,36 +121,41 @@ export function ShadowTableCard({ info }: { info: ShadowTableInfo }) {
         </div>
       </div>
 
-      {keyEntries.length > 0 && (
+      {(keyEntries.length > 0 || droppedKeys > 0) && (
         <div className="space-y-1 border-t border-border-subtle pt-2">
-          {keyEntries.map(([k, v]) => (
-            <div key={k} className="flex items-center justify-between gap-2">
-              <span className="truncate font-sans text-micro uppercase tracking-wider text-fg-muted" title={fmtKey(k)}>
-                {fmtKey(k)}
+          {keyEntries.map(([label, v]) => (
+            <div key={label} className="flex items-center justify-between gap-2">
+              <span className="truncate font-sans text-micro uppercase tracking-wider text-fg-muted" title={label}>
+                {label}
               </span>
               <span className="font-mono text-micro tabular-nums text-fg-primary">
                 {fmtVal(v)}
               </span>
             </div>
           ))}
+          {droppedKeys > 0 && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-sans text-micro uppercase tracking-wider text-fg-faint">
+                more
+              </span>
+              <span className="font-mono text-micro tabular-nums text-fg-faint">
+                +{droppedKeys}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
+      {/* F1: this printed `info.error`, which query_shadow_status.py builds as
+          "key_stat error: <the raw Python exception>". The raw exception is now
+          neither shown nor tooltipped — the card states the fact instead. */}
       {info.error && (
-        <div
-          className="truncate font-sans text-micro italic text-accent-red"
-          title={info.error}
-        >
-          {info.error}
+        <div className="font-sans text-micro italic text-accent-red">
+          The extra statistics for this shadow could not be read.
         </div>
       )}
-
-      <div
-        className="mt-auto truncate font-mono text-micro text-fg-muted/60"
-        title={info.table_name}
-      >
-        {info.table_name}
-      </div>
+      {/* F1: the raw backing-table name that used to sit in this footer is gone;
+          the card's title already identifies the shadow. */}
     </Card>
   );
 }

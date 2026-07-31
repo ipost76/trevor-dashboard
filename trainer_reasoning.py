@@ -209,6 +209,37 @@ def _summarize(verdict: Any, compass_result: Any) -> Dict[str, Any]:
             "leakage": leakage, "dsr": dsr, "p_value": p_value, "discovery": discovery}
 
 
+# 🚨 F1 — plain English for the two identifier sets that reach the SCREEN.
+#
+# `rationale_text` is rendered verbatim by the Hub's TRAINER → reasoning sub-tab,
+# so every identifier baked in here lands on Ghost's monitoring surface. This is
+# the third instance of the same defect found in the Python layer: the leak is
+# MINTED here, and a TSX sweep can never see it. Unmapped names degrade to a
+# neutral word — never to the raw identifier.
+_GATE_LABELS = {
+    "dd_ceiling": "the drawdown limit",
+    "cvar_floor": "the tail-risk floor",
+    "sample_floor_n": "the sample-size floor",
+    "n_trials": "the trials budget",
+    "leakage_reject": "the data-leakage check",
+}
+_METRIC_LABELS = {
+    "dsr": "deflated Sharpe",
+    "p_value": "chance it was luck",
+    "pbo": "overfit probability",
+    "confidence": "confidence",
+    "consistency": "consistency",
+    "magnitude": "magnitude",
+    "blend_score": "blend score",
+}
+
+
+def _gate_label(name: Any) -> str:
+    """Plain English for a gate name, tolerating a "(reason)" suffix."""
+    base = str(name).split("(", 1)[0].strip()
+    return _GATE_LABELS.get(base, "another check")
+
+
 def _template_rationale(summary: Dict[str, Any]) -> str:
     """A DETERMINISTIC legible rationale from the decided verdict's failing gates +
     numbers — the no-LLM fallback. Reads the verdict; never re-decides."""
@@ -222,17 +253,25 @@ def _template_rationale(summary: Dict[str, Any]) -> str:
         label = summary["labels"][0] if summary["labels"] else "no verdict"
         gates = summary["failing_gates"]
         if gates:
-            parts = [f"{label}: failing {', '.join(gates[:4])}"]
+            named = []
+            for g in gates[:4]:
+                lbl = _gate_label(g)
+                if lbl not in named:
+                    named.append(lbl)
+            parts = [f"{label}: failing {', '.join(named)}"]
         else:
             parts = [f"{label}: no failing gates recorded"]
     nums = []
     for k in ("dsr", "p_value", "pbo", "confidence", "consistency", "magnitude", "blend_score"):
         v = summary["metrics"].get(k)
         if v is not None:
+            lbl = _METRIC_LABELS.get(k)
+            if lbl is None:
+                continue
             try:
-                nums.append(f"{k}={float(v):.4g}")
+                nums.append(f"{lbl} {float(v):.4g}")
             except (TypeError, ValueError):
-                nums.append(f"{k}={v}")
+                nums.append(f"{lbl} {v}")
     if nums:
         parts.append("[" + ", ".join(nums[:4]) + "]")
     return " ".join(parts)[:400]

@@ -325,7 +325,11 @@ function DigestCard({
 export function ActivityFeedSection() {
   const [data, setData] = React.useState<DigestListResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [fetchError, setFetchError] = React.useState<string | null>(null);
+  // 🚨 F1: a BOOLEAN, not the error text. This held `json.error` / `String(err)`
+  // and the panel printed it verbatim. Fixing only the renderer would have left
+  // the raw string in state for the next consumer to pick up — the failure mode
+  // C2 already hit once — so the writer never stores it in the first place.
+  const [fetchFailed, setFetchFailed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState<Record<string, DetailState>>({});
   const [sheetDate, setSheetDate] = React.useState<string | null>(null);
@@ -344,10 +348,10 @@ export function ActivityFeedSection() {
         const json = (await res.json()) as DigestListResponse;
         if (!alive) return;
         setData(json);
-        setFetchError(json.error ?? null);
+        setFetchFailed(Boolean(json.error));
       } catch (err) {
         if (!alive) return;
-        setFetchError(String(err));
+        setFetchFailed(true);
       } finally {
         if (alive) setLoading(false);
       }
@@ -450,15 +454,14 @@ export function ActivityFeedSection() {
 
   // A read failure is stated plainly. It is never rendered as "no digests" —
   // "the read broke" and "there is nothing to show" are different facts.
-  if (fetchError) {
+  if (fetchFailed) {
     return (
       <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
         <Card padding="md" className="border-l-4 border-l-accent-gold">
           <Header />
           <p className="text-caption leading-relaxed text-fg-muted">
-            The digest feed could not be read &mdash; {fetchError}. Showing
-            nothing rather than a stale or partial list; it retries
-            automatically.
+            The digest feed could not be read. Showing nothing rather than a
+            stale or partial list; it retries automatically.
           </p>
         </Card>
       </div>

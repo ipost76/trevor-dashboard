@@ -11,6 +11,7 @@ import {
   CollapsibleSection,
   MetricTile,
 } from "@/components/ui";
+import { plainBudgetBucket } from "@/lib/plain-labels";
 import {
   Activity,
   Radio,
@@ -643,12 +644,17 @@ export function HeartbeatView() {
               {cats.budget.budget_breakdown &&
                 Object.keys(cats.budget.budget_breakdown).length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-fg-muted">
+                    {/* F1: C2's capitalisation held for the four buckets it
+                        observed, but it is still the generic shape — a fifth
+                        bucket would have arrived raw. Allowlisted now. */}
                     {Object.entries(cats.budget.budget_breakdown)
                       .filter(([, v]) => (v ?? 0) > 0.01)
                       .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
-                      .map(([k, v]) => (
+                      .map(([k, v]) => [plainBudgetBucket(k), k, v] as const)
+                      .filter((e): e is readonly [string, string, number] => e[0] !== null)
+                      .map(([label, k, v]) => (
                         <span key={k}>
-                          {k.charAt(0).toUpperCase() + k.slice(1)}{" "}
+                          {label}{" "}
                           <span className="font-mono text-fg-primary">
                             ${(v ?? 0).toFixed(2)}
                           </span>

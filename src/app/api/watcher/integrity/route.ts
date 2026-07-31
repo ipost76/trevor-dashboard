@@ -23,6 +23,8 @@ interface IntegrityFinding {
   vacuous: boolean;
   findings_count: number;
   findings: string[];
+  finding_pairs: { key: string; value: string }[];
+  findings_dropped: number;
   level_id: number | null;
   ts: string;
 }

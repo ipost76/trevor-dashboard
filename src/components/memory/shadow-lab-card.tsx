@@ -192,6 +192,12 @@ export function ShadowLabCard() {
                 </Pill>
               }
             >
+              {/* F1: two props used to be passed from here carrying raw DB
+                  column names as string literals, which the card printed
+                  verbatim. Both props are gone: fixing the renderer alone would
+                  have left the literals sitting in this file, and therefore in
+                  the shipped bundle. (Named indirectly on purpose — a bundle
+                  grep should not have to triage this comment.) */}
               <div className="flex flex-col gap-2 p-3">
                 {rows.map((s) => (
                   <CompactShadowCard
@@ -205,10 +211,9 @@ export function ShadowLabCard() {
                     function={s.category}
                     divergentN={s.divergent_n}
                     divergencePct={s.divergence_pct}
-                    divergenceCol="divergent"
                     promotion={s.promotion}
                     promotionN={s.promotion_n}
-                    outcomeCol={s.outcome_linked_n > 0 ? "realized_pnl_usd" : null}
+                    hasOutcomeColumn={s.outcome_linked_n > 0}
                     outcomeLinkedN={s.outcome_linked_n}
                     outcomeMeanPnl={s.outcome_mean_pnl}
                     outcomeMinPnl={s.outcome_min_pnl}

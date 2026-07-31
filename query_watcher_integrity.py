@@ -79,17 +79,35 @@ def _freshness(ts_pool: list[Optional[str]]) -> tuple[Optional[int], Optional[st
     return age, newest.isoformat().replace("+00:00", "Z")
 
 
-def _findings_view(raw: Any) -> tuple[int, list[str]]:
-    """Bounded rendering of a findings blob — a count + up to 5 short lines."""
+def _findings_view(raw: Any) -> tuple[int, list[str], list[dict[str, str]], int]:
+    """Bounded view of a findings blob — (count, authored lines, key/value pairs,
+    dropped).
+
+    🚨 F1 — THIS FUNCTION USED TO SERIALIZE A DICT BLOB TO ``k=v`` STRINGS, HERE,
+    ON THE SERVER. The Hub's plain-English layer already maps these exact keys
+    (``level_matches`` / ``prompt_id_present`` / ``config_snapshot_cross_check``
+    are in ``src/lib/plain-labels.ts``), but it never got the chance: the
+    identifiers were welded into a display string before any renderer saw them,
+    so no amount of sweeping the TSX could have found or fixed it.
+
+    The rule this encodes: a Python reader emits STRUCTURE; the renderer decides
+    what English to show. Never build display text out of column or check names
+    down here.
+    """
     if raw is None:
-        return 0, []
+        return 0, [], [], 0
     if isinstance(raw, list):
-        lines = [str(x)[:200] for x in raw[:5]]
-        return len(raw), lines
+        # Authored finding text passes through; anything else is counted, not
+        # str()'d (str(dict) is the same leak wearing braces).
+        lines = [x[:200] for x in raw[:5] if isinstance(x, str)]
+        return len(raw), lines, [], len(raw[:5]) - len(lines)
     if isinstance(raw, dict):
-        lines = [f"{k}={v}" for k, v in list(raw.items())[:5]]
-        return len(raw), [x[:200] for x in lines]
-    return 1, [str(raw)[:200]]
+        pairs = [{"key": str(k), "value": str(v)[:120]}
+                 for k, v in list(raw.items())[:5]]
+        return len(raw), [], pairs, 0
+    if isinstance(raw, str):
+        return 1, [raw[:200]], [], 0
+    return 1, [], [], 1
 
 
 def main() -> int:
@@ -112,7 +130,8 @@ def main() -> int:
             "FROM integrity_findings ORDER BY ts DESC"
         ).fetchall()
         for r in rows:
-            count, lines = _findings_view(_load_json(r["findings_json"]))
+            count, lines, pairs, dropped = _findings_view(
+                _load_json(r["findings_json"]))
             ok = bool(r["ok"])
             level_id = r["level_id"]
             # VACUOUS: an ok check at L0 with no findings ran but had nothing to
@@ -125,6 +144,8 @@ def main() -> int:
                 "vacuous": vacuous,
                 "findings_count": count,
                 "findings": lines,
+                "finding_pairs": pairs,
+                "findings_dropped": dropped,
                 "level_id": level_id,
                 "ts": r["ts"],
             })

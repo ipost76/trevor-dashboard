@@ -78,8 +78,11 @@ export function EditableField({
     try {
       await onSave(draft);
       setEditing(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+    } catch {
+      // F1: was `e instanceof Error ? e.message : "Save failed"` — a raw
+      // exception rendered as user copy. Unmounted today; fixed so the next
+      // importer does not inherit it.
+      setError("Save failed");
     } finally {
       setSaving(false);
     }

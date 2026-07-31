@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { EmptyState, Pill, Skeleton } from "@/components/ui";
+import { bitsWithDropped, plainAxis, plainMetric } from "@/lib/plain-labels";
 
 // TRAINER · "capability" sub-tab (R12-B1 · H8). The capability-request queue the
 // R9 trainer routes to Ghost, from /api/trainer/capability-queue
@@ -28,18 +29,32 @@ function fmtReplicaAge(sec: number | null | undefined): string {
   return `${Math.floor(sec / 3600)}h ago`;
 }
 
-// Compact scalar fields (requested axes / reason / …) except the ids + status,
-// future-proof against the loop's DDL.
-function detailBits(r: CapabilityRequest): string[] {
+// Compact scalar fields (requested axes / reason / …) except the ids + status.
+//
+// 🚨 ALLOWLISTED. This was generic BY DESIGN — "future-proof against the loop's
+// DDL" — which is not future-proofing, it is a standing promise to print every
+// column the loop ever invents. `capability_requests` is created lazily at
+// cutover, so the raw names would have appeared on a surface nobody had seen.
+// Array values are glossed per-element too: an axis list is a list of
+// identifiers, and half of them ("timing_context") are not English words.
+function detailBits(r: CapabilityRequest): { bits: string[]; dropped: number } {
   const skip = new Set(["shadow_id", "status"]);
   const bits: string[] = [];
+  let dropped = 0;
   for (const [k, v] of Object.entries(r)) {
     if (skip.has(k)) continue;
-    if (typeof v === "number") bits.push(`${k}=${v}`);
-    else if (typeof v === "string" && v.trim()) bits.push(`${k}=${v.length > 40 ? v.slice(0, 40) + "…" : v}`);
-    else if (Array.isArray(v)) bits.push(`${k}=[${v.map(String).join(", ").slice(0, 60)}]`);
+    const label = plainAxis(k) ?? plainMetric(k);
+    if (label === null) { dropped++; continue; }
+    if (typeof v === "number") bits.push(`${label} ${v}`);
+    else if (typeof v === "string" && v.trim()) {
+      bits.push(`${label} ${v.length > 40 ? v.slice(0, 40) + "…" : v}`);
+    } else if (Array.isArray(v)) {
+      const named = v.map((x) => plainAxis(String(x))).filter((x): x is string => x !== null);
+      dropped += v.length - named.length;
+      if (named.length > 0) bits.push(`${label}: ${named.join(", ").slice(0, 60)}`);
+    } else dropped++;
   }
-  return bits.slice(0, 6);
+  return { bits: bits.slice(0, 6), dropped: dropped + Math.max(0, bits.length - 6) };
 }
 
 export function CapabilityQueueSection() {
@@ -98,7 +113,8 @@ export function CapabilityQueueSection() {
       ) : (
         <div className="space-y-1.5">
           {requests.map((r, i) => {
-            const bits = detailBits(r);
+            const detail = detailBits(r);
+            const bits = bitsWithDropped(detail.bits, detail.dropped);
             const shadowId = typeof r.shadow_id === "string" ? r.shadow_id : null;
             const status = typeof r.status === "string" ? r.status : null;
             return (

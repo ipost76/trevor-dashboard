@@ -65,7 +65,10 @@ function fmtMode(mode: string): string {
     case "config_off":
       return "Config off";
     default:
-      return mode || "unknown";
+      // 🚨 F1: was `return mode || "unknown"` — a gloss whose fallback handed
+      // back the RAW key, so any mode the bot adds shipped its identifier to the
+      // screen. The subtler half of this defect class: it looks glossed.
+      return "Other mode";
   }
 }
 
@@ -144,9 +147,12 @@ export function PartialShadowCard() {
         </div>
       </CardHeader>
 
+      {/* F1: this printed `data.error`, which query_partial_shadow.py builds
+          from the raw Python exception ("db: <exc>" / str(exc)). */}
       {data?.error && (
         <div className="mb-3 rounded-md border border-accent-red/40 bg-accent-red/10 p-3 font-sans text-caption text-accent-red">
-          {data.error}
+          The partial-exit shadow could not be read. Showing nothing rather than
+          a partial figure; it retries automatically.
         </div>
       )}
 

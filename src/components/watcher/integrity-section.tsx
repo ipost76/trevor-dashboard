@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
-import { plainCheck, plainKind, plainOutcome } from "@/lib/plain-labels";
+import { plainCheck, plainCheckStrict, plainKind, plainOutcome } from "@/lib/plain-labels";
 import { fmtAge, fmtUpdated } from "./watcher-format";
 
 /**
@@ -22,6 +22,8 @@ interface IntegrityFinding {
   vacuous: boolean;
   findings_count: number;
   findings: string[];
+  finding_pairs: { key: string; value: string }[];
+  findings_dropped: number;
   level_id: number | null;
   ts: string;
 }
@@ -201,6 +203,28 @@ export function IntegritySection() {
                           {f.findings.join(" · ")}
                         </div>
                       )}
+                      {/* F1: the per-check pairs arrive STRUCTURED now.
+                          query_watcher_integrity.py used to serialize them to
+                          "k=v" server-side, which is why the CHECK_PLAIN map
+                          that already names these keys never got to run. */}
+                      {(() => {
+                        const named = (f.finding_pairs ?? [])
+                          .map((p) => [plainCheckStrict(p.key), p.value] as const)
+                          .filter((e): e is readonly [string, string] => e[0] !== null);
+                        const dropped =
+                          (f.finding_pairs ?? []).length -
+                          named.length +
+                          (f.findings_dropped ?? 0);
+                        if (named.length === 0 && dropped === 0) return null;
+                        return (
+                          <div className="font-sans text-micro text-fg-muted">
+                            {[
+                              ...named.map(([label, v]) => `${label}: ${v}`),
+                              ...(dropped > 0 ? [`+${dropped} more`] : []),
+                            ].join(" · ")}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

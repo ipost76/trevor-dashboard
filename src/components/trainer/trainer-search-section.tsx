@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, EmptyState, Pill, Skeleton } from "@/components/ui";
-import { plainStatus } from "@/lib/plain-labels";
+import { plainAxis, plainStatus } from "@/lib/plain-labels";
 
 // TRAINER · "search" sub-tab. The trainer's config-space search state from
 // /api/trainer/search (trainer.db): the settings it is testing, the standing
@@ -60,14 +60,9 @@ function pct(v: number | null | undefined): string {
   return `${Math.round(v * 100)}%`;
 }
 
-/** snake_case / kebab-case → Title Case English. */
-function titleCase(raw: string): string {
-  const words = raw.replace(/[_-]+/g, " ").trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  return words
-    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(" ");
-}
+// F1: titleCase() is gone. It looked like a gloss but only capitalised an
+// identifier, which is the subtler half of this defect class — every caller now
+// goes through the plain-labels allowlists instead.
 
 // A row title must say what the setting VARIES, never identify it by hash — a
 // hash is meaningless on screen. Falls back to a plain ordinal.
@@ -81,8 +76,19 @@ function armTitle(axes: unknown, index: number): string {
     }
   }
   if (parsed && typeof parsed === "object") {
+    // 🚨 F1: ALLOWLISTED. These are config-axis identifiers; titleCase() only
+    // capitalised them, so "timing_context" reached the screen as "Timing
+    // context". An axis with no plain-English label is counted, never named.
     const keys = Object.keys(parsed as Record<string, unknown>).filter(Boolean);
-    if (keys.length > 0) return keys.map(titleCase).join(" · ");
+    const named = keys
+      .map((k) => plainAxis(k))
+      .filter((x): x is string => x !== null);
+    const dropped = keys.length - named.length;
+    if (named.length > 0) {
+      return dropped > 0
+        ? `${named.join(" · ")} · +${dropped} more`
+        : named.join(" · ");
+    }
   }
   return `Setting ${index + 1}`;
 }
@@ -209,7 +215,7 @@ export function TrainerSearchSection() {
                     )}
                   </div>
                   <span className="font-sans text-micro text-fg-faint">
-                    {h.domain ? titleCase(h.domain) : "—"} ·{" "}
+                    {h.domain ? (plainAxis(h.domain) ?? "Other area") : "—"} ·{" "}
                     <span className="font-mono">{h.n_obs ?? 0}</span>{" "}
                     {(h.n_obs ?? 0) === 1 ? "observation" : "observations"}
                     {h.level_id !== null ? ` · Level ${h.level_id}` : ""}

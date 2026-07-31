@@ -288,10 +288,13 @@ def main() -> None:
             payload["by_level"] = _by_level(conn)
             payload["by_ticker"] = _by_ticker(conn)
             payload["recent"] = _recent(conn)
-    except sqlite3.OperationalError as e:
-        payload["error"] = f"db: {e}"
-    except Exception as e:
-        payload["error"] = str(e)
+    # 🚨 F1: these were f"db: {e}" and str(e) — the raw Python exception, which
+    # the Hub card printed verbatim as user copy. Fixed at the writer as well as
+    # the renderer so the raw string never enters the payload.
+    except sqlite3.OperationalError:
+        payload["error"] = "The partial-exit shadow could not be read."
+    except Exception:
+        payload["error"] = "The partial-exit shadow could not be read."
     print(json.dumps(payload, default=str))
 
 

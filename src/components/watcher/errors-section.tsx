@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
-import { plainCheck, plainHealthDetail, plainSource, plainStatus } from "@/lib/plain-labels";
+import { plainCheck, plainCheckDetail, plainSource, plainStatus } from "@/lib/plain-labels";
 import { fmtAge, fmtPanelUpdated, fmtUpdated } from "./watcher-format";
 
 /**
@@ -189,9 +189,13 @@ export function ErrorsSection() {
                 </div>
                 {/* The store still holds rows written before the writer spoke English,
                     and nothing rewrites them — so degrade anything that doesn't read
-                    as a sentence to a neutral phrase rather than printing it raw. */}
+                    as a sentence to a neutral phrase rather than printing it raw.
+                    F1: the floor is unchanged; what sits on top of it is a per-check
+                    AUTHORED sentence, so a flagged check now says WHICH check and
+                    what it looks at. An unmapped check_name still lands on the
+                    generic floor — never on the raw detail. */}
                 <span className="font-sans text-micro leading-relaxed text-fg-muted">
-                  {plainHealthDetail(h.detail, h.status)}
+                  {plainCheckDetail(h.check_name, h.detail, h.status)}
                 </span>
               </div>
             ))}

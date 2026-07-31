@@ -4,6 +4,7 @@ import { EmptyState, Pill, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { APPROVAL_RECORDING_NOTE, ApproveRejectControl } from "./approve-reject-control";
 import { PromotionsList } from "@/components/intel/promotions-list";
+import { bitsWithDropped, plainAxis, plainMetric } from "@/lib/plain-labels";
 
 // TRAINER · "promotions" sub-tab (R12-B1). The PRIMARY surface = R8's
 // promotion_candidates (config diff + stats + reasoning) from
@@ -44,22 +45,34 @@ function reasoningOf(c: Candidate): string | null {
   return null;
 }
 
-// Compact scalar stats (n / expectancy_usd / net_usd / win_rate / …) — every
-// scalar column except the ids + reasoning, future-proof against R8's DDL.
-function statBits(c: Candidate): string[] {
+// Compact scalar stats (sample size / expectancy / net / win rate / …).
+//
+// 🚨 ALLOWLISTED, and that is the point. This helper used to be generic BY
+// DESIGN — "every scalar column except the ids + reasoning, future-proof against
+// R8's DDL" — which made it a standing guarantee that every column R8 ever adds
+// ships its raw name to the screen. `promotion_candidates` does not exist yet, so
+// that would have fired at cutover, on columns nobody has seen. Only keys with a
+// plain-English label in plain-labels.ts render; everything else is counted and
+// surfaced as "+N more", so the omission is visible rather than silent.
+function statBits(c: Candidate): { bits: string[]; dropped: number } {
   const skip = new Set(["candidate_id", "shadow_id", "verdict_summary", "reasoning", "verdict"]);
   const bits: string[] = [];
+  let dropped = 0;
   for (const [k, v] of Object.entries(c)) {
     if (skip.has(k)) continue;
-    if (typeof v === "number") bits.push(`${k}=${Number.isInteger(v) ? v : v.toFixed(3)}`);
-    else if (typeof v === "string" && v.length <= 24 && v.trim()) bits.push(`${k}=${v}`);
+    const label = plainMetric(k) ?? plainAxis(k);
+    if (label === null) { dropped++; continue; }
+    if (typeof v === "number") bits.push(`${label} ${Number.isInteger(v) ? v : v.toFixed(3)}`);
+    else if (typeof v === "string" && v.length <= 24 && v.trim()) bits.push(`${label} ${v}`);
+    else dropped++;
   }
-  return bits.slice(0, 8);
+  return { bits: bits.slice(0, 8), dropped: dropped + Math.max(0, bits.length - 8) };
 }
 
 function CandidateRow({ c, writeEnabled }: { c: Candidate; writeEnabled: boolean }) {
   const reasoning = reasoningOf(c);
-  const bits = statBits(c);
+  const stats = statBits(c);
+  const bits = bitsWithDropped(stats.bits, stats.dropped);
   const candidateId = typeof c.candidate_id === "string" ? c.candidate_id : null;
   const shadowId = typeof c.shadow_id === "string" ? c.shadow_id : null;
   return (
@@ -162,7 +175,7 @@ export function PromotionCandidatesList() {
           <span className="font-sans text-caption font-semibold uppercase tracking-wider text-fg-muted">
             Readiness gate (secondary)
           </span>
-          <Pill tone="neutral" size="sm">promotion_ready</Pill>
+          <Pill tone="neutral" size="sm">Legacy</Pill>
         </div>
         <p className="font-sans text-micro leading-relaxed text-fg-muted">
           The nightly readiness-gate worklist — a separate view from the candidates

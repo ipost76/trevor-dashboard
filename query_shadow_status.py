@@ -496,8 +496,13 @@ def _inspect_table(
         if key_stat_fn is not None and info["rows"] > 0:
             try:
                 info["key_stat"] = key_stat_fn(conn)
-            except Exception as ks_err:
-                info["error"] = f"key_stat error: {ks_err}"
+            except Exception:
+                # 🚨 F1: was f"key_stat error: {ks_err}" — the raw Python
+                # exception, which the Hub card printed verbatim. The renderer is
+                # fixed too, but the writer must not put it in the payload at
+                # all: a later consumer would pick the raw string straight back
+                # up. Emit a sentence, not a traceback fragment.
+                info["error"] = "The extra statistics could not be read."
 
     except Exception as exc:
         info["status"] = "BROKEN" if expected_active else "DORMANT"

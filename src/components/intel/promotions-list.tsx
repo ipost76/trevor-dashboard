@@ -47,10 +47,14 @@ function fmtExpectancy(v: number | null | undefined): string | null {
   return `${sign}$${Math.abs(v).toFixed(3)}/trade`;
 }
 
-// Metric bits: n=X · ±$Y/trade (whichever are present).
+// Metric bits: N distinct trades · ±$Y/trade (whichever are present).
+// A fixed two-field builder, not a dict dump — but "n=" was still an unglossed
+// identifier on screen, so it says what it counts (F1).
 function metricBits(p: Promotion): string[] {
   const bits: string[] = [];
-  if (p.n_distinct !== null && p.n_distinct !== undefined) bits.push(`n=${p.n_distinct}`);
+  if (p.n_distinct !== null && p.n_distinct !== undefined) {
+    bits.push(`${p.n_distinct} distinct trades`);
+  }
   const exp = fmtExpectancy(p.expectancy_usd);
   if (exp) bits.push(exp);
   return bits;

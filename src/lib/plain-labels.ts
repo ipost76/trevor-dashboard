@@ -187,3 +187,272 @@ export function plainHealthDetail(
   if (status === "degraded") return "This check found a problem.";
   return "No readable detail was recorded for this check.";
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ALLOWLISTS (F1) — for the generic dict-serializer shape.
+ *
+ * 🚨 WHY THESE RETURN `null` AND NOT A FALLBACK STRING. The maps above answer
+ * "what is the English for this key?" and lean on a neutral fallback so a miss
+ * degrades instead of leaking. That is right for a single labelled field. It is
+ * NOT enough for a serializer that walks an UNKNOWN key set: five separate
+ * prompts have now found the same `${k}=${v}` shape, twice written deliberately
+ * generic ("future-proof against the loop's DDL"), so every future schema
+ * migration ships new raw column names to the screen.
+ *
+ * These helpers return `null` for an unmapped key, and callers MUST drop it and
+ * count it. An unmapped key is therefore structurally unrenderable — it does not
+ * depend on a fallback string staying neutral. The caller renders the tally as
+ * "+N more", so the information loss an allowlist causes is VISIBLE, never
+ * silent.
+ *
+ * Adding a key here can only ever ADD a plain-English label; it can never cause
+ * a leak. Omitting one costs a row, not a disclosure. When in doubt, omit.
+ * ────────────────────────────────────────────────────────────────────────────*/
+
+/**
+ * Shadow / promotion metric keys.
+ *
+ * The 29 shadow keys are the COMPLETE set emitted by `query_shadow_status.py`'s
+ * `_ks_*` functions (extracted from that source, not sampled from live data, so
+ * it cannot miss a rarely-populated table). The promotion-stat keys come from
+ * `query_promotion_candidates.py`'s own documented contract — that table does
+ * not exist pre-cutover, so its columns are documented rather than observed.
+ */
+export const METRIC_PLAIN: Record<string, string> = {
+  // ── query_shadow_status.py `_ks_*` returns ────────────────────────────────
+  alerts: "Alerts",
+  all_gates_pass: "All gates passed",
+  avg_bps: "Average basis points",
+  avg_delta: "Average difference",
+  avg_v1_size: "Average size (v1)",
+  avg_v2_size: "Average size (v2)",
+  block: "Blocked",
+  block_pct: "Blocked share",
+  blocked: "Blocked",
+  confirm_exit: "Confirmed exits",
+  cycles: "Cycles",
+  divergence_pct: "Divergence rate",
+  divergent: "Divergent rows",
+  fills: "Fills",
+  gap_cycles: "Gap cycles",
+  gate_progress: "Gate progress",
+  max_delta: "Largest difference",
+  min_delta: "Smallest difference",
+  pass: "Passed",
+  pass_pct: "Passed share",
+  rejects: "Rejects",
+  rows_24h: "Rows (24h)",
+  shadow_blocks: "Shadow blocks",
+  timeouts: "Timeouts",
+  total: "Total rows",
+  total_48h: "Total (48h)",
+  total_funding_usd: "Total funding",
+  v2_exit: "Exits (v2)",
+  v2_hold: "Holds (v2)",
+  // ── shadow-lab-card's one observed `extraMetrics` key ─────────────────────
+  candidate: "Candidate",
+  // ── query_promotion_candidates.py documented stats ────────────────────────
+  n: "Sample size",
+  n_distinct: "Distinct trades",
+  expectancy_usd: "Expectancy per trade",
+  net_usd: "Net profit",
+  win_rate: "Win rate",
+  exact_or_bound: "Exact or bounded",
+};
+
+/**
+ * Own-property lookup for the allowlists.
+ *
+ * 🚨 A bare `MAP[k]` is NOT safe for a key set you do not control: `"__proto__"`
+ * resolves to `Object.prototype` and `"constructor"` to the `Object` function.
+ * Neither is null or undefined, so `?? null` never fires and a non-string
+ * reaches the renderer — React throws on an object child, blanking the panel.
+ * These helpers exist precisely to walk untrusted key sets, so they must use an
+ * own-property check. (Found by this change's own negative control, not by
+ * reasoning — which is the argument for writing the control first.)
+ */
+function ownLabel(map: Record<string, string>, raw: string): string | null {
+  return Object.prototype.hasOwnProperty.call(map, raw) ? map[raw] : null;
+}
+
+export function plainMetric(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return ownLabel(METRIC_PLAIN, raw);
+}
+
+/**
+ * Append the dropped-key tally to an allowlisted bit list.
+ *
+ * This is the counterpart that makes an allowlist honest: it keeps the
+ * information loss VISIBLE without ever naming the key that was dropped. Every
+ * allowlisted serializer renders through this, so the "+N more" wording cannot
+ * drift between surfaces.
+ */
+export function bitsWithDropped(bits: string[], dropped: number): string[] {
+  return dropped > 0 ? [...bits, `+${dropped} more`] : bits;
+}
+
+/**
+ * Trainer config axes — the 12-value closed vocabulary in `lib/memory_db.py`
+ * (`CONFIG_AXES`), plus the capability-request fields `query_capability_queue.py`
+ * documents. That table is also absent pre-cutover.
+ */
+export const AXIS_PLAIN: Record<string, string> = {
+  tickers: "Tickers",
+  size: "Position size",
+  leverage: "Leverage",
+  timeframe: "Timeframe",
+  direction: "Direction",
+  hedge: "Hedging",
+  exit: "Exit rules",
+  portfolio: "Portfolio shape",
+  timing_context: "Timing context",
+  cost: "Trading costs",
+  signal: "Signal rules",
+  entry: "Entry rules",
+  // standing_hypotheses domains (trainer_hypotheses.SEED_HYPOTHESES)
+  sizing: "Position sizing",
+  // capability_requests documented fields
+  axes: "Requested axes",
+  requested_axes: "Requested axes",
+  reason: "Reason",
+  level_id: "Level",
+  created_at: "Created",
+};
+
+export function plainAxis(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return ownLabel(AXIS_PLAIN, raw);
+}
+
+/**
+ * API-budget buckets (`heartbeat.categories.budget.budget_breakdown`). C2 fixed
+ * the raw `${k} $${v}` serialization here by capitalising the key, on the
+ * grounds that the four buckets are a closed set of ordinary words. That held
+ * for those four — but it is still the generic shape, so a fifth bucket would
+ * arrive raw. Allowlisted for the same reason as the others.
+ */
+export const BUDGET_BUCKET_PLAIN: Record<string, string> = {
+  briefing: "Briefing",
+  learning: "Learning",
+  swarm: "Swarm",
+  other: "Other",
+};
+
+export function plainBudgetBucket(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return ownLabel(BUDGET_BUCKET_PLAIN, raw);
+}
+
+/**
+ * Trainer gate names, from `compass_metrics.py` + `trainer_validation.py`.
+ * A gate may arrive with a parenthesised reason (`dd_ceiling(insufficient_curve)`);
+ * the suffix is stripped before lookup so the variant maps to the same label,
+ * and an unmapped base name still returns null rather than leaking the suffix.
+ */
+export const GATE_PLAIN: Record<string, string> = {
+  dd_ceiling: "Drawdown limit",
+  cvar_floor: "Tail-risk floor",
+  sample_floor_n: "Sample-size floor",
+  n_trials: "Trials budget",
+  leakage_reject: "Data-leakage check",
+};
+
+export function plainGate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const base = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  return ownLabel(GATE_PLAIN, base);
+}
+
+/**
+ * Allowlist form of plainCheck(), for walking an UNKNOWN key set.
+ *
+ * plainCheck() keeps its neutral "Other check" fallback — that is right for a
+ * single named field and other surfaces rely on it, so it is not changed here.
+ * A dict walk needs the stricter contract: null, so the caller drops and counts.
+ */
+export function plainCheckStrict(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return ownLabel(CHECK_PLAIN, raw);
+}
+
+/**
+ * Authored per-check sentences for the watcher self-check panel, keyed
+ * `"<check_name>:<status>"`.
+ *
+ * 🚨 AUTHORED, NOT DERIVED. Each sentence is written from what the check in
+ * `watcher_surface.py` actually DOES, never reconstructed from the stored
+ * detail — reconstructing meaning from the stored machine text is precisely the
+ * leak `plainHealthDetail`'s floor exists to prevent. Naming which check flagged
+ * a problem is the whole payload; the numbers stay out.
+ *
+ * TENSE. Five of the six live rows were written 2026-07-22 and nothing rewrites
+ * them, so they are a snapshot and read in the past tense. `watcher_loop` is the
+ * self-refreshing bookkeeping row (it updates every cycle), so its sentences are
+ * present tense — a past-tense sentence there would go stale the other way.
+ */
+export const CHECK_SENTENCE: Record<string, string> = {
+  "loop_freshness:degraded":
+    "Loop freshness was flagged — at least one background loop had gone quiet for longer than its expected interval.",
+  "loop_freshness:ok":
+    "Every background loop had written within its expected interval.",
+  "loop_freshness:unknown":
+    "Loop freshness could not be read when this ran.",
+
+  "stuck_testing:degraded":
+    "Stuck tests were flagged — at least one shadow had sat in a testing state for over a day.",
+  "stuck_testing:ok":
+    "No shadow had been left sitting in a testing state.",
+  "stuck_testing:unknown":
+    "Stuck tests could not be read when this ran.",
+
+  "alerting_canary:degraded":
+    "Alert delivery was flagged — the canary that proves alerts still fire had not been seen recently enough.",
+  "alerting_canary:ok":
+    "The canary that proves alerts still fire had been seen recently.",
+  "alerting_canary:unknown":
+    "Alert delivery could not be read when this ran.",
+
+  "critical_units:degraded":
+    "Background services were flagged — at least one service that should always be running was not.",
+  "critical_units:ok":
+    "Every service that should always be running was up.",
+  "critical_units:unknown":
+    "Background services could not be read when this ran.",
+
+  "cron_liveness:degraded":
+    "Scheduled jobs were flagged — at least one scheduled job had ended in failure.",
+  "cron_liveness:ok":
+    "No scheduled job had ended in failure.",
+  "cron_liveness:unknown":
+    "Scheduled jobs could not be read when this ran.",
+
+  "watcher_loop:degraded":
+    "The watcher is reporting a problem with its own cycle.",
+  "watcher_loop:ok":
+    "The watcher is completing its own cycle normally.",
+  "watcher_loop:unknown":
+    "The watcher cannot currently report on its own cycle.",
+};
+
+/**
+ * The self-check panel's detail line.
+ *
+ * Order, and why: stored text wins ONLY if it passes the same sentence sniff the
+ * floor already uses (so a writer that learns to speak English is rendered as
+ * written); otherwise the authored sentence for this exact check+status; and
+ * failing both, the original generic floor. An unmapped `check_name` therefore
+ * lands on the generic sentence — NEVER on the raw detail.
+ */
+export function plainCheckDetail(
+  checkName: string | null | undefined,
+  detail: string | null | undefined,
+  status?: string | null,
+): string {
+  const text = (detail ?? "").trim();
+  if (readsAsSentence(text)) return text;
+  const authored =
+    CHECK_SENTENCE[`${(checkName ?? "").trim()}:${(status ?? "").trim()}`];
+  if (authored) return authored;
+  return plainHealthDetail(detail, status);
+}

@@ -4,12 +4,17 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Pill } from "./pill";
 import { fmtUsd, fmtPct, fmtCount } from "@/lib/shadow-aggregate";
+import { plainMetric } from "@/lib/plain-labels";
 
 export type CompactShadowStatus = "active" | "dormant" | "stale";
 export type CompactPromotion = "ready" | "accruing" | "na";
 
 export interface CompactShadowCardProps {
   name: string;
+  /**
+   * Backing table, kept for identity/keying by callers. 🚨 DELIBERATELY NOT
+   * RENDERED (F1) — it named a storage location, not a fact about the shadow.
+   */
   tableName: string;
   totalRows: number;
   rows48h: number;
@@ -21,8 +26,6 @@ export interface CompactShadowCardProps {
   divergentN?: number | null;
   /** divergent / total, percent; null when not applicable. */
   divergencePct?: number | null;
-  /** Name of the boolean column divergentN was counted from (for the tooltip). */
-  divergenceCol?: string | null;
   /** Promotion-readiness: ready (n≥30 + Wilson-LB>0) / accruing / na (no signal). */
   promotion?: CompactPromotion;
   /** Divergent-sample count toward the n≥30 threshold (for "accruing N/30"). */
@@ -30,8 +33,14 @@ export interface CompactShadowCardProps {
   /** Writer flag-gated off; render a muted "retired" marker. */
   retired?: boolean;
   // HUB-C2 realized-outcome aggregates (read-only over existing columns).
-  // null/absent ⇒ Group C ⇒ render "n/a — no per-trade outcome", never a WR.
-  outcomeCol?: string | null;
+  // false/absent ⇒ Group C ⇒ render "n/a — no per-trade outcome", never a WR.
+  //
+  // 🚨 F1: this was `outcomeCol?: string | null` — the NAME of the P&L column,
+  // which the card printed verbatim. Only its truthiness was ever used, so it is
+  // now a boolean. Changing the PROP (not just the render) is deliberate: the
+  // caller passed the string literal, so a renderer-only fix would have left
+  // "realized_pnl_usd" sitting in the shipped bundle.
+  hasOutcomeColumn?: boolean;
   outcomeLinkedN?: number | null;
   outcomeMeanPnl?: number | null;
   outcomeMinPnl?: number | null;
@@ -156,7 +165,6 @@ function AggregateSummaryLine({
 export function CompactShadowCard(props: CompactShadowCardProps) {
   const {
     name,
-    tableName,
     totalRows,
     rows48h,
     latestAge,
@@ -164,11 +172,10 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
     function: fnGroup,
     divergentN,
     divergencePct,
-    divergenceCol,
     promotion = "na",
     promotionN,
     retired,
-    outcomeCol,
+    hasOutcomeColumn,
     outcomeLinkedN,
     outcomeMeanPnl,
     outcomeMinPnl,
@@ -185,9 +192,18 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
       ? "bg-accent-red"
       : "bg-fg-faint";
   const hasDiv = divergencePct !== null && divergencePct !== undefined;
+  // Allowlist the optional extra rows: a key with no plain-English label is
+  // counted, never rendered. See plain-labels.ts for why this returns null.
+  const extraNamed: Array<[string, string]> = [];
+  let extraDropped = 0;
+  for (const [k, v] of Object.entries(extraMetrics ?? {})) {
+    const label = plainMetric(k);
+    if (label === null) extraDropped++;
+    else extraNamed.push([label, String(v)]);
+  }
   // Outcome shadow ⇔ a realized P&L column exists AND at least one row is linked.
   const hasOutcome =
-    !!outcomeCol &&
+    !!hasOutcomeColumn &&
     outcomeWinRate !== null &&
     outcomeWinRate !== undefined &&
     (outcomeLinkedN ?? 0) > 0;
@@ -253,8 +269,9 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
       {expanded && (
         <div className="border-t border-border-subtle px-3 py-2 font-mono text-micro tabular-nums">
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
-            <dt className="font-sans text-fg-muted">table</dt>
-            <dd className="truncate text-fg-primary">{tableName}</dd>
+            {/* F1: the raw `table` row is gone. It printed the backing DB table
+                name, which names where the data is stored rather than anything
+                about the shadow — the display name above already identifies it. */}
             <dt className="font-sans text-fg-muted">function</dt>
             <dd className="text-accent-cyan-soft-strong">{fnGroup}</dd>
             <dt className="font-sans text-fg-muted">status</dt>
@@ -277,10 +294,12 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
             <dd className="text-fg-primary">{latestAge}</dd>
             {hasDiv && (
               <>
-                <dt className="font-sans text-fg-muted">divergent</dt>
+                {/* F1: this label read "divergent" — the boolean COLUMN's name.
+                    "would-fire" is what the collapsed summary line above already
+                    calls the same number, so the two now agree. */}
+                <dt className="font-sans text-fg-muted">would-fire</dt>
                 <dd className="text-accent-gold-strong">
                   {fmtNum(divergentN ?? 0)} ({divergencePct}%)
-                  {divergenceCol ? ` · ${divergenceCol}` : ""}
                 </dd>
                 <dt className="font-sans text-fg-muted">promotion</dt>
                 <dd
@@ -314,8 +333,9 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
                 <dd className="text-fg-primary">
                   {fmtUsd(outcomeMinPnl)} – {fmtUsd(outcomeMaxPnl)}
                 </dd>
-                <dt className="font-sans text-fg-muted">outcome col</dt>
-                <dd className="truncate text-fg-faint">{outcomeCol}</dd>
+                {/* F1: the `outcome col` row is gone — it printed the P&L
+                    column's name, which tells a reader nothing the win-rate and
+                    mean above do not already say. */}
               </>
             ) : (
               <>
@@ -323,13 +343,23 @@ export function CompactShadowCard(props: CompactShadowCardProps) {
                 <dd className="text-fg-faint italic">n/a — no per-trade outcome</dd>
               </>
             )}
-            {extraMetrics &&
-              Object.entries(extraMetrics).map(([k, v]) => (
-                <React.Fragment key={k}>
-                  <dt className="font-sans text-fg-muted">{k}</dt>
-                  <dd className="text-fg-primary">{String(v)}</dd>
-                </React.Fragment>
-              ))}
+            {/* F1: ALLOWLISTED. This walked an arbitrary key set and printed
+                each key as its own <dt> — one call site and one known key today,
+                so it was latent rather than live, but it is the same shape that
+                five separate prompts have now found elsewhere. An unmapped key
+                is counted, never named. */}
+            {extraNamed.map(([label, text]) => (
+              <React.Fragment key={label}>
+                <dt className="font-sans text-fg-muted">{label}</dt>
+                <dd className="text-fg-primary">{text}</dd>
+              </React.Fragment>
+            ))}
+            {extraDropped > 0 && (
+              <>
+                <dt className="font-sans text-fg-muted">more</dt>
+                <dd className="text-fg-faint">+{extraDropped} not shown</dd>
+              </>
+            )}
           </dl>
         </div>
       )}
