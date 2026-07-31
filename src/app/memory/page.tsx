@@ -59,11 +59,7 @@ function MemoryDisabled() {
       </div>
       <h1 className="text-h2 text-fg-primary">Temporarily Disabled</h1>
       <p className="max-w-md text-caption text-fg-muted">
-        Set{" "}
-        <code className="rounded bg-bg-elevated px-2 py-0.5 text-accent-cyan">
-          HUB_REDESIGN_MEMORY=true
-        </code>{" "}
-        in <code>auto_config</code> to enable.
+        This section is switched off.
       </p>
     </div>
   );

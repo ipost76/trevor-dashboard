@@ -232,7 +232,9 @@ export function RecentTab() {
         // B2: surface a broken fetch (was a bare `return` that left the empty
         // state showing). !res.ok → HTTP-level failure.
         if (!res.ok) {
-          setError(`HTTP ${res.status}`);
+          // C2: a status code told a reader nothing they could act on. One fixed
+          // sentence, matching the sibling branches B1 already cleared.
+          setError("Couldn't load your recent trades. Retrying.");
           return;
         }
         const j = (await res.json()) as ClosedTradesResponse;
@@ -250,7 +252,10 @@ export function RecentTab() {
         setError(null); // most recent fetch succeeded — clear any prior error
       } catch (e) {
         // B2: network / parse failure → honest error, NEVER a silent "no trades".
-        if (!cancelled) setError(String(e));
+        // C2: the exception's own text was never readable copy; the sentence is
+        // the same as the bad-status branch because to a reader both mean "the
+        // feed isn't answering".
+        if (!cancelled) setError("Couldn't load your recent trades. Retrying.");
       } finally {
         if (!cancelled) setLoading(false);
       }

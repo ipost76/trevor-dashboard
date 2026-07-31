@@ -41,15 +41,11 @@ function IntelDisabled() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-8 text-center font-mono">
       <div className="text-micro uppercase tracking-[0.3em] text-accent-magenta/60">
-        SHADOWS
+        Trainer
       </div>
       <h1 className="text-h2 text-fg-primary">Temporarily Disabled</h1>
       <p className="max-w-md text-caption text-fg-muted">
-        Set{" "}
-        <code className="rounded bg-bg-elevated px-2 py-0.5 text-accent-cyan">
-          HUB_REDESIGN_INTEL=true
-        </code>{" "}
-        in <code>auto_config</code> to enable.
+        This section is switched off.
       </p>
     </div>
   );

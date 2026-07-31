@@ -135,7 +135,7 @@ function TrendBars({ series, threshold }: { series: WedgeDay[]; threshold: numbe
             fill={c === 0 ? C_MUTED : over(c) ? C_RED : C_MINT}
             opacity={c === 0 ? 0.4 : 0.8}
           >
-            <title>{`${d.date ?? "?"}: ${c} wedge${c === 1 ? "" : "s"}`}</title>
+            <title>{`${d.date ?? "?"}: ${c} freeze${c === 1 ? "" : "s"}`}</title>
           </rect>
         );
       })}
@@ -172,7 +172,7 @@ export function WedgeRateTile() {
       <CardTitle>
         <span className="flex items-center gap-2 uppercase tracking-wider">
           <Snowflake size={14} aria-hidden />
-          Wedge Rate
+          Loop freezes
         </span>
       </CardTitle>
       {right}
@@ -203,8 +203,7 @@ export function WedgeRateTile() {
           }
         />
         <p className="text-caption leading-relaxed text-fg-muted">
-          No wedge metrics yet — the loop-freeze signal lights up once the VM job
-          publishes <code className="text-accent-cyan-soft">logs/wedge_metrics.json</code>.
+          No freeze data yet. This fills in once the bot starts reporting it.
         </p>
       </Card>
     );
@@ -222,8 +221,8 @@ export function WedgeRateTile() {
           }
         />
         <p className="text-caption leading-relaxed text-fg-muted">
-          Wedge metrics unavailable right now — {data.error ?? "the VM read failed"}.
-          {" "}Showing nothing rather than a stale number; retries automatically.
+          Couldn&apos;t read the loop-freeze figures right now. Showing nothing
+          rather than a stale number; retries automatically.
         </p>
       </Card>
     );

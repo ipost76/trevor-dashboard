@@ -15,7 +15,7 @@ import { ReplicaAge } from "@/lib/replica-age";
 // created_at_utc is REAL UTC and must be converted; the RECENT trade rows
 // raw-slice their naive-ET columns instead. Using either helper on the wrong
 // kind of column is the 4-hour bug, in one direction or the other.
-import { fmtEtFromUtc } from "@/lib/et-clock";
+import { fmtEtFromUtc, parseUtc } from "@/lib/et-clock";
 import { Radio, AlertTriangle } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,10 +166,70 @@ function emptyStateCopy(d: SignalsResponse): { title: string; body: string } {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// C2 (2026-07-31) — E12: LAST SCAN, with an age recomputed HERE.
+//
+// The bare wall-clock time this used to render made two very different states
+// look identical: a replica running a few minutes behind, and a scanner that
+// had stopped. A3 measured the scanner and it is healthy — the largest gap in
+// 26 hours was 198 seconds across 520 cycles on a ~180s cadence, and the
+// apparent 85-minute stall was replica lag (~9 min measured). The number was
+// right; the presentation made lag indistinguishable from death.
+//
+// This is the RD-B7 pattern from profit-risk-panel.tsx's evalFreshness(), and
+// it is deliberately the SAME pattern rather than a second freshness idiom: the
+// age is derived from the ABSOLUTE timestamp against the browser's own clock at
+// render time. That matters because this route is served through a
+// stale-while-revalidate cache — a server-computed age freezes with the body it
+// travelled in and keeps looking fresh, which is a stale number wearing a
+// freshness label. Deriving it here means a frozen body shows a GROWING age and
+// trips the bound on its own.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Age past which "last scan" is called out rather than stated flatly.
+ *
+ * Derived, not picked for looks: the scan cadence is ~180s and the read-only
+ * replica publishes on a timer that budgets ~20 min, so normal operation can
+ * legitimately show a ~20 min old scan. 45 min sits clear of both — it cannot
+ * be reached by ordinary lag, and it matches the STALE_S already used by
+ * ReplicaAge so the two freshness surfaces agree on what "behind" means.
+ */
+const SCAN_STALE_S = 45 * 60;
+
+/** Recompute the scan age against the browser clock. Undatable → no claim. */
+function scanFreshness(utc: string | null | undefined): {
+  ageS: number | null;
+  stale: boolean;
+} {
+  const d = parseUtc(utc);
+  if (d === null) return { ageS: null, stale: false };
+  const ageS = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+  return { ageS, stale: ageS > SCAN_STALE_S };
+}
+
+/** "3 min ago" / "2h ago" — plain words, no notation. */
+function fmtScanAge(seconds: number | null): string {
+  if (seconds === null) return "";
+  if (seconds < 90) return "just now";
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 172800) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
 export function SignalsCard() {
   const [data, setData] = React.useState<SignalsResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  // C2 — drives the LAST SCAN age forward on its own cadence. Without it the age
+  // would only advance when a fetch happened to resolve, so a wedged feed (or a
+  // cache serving the same body) would show an age frozen at the moment it was
+  // first rendered — the exact failure this fix exists to close.
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -254,9 +314,30 @@ export function SignalsCard() {
           {data.scanner.ticker_scans.toLocaleString()} ticker checks →{" "}
           {data.scanner.candidates.toLocaleString()} candidates →{" "}
           {data.scanner.signals_posted.toLocaleString()} posted
-          {data.scanner.newest_scan_utc && (
-            <> · last scan {fmtEtFromUtc(data.scanner.newest_scan_utc)}</>
-          )}
+          {data.scanner.newest_scan_utc &&
+            (() => {
+              const { ageS, stale } = scanFreshness(data.scanner.newest_scan_utc);
+              const age = fmtScanAge(ageS);
+              return (
+                <>
+                  {" "}
+                  · last scan {fmtEtFromUtc(data.scanner.newest_scan_utc)}
+                  {age && (
+                    <span
+                      className={stale ? "text-accent-gold" : undefined}
+                      title={
+                        stale
+                          ? "The scanner normally runs every few minutes. A gap this large is beyond anything the read-only replica's own delay can explain, so the scanner itself may have stopped."
+                          : "How long ago the scanner last ran, counted from your device's clock so it keeps rising even if this page is showing a cached copy."
+                      }
+                    >
+                      {" "}
+                      ({age})
+                    </span>
+                  )}
+                </>
+              );
+            })()}
         </p>
       )}
 

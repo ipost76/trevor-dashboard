@@ -69,7 +69,9 @@ export function DownloadFormatSheet({
         `/api/docs/downloads/${encodeURIComponent(filename)}/pdf`,
         { cache: "no-store" },
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // C2: was `HTTP ${res.status}` — this Error surfaces to the user, and a
+      // status code tells them nothing they can act on.
+      if (!res.ok) throw new Error("Couldn't prepare that download.");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const pdfName = filename.replace(/\.md$/i, "") + ".pdf";

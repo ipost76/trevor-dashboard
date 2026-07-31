@@ -143,12 +143,15 @@ export function KillswitchControlCard() {
             </div>
           </div>
         </div>
+        {/* C2: this pill's text was the raw flag name EMERGENCY_KILLSWITCH,
+            which restated the heading beside it in identifier form and told a
+            reader nothing extra. It now says what the state MEANS. */}
         <Pill
           tone={enabled ? "red" : "neutral"}
           size="sm"
           pulse={enabled}
         >
-          EMERGENCY_KILLSWITCH
+          {enabled ? "New trades blocked" : "New trades allowed"}
         </Pill>
       </div>
 
@@ -259,15 +262,15 @@ export function KillswitchControlCard() {
               </div>
               <div className="text-micro text-fg-muted">
                 {confirmTarget === "on"
-                  ? "Blocks ALL new signal cards + AutoTrader entries immediately. Open positions stay monitored. Does NOT close, cancel, or restart anything (Rule 1)."
+                  ? "Blocks ALL new signal cards + AutoTrader entries immediately. Open positions stay monitored. Does NOT close, cancel, or restart anything."
                   : "Signal cards + AutoTrader entries resume on the bot's next 5s cache-bust. No effect on existing trades."}
               </div>
             </div>
           </div>
           <div className="font-sans text-micro text-fg-muted">
-            Author: <span className="text-fg-primary">ghost</span> · Audit recorded
-            in <code className="font-mono">auto_config.EMERGENCY_KILLSWITCH_LAST_*</code> · WARNING
-            sentinel <code className="font-mono">[KILLSWITCH-{confirmTarget?.toUpperCase()}]</code> emitted.
+            Author: <span className="text-fg-primary">ghost</span> · This change
+            is recorded in the audit trail, and the bot logs a warning when it
+            takes effect.
           </div>
           {/* B5: server-verified password re-confirm before the killswitch fires */}
           <div className="space-y-1.5">

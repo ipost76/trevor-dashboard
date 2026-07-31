@@ -9,14 +9,17 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { plainCategory } from "@/lib/plain-labels";
 import { Sparkles, Download } from "lucide-react";
 
 // B4 AI engine (Hub read-side) — AI findings panel on the Health home (default tab).
 //
 // Reads /api/health/ai-findings (findings WHERE status != 'resolved') and renders
 // each finding as a card. READ-ONLY (B2 read-only lockdown removed the
-// "Analyze now" write trigger); the engine is capped until 2026-07-01, so the
-// list is EMPTY today until the engine processes findings.
+// "Analyze now" write trigger). The list is normally empty — measured
+// 2026-07-31, ai_findings holds a single row. (This comment used to say "the
+// engine is capped until 2026-07-01"; that cap date had passed, so the sentence
+// had quietly become false. C2 removed the date rather than guess a new one.)
 
 const ENDPOINT = "/api/health/ai-findings";
 const POLL_MS = 60_000;
@@ -123,7 +126,7 @@ export function AiFindingsPanel() {
         <EmptyState
           icon={<Sparkles size={28} />}
           title="No active findings"
-          body="The AI Analysis Engine surfaces triaged findings here. The engine is capped until 2026-07-01 — “Analyze now” queues a run; findings appear once it processes them."
+          body="Nothing needs your attention right now. Use “Analyze now” to check for new findings."
         />
       )}
 
@@ -141,7 +144,7 @@ export function AiFindingsPanel() {
                 {severityPill(f.severity)}
                 {f.category && (
                   <Pill tone="neutral" size="sm">
-                    {f.category}
+                    {plainCategory(f.category)}
                   </Pill>
                 )}
                 <span className="font-sans text-body font-semibold text-fg-primary">

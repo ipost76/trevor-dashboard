@@ -307,8 +307,8 @@ function DigestCard({
               </div>
             ) : detail.phase === "error" ? (
               <p className="text-caption leading-relaxed text-accent-gold-strong">
-                Could not load this digest &mdash; {detail.message}. Showing
-                nothing rather than a partial document; try again shortly.
+                Couldn&apos;t load this summary. Showing nothing rather than a
+                partial document; try again shortly.
               </p>
             ) : (
               <DigestMarkdown source={detail.body} />

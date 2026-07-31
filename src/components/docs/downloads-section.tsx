@@ -517,7 +517,10 @@ export function DownloadsSection() {
 
       {/* Backend error */}
       {!initializing && data?.error && (
-        <EmptyState title="Failed to load downloads" body={data.error} />
+        <EmptyState
+          title="Couldn't load your files"
+          body="Couldn't load the file list right now."
+        />
       )}
 
       {/* Empty state — scoped to the selected category */}

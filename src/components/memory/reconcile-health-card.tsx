@@ -10,6 +10,7 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { plainMismatchKind } from "@/lib/plain-labels";
 import { RefreshCw } from "lucide-react";
 
 // B4 — Reconcile-Health card (READ-ONLY display).
@@ -137,7 +138,7 @@ export function ReconcileHealthCard() {
         <EmptyState
           icon={<RefreshCw size={28} />}
           title="Reconcile telemetry pending"
-          body="The reconcile heartbeat category isn't published yet (Phase 2 — VM). This card lights up automatically once the Observatory collector carries it."
+          body="Trade-reconciliation data isn't being published yet."
         />
       )}
 
@@ -185,7 +186,7 @@ export function ReconcileHealthCard() {
               </span>
               {mismatches.map((m) => (
                 <Pill key={m.kind} tone="amber" size="sm">
-                  {m.kind} {m.count}
+                  {plainMismatchKind(m.kind)} {m.count}
                 </Pill>
               ))}
             </div>

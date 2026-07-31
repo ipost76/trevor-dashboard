@@ -126,7 +126,7 @@ export function CategorySettingsSheet({
       if (!res.ok || json.success === false) {
         setRow(cat.id, {
           saving: false,
-          error: json.error ?? `Rename failed (${res.status})`,
+          error: "Couldn't rename that folder. Try again.",
         });
         return;
       }
@@ -135,7 +135,7 @@ export function CategorySettingsSheet({
     } catch (e) {
       setRow(cat.id, {
         saving: false,
-        error: e instanceof Error ? e.message : "Rename failed",
+        error: "Couldn't rename that folder. Try again.",
       });
     }
   };
@@ -170,7 +170,7 @@ export function CategorySettingsSheet({
       if (!res.ok || json.success === false) {
         setRow(cat.id, {
           deletePhase: "error",
-          error: json.error ?? `Delete failed (${res.status})`,
+          error: "Couldn't delete that folder. Try again.",
         });
         deleteTimer.current = setTimeout(() => {
           setRows((prev) => {
@@ -188,7 +188,7 @@ export function CategorySettingsSheet({
     } catch (e) {
       setRow(cat.id, {
         deletePhase: "error",
-        error: e instanceof Error ? e.message : "Delete failed",
+        error: "Couldn't delete that folder. Try again.",
       });
     }
   };
@@ -224,14 +224,14 @@ export function CategorySettingsSheet({
         error?: string;
       };
       if (!res.ok || json.success === false) {
-        setAddError(json.error ?? `Create failed (${res.status})`);
+        setAddError("Couldn't create that folder. Try again.");
         return;
       }
       setAdding(false);
       setAddValue("");
       onCategoriesChanged();
     } catch (e) {
-      setAddError(e instanceof Error ? e.message : "Create failed");
+      setAddError("Couldn't create that folder. Try again.");
     } finally {
       setAddSaving(false);
     }
@@ -284,7 +284,7 @@ export function CategorySettingsSheet({
       };
       if (!res.ok || json.success === false) {
         setOptimisticOrder(null);
-        setReorderError(json.error ?? `Reorder failed (${res.status})`);
+        setReorderError("Couldn't save the new order. Try again.");
         return;
       }
       onCategoriesChanged();
@@ -294,7 +294,7 @@ export function CategorySettingsSheet({
       // Then clear on next prop change via the effect below.
     } catch (e) {
       setOptimisticOrder(null);
-      setReorderError(e instanceof Error ? e.message : "Reorder failed");
+      setReorderError("Couldn't save the new order. Try again.");
     } finally {
       setReordering(false);
     }

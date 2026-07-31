@@ -277,8 +277,11 @@ export function HeartbeatView() {
         cache: "no-store",
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(body.error ?? `HTTP ${res.status}`);
+        // C2: was `body.error ?? \`HTTP ${res.status}\``, which put a raw server
+        // string or a bare status code into the error channel this view renders.
+        // Fixed at the WRITER as well as the reader: leaving it here and only
+        // cleaning the render would keep the raw text one state read away.
+        setError("Couldn't reach the system-status feed.");
       } else {
         const json = (await res.json()) as HeartbeatData & { observatory?: string };
         // RM-DECOM B5: retired shape (no live heartbeat) → neutral card, not data.
@@ -290,8 +293,10 @@ export function HeartbeatView() {
           setLastUpdated(Date.now());
         }
       }
-    } catch (e) {
-      setError(String(e));
+    } catch {
+      // C2: the exception text was never readable copy. Same sentence as the
+      // bad-status branch — to a reader both mean "the feed isn't answering".
+      setError("Couldn't reach the system-status feed.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -332,8 +337,8 @@ export function HeartbeatView() {
       <Card padding="md" className="card-base">
         <EmptyState
           icon={<HeartPulse size={32} className="text-fg-muted" />}
-          title="Observatory heartbeat retired"
-          body="Live heartbeat telemetry is offline (Observatory decommissioned — RM-DECOM). Trade data, closed history and account numbers remain live via the replica on the other cards."
+          title="Live telemetry is off"
+          body="Live system telemetry was switched off. Trades, history and account numbers on the other cards are still current."
         />
       </Card>
     );
@@ -344,8 +349,8 @@ export function HeartbeatView() {
       <Card padding="md" className="card-warn">
         <EmptyState
           icon={<AlertCircle size={32} />}
-          title="Observatory unreachable"
-          body={error ?? "Could not fetch heartbeat data from the Observatory."}
+          title="System status unavailable"
+          body="Couldn't reach the system-status feed. It will keep retrying."
           action={
             <HapticButton
               variant="primary"
@@ -627,14 +632,28 @@ export function HeartbeatView() {
                 pct={cats.budget.pct}
                 warnAt={80}
               />
+              {/* C2: the breakdown was Object.entries(...).map(([k,v]) =>
+                  `${k} $${v}`).join(" · ") — a dict serialized straight to
+                  screen, the third instance of that shape found in this
+                  campaign. The numbers were the useful part and they are kept;
+                  only the raw-key notation is gone. The four keys are a closed
+                  set (briefing / learning / swarm / other) and are ordinary
+                  words, so Title Case is a formatting change, not a claim about
+                  what each bucket means. */}
               {cats.budget.budget_breakdown &&
                 Object.keys(cats.budget.budget_breakdown).length > 0 && (
-                  <div className="mt-1 text-caption text-fg-muted">
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-fg-muted">
                     {Object.entries(cats.budget.budget_breakdown)
                       .filter(([, v]) => (v ?? 0) > 0.01)
                       .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
-                      .map(([k, v]) => `${k} $${(v ?? 0).toFixed(2)}`)
-                      .join(" · ")}
+                      .map(([k, v]) => (
+                        <span key={k}>
+                          {k.charAt(0).toUpperCase() + k.slice(1)}{" "}
+                          <span className="font-mono text-fg-primary">
+                            ${(v ?? 0).toFixed(2)}
+                          </span>
+                        </span>
+                      ))}
                   </div>
                 )}
             </div>

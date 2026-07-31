@@ -335,7 +335,8 @@ export function ProfitRiskPanel() {
             <TrendingUp size={24} className="opacity-20" aria-hidden />
             <span className="text-caption text-fg-muted">No open positions</span>
             <span className="text-micro text-fg-faint">
-              Breakeven / ratchet / partials appear here once a live trade is running.
+              Breakeven, ratchet and partial-exit progress appear here while a
+              position is open.
             </span>
           </div>
         )}

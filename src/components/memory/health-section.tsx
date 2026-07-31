@@ -9,7 +9,6 @@ import { DataFreshnessCard } from "./data-freshness-card";
 import { ReconcileHealthCard } from "./reconcile-health-card";
 import { ShadowLabCard } from "./shadow-lab-card";
 import { HeartbeatView } from "./heartbeat-view";
-import { SentinelsCard } from "./sentinels-card";
 
 // HB-04 (2026-05-12): MEMORY → System Health rewritten as a composite of
 // three independent cards:
@@ -23,10 +22,15 @@ import { SentinelsCard } from "./sentinels-card";
 //      system bars + quick stats + connectivity placeholder. Replaces the
 //      former Services + System Probes grids (overlap with heartbeat data;
 //      heartbeat is the richer surface).
-//   3. <SentinelsCard /> — PRESERVED. Same /api/memory/health endpoint
-//      G2 has used since 2026-05-01; renders only the sentinels array.
-//      Unique diagnostic value (last 10 WARNING+ from trevor.log tail)
-//      that the heartbeat collector doesn't expose.
+//   3. <SentinelsCard /> — REMOVED from this view (C2, 2026-07-31). It rendered
+//      the last 10 WARNING+ lines from the bot log, but that feed cannot reach
+//      this box: query_system_health.collect_sentinels() does a plain local
+//      open() of /home/trevor/trevor/logs/trevor.log, and on WSL that directory
+//      holds exactly one entry — the trevor.db symlink. So the array is [] every
+//      time (measured three ways: the path is absent, the helper returns [], and
+//      the live /api/memory/health returns []). The card was a permanent empty
+//      state implying the bot had logged no warnings. sentinels-card.tsx is left
+//      on disk UNEDITED — if the log is ever piped here, remount it as-is.
 //
 // B4 (2026-06-19): the health view is promoted to a top-level "Health" home
 // (additive nav entry; /memory?tab=health deep link preserved) and gains two
@@ -92,7 +96,6 @@ export function HealthSection() {
         </div>
       </CollapsibleSection>
       <HeartbeatView />
-      <SentinelsCard />
     </div>
   );
 }

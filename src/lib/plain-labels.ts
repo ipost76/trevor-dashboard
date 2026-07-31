@@ -63,6 +63,21 @@ export const KIND_PLAIN: Record<string, string> = {
   declared_not_detected: "Declared a change, but none was found",
 };
 
+/**
+ * Trade-reconciliation mismatch kinds — the heartbeat's `reconcile` category,
+ * `open_mismatches[].kind`. A DIFFERENT domain from KIND_PLAIN above, which maps
+ * the watcher's `reconciliation_log.kind`; the two must not be conflated.
+ *
+ * 🚨 DELIBERATELY EMPTY. C2 could not observe this domain: the Observatory
+ * collector that publishes the category was decommissioned (RM-DECOM) and the
+ * category has never been published, so there is no live data to read the keys
+ * from. Per this module's contract we add only keys OBSERVED in live data, and
+ * inventing plausible ones would be the guess the header forbids. The helper
+ * below still does its job — an unmapped kind reads "Mismatch", never the raw
+ * key. Add real keys here when the category actually starts publishing.
+ */
+export const MISMATCH_KIND_PLAIN: Record<string, string> = {};
+
 // ── reconciliation result (reconciliation_log.outcome) ───────────────────────
 export const OUTCOME_PLAIN: Record<string, string> = {
   mismatch: "Mismatch found",
@@ -110,6 +125,19 @@ export function plainSeverity(raw: string | null | undefined): string {
 export function plainKind(raw: string | null | undefined): string {
   if (!raw) return "Check";
   return KIND_PLAIN[raw] ?? "Check";
+}
+
+/**
+ * A trade-reconciliation mismatch kind, for the pill on the reconcile card.
+ *
+ * Separate from plainKind() on purpose: that helper's neutral fallback is
+ * "Check", which reads wrong on a mismatch pill ("Check 3" implies a check ran,
+ * not that three records disagree). Adding a helper rather than changing an
+ * existing fallback — other prompts read this module live.
+ */
+export function plainMismatchKind(raw: string | null | undefined): string {
+  if (!raw) return "Mismatch";
+  return MISMATCH_KIND_PLAIN[raw] ?? "Mismatch";
 }
 
 export function plainOutcome(raw: string | null | undefined): string {

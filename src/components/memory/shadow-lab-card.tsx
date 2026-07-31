@@ -152,7 +152,7 @@ export function ShadowLabCard() {
         <EmptyState
           icon={<FlaskConical size={28} />}
           title="No shadows registered yet"
-          body="The unified shadow registry is empty. The first shadow registers in B7 (ssl.py); this lab lights up automatically once shadow_registry carries a row."
+          body="No experiments are running yet. This fills in when the first one starts."
         />
       )}
 

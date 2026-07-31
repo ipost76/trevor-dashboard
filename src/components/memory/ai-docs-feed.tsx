@@ -9,6 +9,7 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { plainCategory } from "@/lib/plain-labels";
 import { FileText, Download } from "lucide-react";
 
 // B4 AI engine (Hub read-side) — AI Docs feed (Health zone "docs" sub-tab).
@@ -21,8 +22,10 @@ import { FileText, Download } from "lucide-react";
 // this reads ai_findings.recon_md, NOT the downloads file system. No shared
 // module, route, or storage with the downloads surface.
 //
-// EMPTY until the engine produces a finding with a recon doc (capped until
-// 2026-07-01) — renders a clean EmptyState, never errors.
+// EMPTY until the engine produces a finding carrying a recon doc — renders a
+// clean EmptyState, never errors. (Was "capped until 2026-07-01"; that date had
+// passed and the claim was no longer true. C2 removed it rather than restate a
+// cap nobody had re-measured.)
 
 const ENDPOINT = "/api/health/ai-findings";
 const POLL_MS = 60_000;
@@ -109,7 +112,7 @@ export function AiDocsFeed() {
           <EmptyState
             icon={<FileText size={28} />}
             title="No recon documents yet"
-            body="Deep-dive recon write-ups produced by the AI Analysis Engine appear here as downloadable docs. The engine is capped until 2026-07-01."
+            body="In-depth write-ups appear here as downloadable documents once the analysis engine produces one."
           />
         )}
 
@@ -130,12 +133,16 @@ export function AiDocsFeed() {
                   aria-hidden
                 />
                 <div className="min-w-0 flex-1">
+                  {/* C2: the title fell back to the raw .md filename and then to
+                      a row id. Neither is a title — a reader cannot tell what a
+                      document is from either one, and both are internal
+                      bookkeeping. The filename was ALSO rendered on its own
+                      below; that span is gone for the same reason. */}
                   <div className="truncate font-sans text-body font-semibold text-fg-primary">
-                    {d.title ?? d.recon_md_filename ?? `Finding #${d.id}`}
+                    {d.title ?? "Untitled report"}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-micro text-fg-muted">
-                    {d.category && <span>{d.category}</span>}
-                    {d.recon_md_filename && <span>{d.recon_md_filename}</span>}
+                    {d.category && <span>{plainCategory(d.category)}</span>}
                     <span>{fmtAge(d.created_at)}</span>
                   </div>
                 </div>
