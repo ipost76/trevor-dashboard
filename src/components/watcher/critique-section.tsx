@@ -2,7 +2,7 @@
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
 import { plainCheck, plainDecisionKind, plainSeverity } from "@/lib/plain-labels";
-import { fmtAge, fmtUpdated } from "./watcher-format";
+import { fmtAge, fmtPanelUpdated } from "./watcher-format";
 
 /**
  * WATCHER → critique sub-tab. The trainer decisions the watcher reviewed and
@@ -35,6 +35,7 @@ interface Resp {
   status: string;
   critiques: Critique[];
   updated_seconds: number | null;
+  critiques_updated_at: string | null;
   error?: string;
 }
 
@@ -107,7 +108,12 @@ export function CritiqueSection() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-mint-strong" />
-            {fmtUpdated(data.updated_seconds)}
+            {/* 🚨 This panel's OWN age, never the shared headline. With no
+                critiques stored, the headline age IS the errors pool's — showing
+                it here would relabel one pool's freshness as another's, the very
+                defect this surface was rebuilt to stop. A null reads "never
+                updated", which is the honest state of an unwritten pool. */}
+            {fmtPanelUpdated(data.critiques_updated_at)}
           </span>
         </div>
         <EmptyState
@@ -123,7 +129,7 @@ export function CritiqueSection() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-gold" />
-          {fmtUpdated(data.updated_seconds)}
+          {fmtPanelUpdated(data.critiques_updated_at)}
         </span>
         <span className="text-fg-faint">·</span>
         <span>

@@ -2,16 +2,23 @@
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
 import { plainCheck, plainHealthDetail, plainSource, plainStatus } from "@/lib/plain-labels";
-import { fmtAge, fmtUpdated } from "./watcher-format";
+import { fmtAge, fmtPanelUpdated, fmtUpdated } from "./watcher-format";
 
 /**
- * WATCHER → errors sub-tab. The watcher's real live detections
- * (watcher_errors) + its per-check self-health roll-up (watcher_health), read
- * from data/watcher.db (mode=ro) via /api/watcher/critiques.
+ * WATCHER → errors sub-tab. The watcher's recorded detections (watcher_errors)
+ * + its per-check self-health roll-up (watcher_health), read from
+ * data/watcher.db (mode=ro) via /api/watcher/critiques.
  *
- * Rendered HONESTLY: a ~79h stale loop, a dead cron, or a dead critical daemon
- * is correct reporting of genuinely bad live state — NOT a Hub bug. This is the
- * cockpit surface where that oversight finally reaches Ghost.
+ * 🚨 These rows are RECORDED DETECTIONS, not a live reading — each panel shows
+ * its OWN newest write (errors_updated_at / health_updated_at) rather than the
+ * shared headline, so one pool can never re-badge another's freshness. The
+ * arming banner in <WatcherZoneView/> says when a cycle last ran at all.
+ *
+ * (This header and the panel subtitle both used to vouch for the stored rows as
+ * a correct description of the system right now. Nothing had checked, and every
+ * stored row is historical or masked-by-design. Both claims are gone: an
+ * unverified assertion in a comment outlives the string on screen and misteaches
+ * the next reader. State what a returned field says, or say nothing.)
  */
 
 interface WatcherError {
@@ -33,6 +40,8 @@ interface Resp {
   errors: WatcherError[];
   health: WatcherHealth[];
   updated_seconds: number | null;
+  errors_updated_at: string | null;
+  health_updated_at: string | null;
   error?: string;
 }
 
@@ -110,12 +119,16 @@ export function ErrorsSection() {
           <h3 className="flex items-center gap-2 font-sans text-caption font-semibold text-accent-gold">
             <span aria-hidden>⚠</span>
             {unresolved > 0
-              ? `${unresolved} worth a look — surfaced by the watcher`
-              : "all surfaced errors resolved"}
+              ? `${unresolved} recorded detections — none marked resolved`
+              : "every recorded detection is marked resolved"}
           </h3>
+          {/* What is actually known: these are stored rows, and the newest write
+              to this pool is what the age below reports. No claim is made about
+              whether any of them still describes the system now — nothing has
+              re-checked them, so nothing could support that claim. */}
           <p className="font-sans text-micro leading-relaxed text-fg-muted">
-            These are real detections of genuinely bad live state — correct
-            reporting, not a Hub bug.
+            Recorded detections, {fmtPanelUpdated(data.errors_updated_at)} — not a
+            live reading. Nothing has re-checked them since.
           </p>
           <div className="space-y-1.5">
             {errors.map((e) => (
@@ -149,6 +162,13 @@ export function ErrorsSection() {
         <Card>
           <CardHeader>
             <CardTitle>Watcher self-checks</CardTitle>
+            {/* This pool's OWN newest write. It is deliberately not the headline:
+                the self-health bookkeeping row is written more recently than the
+                surface checks, so a shared age would let it speak for rows it
+                has nothing to do with. */}
+            <span className="font-sans text-micro text-fg-muted">
+              {fmtPanelUpdated(data.health_updated_at)}
+            </span>
           </CardHeader>
           <div className="space-y-1.5 p-3 md:p-4">
             {health.map((h) => (

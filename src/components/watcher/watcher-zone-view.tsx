@@ -6,6 +6,7 @@ import { IntegritySection } from "./integrity-section";
 import { LevelSection } from "./level-section";
 import { MemoryIntelSection } from "@/components/memory/memory-intel-section";
 import { ZoneEyebrow } from "@/components/zone-eyebrow";
+import { armingLine } from "./watcher-format";
 
 /**
  * WATCHER zone dispatcher (R12-B2). Renders the cockpit surface where Ghost
@@ -31,6 +32,68 @@ interface WatcherZoneViewProps {
   subtab: string;
 }
 
+/**
+ * The two sub-tabs NOT written by a watcher cycle: `level` reads the VM level
+ * chain live over ssh, `loops` reads the replica's loop_health. An arming banner
+ * over either would MANUFACTURE a staleness claim about data that is not stale.
+ *
+ * Expressed as the exclusion set, not the inclusion set, so it mirrors the
+ * dispatcher's `default:` exactly — a stale `?tab=` renders <ErrorsSection/>,
+ * which IS cycle-backed and must carry the banner with it.
+ */
+const NON_CYCLE_TABS = new Set(["level", "loops"]);
+
+interface ArmingResp {
+  watcher_cycle_ever_ran: boolean | null;
+  watcher_last_cycle_at: string | null;
+}
+
+/**
+ * Says when the watcher last actually ran, so a reader knows whether the panels
+ * below are a live reading or a snapshot. The three-state copy lives in
+ * `armingLine()` (watcher-format.ts) — a pure function, so each state can be
+ * rendered and checked directly rather than inferred.
+ */
+function ArmingBanner() {
+  const [arming, setArming] = React.useState<ArmingResp | null>(null);
+  const [loaded, setLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/watcher/critiques", { cache: "no-store" });
+        if (cancelled) return;
+        if (res.ok) setArming(await res.json());
+      } catch {
+        // swallow — no response reads as UNKNOWN below, never as "never ran".
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Say nothing until we know something — an empty banner beats a guessed one.
+  if (!loaded) return null;
+
+  // No response at all means the same thing as an unreadable store: UNKNOWN.
+  // `?? null` maps undefined -> null and leaves a real `false` alone.
+  const { label, body, tone } = armingLine(
+    arming?.watcher_cycle_ever_ran ?? null,
+    arming?.watcher_last_cycle_at ?? null,
+  );
+
+  return (
+    <div className={`rounded-md border p-3 ${tone}`}>
+      <div className="font-sans text-micro font-semibold text-fg-primary">{label}</div>
+      <p className="font-sans text-micro leading-relaxed text-fg-muted">{body}</p>
+    </div>
+  );
+}
+
 export function WatcherZoneView({ subtab }: WatcherZoneViewProps) {
   const view = (() => {
     switch (subtab) {
@@ -54,6 +117,11 @@ export function WatcherZoneView({ subtab }: WatcherZoneViewProps) {
           owns its own padding) so {view} renders byte-identical to before. */}
       <div className="px-4 pt-4 md:px-6 lg:px-8">
         <ZoneEyebrow zone="watcher" />
+        {!NON_CYCLE_TABS.has(subtab) && (
+          <div className="mt-3">
+            <ArmingBanner />
+          </div>
+        )}
       </div>
       {view}
     </div>
