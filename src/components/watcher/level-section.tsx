@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, Skeleton } from "@/components/ui";
+import { plainCheck } from "@/lib/plain-labels";
 import { fmtAge } from "./watcher-format";
 
 /**
@@ -151,23 +152,19 @@ export function LevelSection() {
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <Pill tone="neutral" size="sm">
-                      L{h.level}
+                      Level {h.level}
                     </Pill>
                     {h.is_revert && (
                       <Pill intent="warn" size="sm">
-                        revert
+                        reverted
                       </Pill>
                     )}
                     <span className="font-sans text-caption text-fg-primary">
-                      {h.money_path_change ?? "—"}
+                      {h.money_path_change ?? "No description recorded"}
                     </span>
                     <span className="ml-auto font-sans text-micro text-fg-faint">
                       {fmtAge(h.created_at)} ago
                     </span>
-                  </div>
-                  <div className="font-sans text-micro text-fg-muted">
-                    {h.prompt_id ?? "—"}
-                    {h.commit_hash ? ` · ${h.commit_hash.slice(0, 8)}` : ""}
                   </div>
                 </div>
               ))}
@@ -203,7 +200,7 @@ export function LevelSection() {
           <div className="space-y-1.5 p-3 md:p-4">
             {integ.status !== "ok" ? (
               <p className="font-sans text-micro leading-relaxed text-fg-muted">
-                Integrity couldn&apos;t be read over the pipe right now. {integ.reason}
+                Couldn&apos;t check the bot&apos;s integrity right now.
               </p>
             ) : (
               <>
@@ -226,10 +223,14 @@ export function LevelSection() {
                         (c.ok ? "bg-accent-mint-strong" : "bg-accent-red")
                       }
                     />
-                    <span className="font-mono text-micro text-fg-primary">{c.check}</span>
+                    <span className="font-sans text-micro text-fg-primary">
+                      {plainCheck(c.check)}
+                    </span>
                     {c.findings.length > 0 && (
                       <span className="font-sans text-micro text-accent-red">
-                        {c.findings.length} finding(s)
+                        {c.findings.length === 1
+                          ? "1 problem"
+                          : `${c.findings.length} problems`}
                       </span>
                     )}
                   </div>
@@ -250,17 +251,16 @@ export function LevelSection() {
                 {cfg.status !== "ok"
                   ? "unavailable"
                   : cfg.populated
-                    ? "populated"
-                    : "awaiting R8"}
+                    ? "recorded"
+                    : "not started yet"}
               </Pill>
             </div>
           </CardHeader>
           <div className="p-3 md:p-4">
             <p className="font-sans text-micro leading-relaxed text-fg-muted">
               {cfg.status !== "ok"
-                ? `Couldn't read the config-tested cross-reference right now. ${cfg.reason ?? ""}`
-                : (cfg.r8_dependency ??
-                  "Level-tagged test results are populated by R8 — expected-empty until then, not a fault.")}
+                ? "Couldn't cross-check the settings right now."
+                : "Test results aren't being recorded against each level yet. That's expected at this stage, not a fault."}
             </p>
           </div>
         </Card>

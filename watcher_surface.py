@@ -86,6 +86,58 @@ CRITICAL_DAEMONS = (
     "trevor-observatory.service",
 )
 
+# ── plain-English helpers for the `detail` text (RM-HUB-CLEAN B2) ─────────────
+# Every record_health detail below is read verbatim by the Hub's WATCHER tab, so
+# it is USER-FACING COPY, not a log line. It must never carry a unit name, a
+# snake_case table name, a shell glob, a raw exception or a serialized dict.
+# The Hub applies its own floor too (src/lib/plain-labels.ts plainHealthDetail),
+# which rejects any stored detail that does not read as a sentence.
+
+# Unit -> plain name. Deliberately NOT derived by stripping the prefix/suffix: a
+# de-hyphenated unit name is still a unit name. An unmapped unit is left UNNAMED
+# by the callers rather than guessed at.
+UNIT_PLAIN = {
+    "trevor.service": "the trading bot",
+    "trevor-monitor-center.service": "the monitor centre",
+    "trevor-observatory.service": "the observatory",
+    "trevor-regime-transitions.service": "market-regime transitions",
+}
+
+_NUMBER_WORDS = ("No", "One", "Two", "Three", "Four", "Five",
+                 "Six", "Seven", "Eight", "Nine", "Ten")
+
+
+def _plain_count(n: int) -> str:
+    """Small counts read better as words at the start of a sentence."""
+    return _NUMBER_WORDS[n] if 0 <= n < len(_NUMBER_WORDS) else str(n)
+
+
+def _plain_duration(seconds: float) -> str:
+    """Machine seconds -> the largest sensible human unit ('5 days', '6 hours')."""
+    try:
+        s = abs(float(seconds))
+    except (TypeError, ValueError):
+        return "an unknown time"
+    if s < 90:
+        n, unit = round(s), "second"
+    elif s < 5400:
+        n, unit = round(s / 60), "minute"
+    elif s < 172800:
+        n, unit = round(s / 3600), "hour"
+    else:
+        n, unit = round(s / 86400), "day"
+    return f"{n} {unit}" if n == 1 else f"{n} {unit}s"
+
+
+def _plain_join(names) -> str:
+    """['a', 'b', 'c'] -> 'a, b and c'."""
+    names = list(names)
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
 # Mirror of loop_registry.REMOVED_LOOPS (VM) — a belt-and-suspenders ignore-set OVER the
 # is_dormant filter (all 9 are is_dormant=1). fetch_removed_loops() refreshes it from the
 # VM source of truth per cycle; this is the fallback if that ssh read fails. Re-sync if
@@ -323,7 +375,8 @@ def check_loop_freshness(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3.
             "SELECT loop_name, cadence_seconds, last_iteration_at, is_dormant, error_count "
             "FROM loop_heartbeat").fetchall()
     except sqlite3.Error as exc:
-        record_health(watcher_conn, check, "unknown", f"loop_heartbeat unreadable: {exc}")
+        record_health(watcher_conn, check, "unknown",
+                      "Couldn't read the record of background-loop activity.")
         return {"status": "unknown", "error": str(exc)}
     fired: List[str] = []
     unparsed = 0
@@ -346,9 +399,15 @@ def check_loop_freshness(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3.
             }, severity="high")
             fired.append(name)
     resolve_cleared(watcher_conn, "loop_stall", set(fired))
-    record_health(watcher_conn, check, "degraded" if fired else "ok",
-                  f"{len(fired)} stale of {len(rows)} loops"
-                  + (f"; {unparsed} unparseable ts" if unparsed else ""))
+    if fired:
+        _detail = (f"{len(fired)} of {len(rows)} background loops "
+                   f"{'has' if len(fired) == 1 else 'have'} stopped updating.")
+    else:
+        _detail = f"All {len(rows)} background loops are updating normally."
+    if unparsed:
+        _detail += (f" {_plain_count(unparsed)} more "
+                    f"{'has' if unparsed == 1 else 'have'} no readable last-run time.")
+    record_health(watcher_conn, check, "degraded" if fired else "ok", _detail)
     return {"status": "ok", "fired": fired, "scanned": len(rows), "unparsed": unparsed}
 
 
@@ -367,9 +426,11 @@ def check_stuck_testing(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3.C
     except sqlite3.Error as exc:
         if "no such table" in str(exc).lower():
             resolve_cleared(watcher_conn, "stuck_testing", set())  # definitive: nothing testing
-            record_health(watcher_conn, check, "ok", "shadow_lifecycle absent — expected pre-cutover")
+            record_health(watcher_conn, check, "ok",
+                          "Nothing is being tested yet, which is expected at this stage.")
             return {"status": "ok", "fired": [], "note": "table absent (expected)"}
-        record_health(watcher_conn, check, "unknown", f"shadow_lifecycle unreadable: {exc}")
+        record_health(watcher_conn, check, "unknown",
+                      "Couldn't read the record of what's being tested.")
         return {"status": "unknown", "error": str(exc)}
     fired: List[str] = []
     for shadow_id, state, changed_at in rows:
@@ -384,8 +445,12 @@ def check_stuck_testing(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3.C
             }, severity="medium")
             fired.append(str(shadow_id))
     resolve_cleared(watcher_conn, "stuck_testing", set(fired))
-    record_health(watcher_conn, check, "degraded" if fired else "ok",
-                  f"{len(fired)} stuck TESTING of {len(rows)} testing rows")
+    if fired:
+        _detail = (f"{_plain_count(len(fired))} of {len(rows)} tests "
+                   f"{'has' if len(fired) == 1 else 'have'} been stuck for more than a day.")
+    else:
+        _detail = "Nothing is stuck in testing."
+    record_health(watcher_conn, check, "degraded" if fired else "ok", _detail)
     return {"status": "ok", "fired": fired, "scanned": len(rows)}
 
 
@@ -406,19 +471,25 @@ def check_alerting_canary(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3
     except sqlite3.Error as exc:
         if "no such table" in str(exc).lower():
             resolve_cleared(watcher_conn, "swallowed_canary", set())
-            record_health(watcher_conn, check, "ok", "hmm_inference_log absent — expected-empty")
+            record_health(watcher_conn, check, "ok",
+                          "No market-regime data is being recorded yet, which is expected "
+                          "at this stage.")
             return {"status": "ok", "fired": [], "note": "hmm table absent"}
-        record_health(watcher_conn, check, "unknown", f"hmm_inference_log unreadable: {exc}")
+        record_health(watcher_conn, check, "unknown",
+                      "Couldn't read the market-regime data.")
         return {"status": "unknown", "error": str(exc)}
     hmm_last = row[0] if row else None
     if hmm_last is None:
         resolve_cleared(watcher_conn, "swallowed_canary", set())
-        record_health(watcher_conn, check, "ok", "no hmm_inference rows — expected-empty")
+        record_health(watcher_conn, check, "ok",
+                      "No market-regime readings have been recorded yet, which is expected "
+                      "at this stage.")
         return {"status": "ok", "fired": [], "note": "hmm empty"}
     try:
         hmm_last = int(hmm_last)
     except (TypeError, ValueError):
-        record_health(watcher_conn, check, "unknown", f"hmm ts unparseable: {hmm_last!r}")
+        record_health(watcher_conn, check, "unknown",
+                      "The market-regime data has an unreadable timestamp.")
         return {"status": "unknown", "error": "hmm ts unparseable"}
     hmm_age = now_epoch - hmm_last
     fired: List[str] = []
@@ -430,7 +501,8 @@ def check_alerting_canary(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3
                 "SELECT count(*) FROM observability_alerts "
                 "WHERE alert_type='hmm_stale' AND created_at > ?", (window_start,)).fetchone()[0]
         except sqlite3.Error as exc:
-            record_health(watcher_conn, check, "unknown", f"observability_alerts unreadable: {exc}")
+            record_health(watcher_conn, check, "unknown",
+                          "Couldn't read the alert history.")
             return {"status": "unknown", "error": str(exc)}
         if n_alerts == 0:
             route_malfunction(watcher_conn, "swallowed_canary", "hmm_stale_alerter", {
@@ -442,8 +514,16 @@ def check_alerting_canary(watcher_conn: sqlite3.Connection, trevor_conn: sqlite3
             }, severity="high")
             fired.append("hmm_stale_alerter")
     resolve_cleared(watcher_conn, "swallowed_canary", set(fired))
-    record_health(watcher_conn, check, "degraded" if fired else "ok",
-                  f"hmm_age={hmm_age}s (threshold {hmm_stale_seconds}s); fired={len(fired)}")
+    if fired:
+        _detail = (f"Market-regime data is {_plain_duration(hmm_age)} old — it should be "
+                   f"under {_plain_duration(hmm_stale_seconds)}. No alert was raised about it.")
+    elif hmm_age > hmm_stale_seconds:
+        _detail = (f"Market-regime data is {_plain_duration(hmm_age)} old — it should be "
+                   f"under {_plain_duration(hmm_stale_seconds)}. An alert was raised.")
+    else:
+        _detail = (f"Market-regime data is {_plain_duration(hmm_age)} old, within the limit "
+                   f"of {_plain_duration(hmm_stale_seconds)}.")
+    record_health(watcher_conn, check, "degraded" if fired else "ok", _detail)
     return {"status": "ok", "fired": fired, "hmm_age_seconds": hmm_age}
 
 
@@ -460,12 +540,14 @@ def check_critical_units(watcher_conn: sqlite3.Connection, *,
     res = run("systemctl is-active " + " ".join(units))
     out = res.get("out", "")
     if not out:  # empty reply => ssh genuinely failed => UNKNOWN (never a false all-clear)
-        record_health(watcher_conn, check, "unknown", f"ssh vm returned no output: {res.get('err')}")
+        record_health(watcher_conn, check, "unknown",
+                      "Couldn't reach the trading server to check its background services.")
         return {"status": "unknown", "error": res.get("err") or "no output"}
     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
     if len(lines) != len(units):  # ambiguous mapping — decline rather than mis-attribute
         record_health(watcher_conn, check, "unknown",
-                      f"is-active returned {len(lines)} states for {len(units)} units")
+                      "The background-service check gave an unexpected reply, so its result "
+                      "couldn't be trusted.")
         return {"status": "unknown", "error": "state count mismatch", "out": out}
     fired: List[str] = []
     states: Dict[str, str] = {}
@@ -478,8 +560,17 @@ def check_critical_units(watcher_conn: sqlite3.Connection, *,
             }, severity=("critical" if unit == "trevor.service" else "high"))
             fired.append(unit)
     resolve_cleared(watcher_conn, "systemctl_failed", set(fired))
-    record_health(watcher_conn, check, "degraded" if fired else "ok",
-                  f"{len(fired)} critical daemon(s) not active: {states}")
+    # 🚨 The states dict must NEVER reach the UI — build the sentence from the
+    # mapped plain names. An unmapped unit is counted but not named, rather than
+    # leaking its unit name onto the screen.
+    if fired:
+        named = [UNIT_PLAIN[u] for u in fired if u in UNIT_PLAIN]
+        _detail = (f"{_plain_count(len(fired))} background "
+                   f"{'service is' if len(fired) == 1 else 'services are'} stopped")
+        _detail += f": {_plain_join(named)}." if len(named) == len(fired) else "."
+    else:
+        _detail = f"All {len(units)} background services are running."
+    record_health(watcher_conn, check, "degraded" if fired else "ok", _detail)
     return {"status": "ok", "fired": fired, "states": states}
 
 
@@ -523,11 +614,21 @@ def check_cron_liveness(watcher_conn: sqlite3.Connection, *,
 
     if definitive:
         resolve_cleared(watcher_conn, "cron_dead", set(fired))
-        record_health(watcher_conn, check, "degraded" if fired else "ok",
-                      f"{len(fired)} failed trevor-* job(s)")
+        # `fired` holds "<box>:<unit>" keys — name the job in plain words, never the
+        # unit name or the trevor-* glob. Unmapped jobs are counted, not named.
+        if fired:
+            named = [UNIT_PLAIN[k.split(":", 1)[-1]] for k in fired
+                     if k.split(":", 1)[-1] in UNIT_PLAIN]
+            _detail = (f"{_plain_count(len(fired))} scheduled "
+                       f"{'job' if len(fired) == 1 else 'jobs'} failed on "
+                       f"{'its' if len(fired) == 1 else 'their'} last run")
+            _detail += f": {_plain_join(named)}." if len(named) == len(fired) else "."
+        else:
+            _detail = "All scheduled jobs completed successfully."
+        record_health(watcher_conn, check, "degraded" if fired else "ok", _detail)
         return {"status": "ok", "fired": fired}
     record_health(watcher_conn, check, "unknown",
-                  f"scheduled-job read incomplete (fired {len(fired)}; resolution deferred)")
+                  "Couldn't check all the scheduled jobs, so this result is incomplete.")
     return {"status": "partial", "fired": fired}
 
 
@@ -555,6 +656,7 @@ def run_surface_checks(*, watcher_conn: Optional[sqlite3.Connection] = None,
         watcher_conn = get_connection()
         own_watcher = True
     results: Dict[str, Any] = {}
+    replica_err = "replica unreadable"
     try:
         if trevor_conn is None:
             try:
@@ -562,8 +664,12 @@ def run_surface_checks(*, watcher_conn: Optional[sqlite3.Connection] = None,
                 own_trevor = True
             except sqlite3.Error as exc:
                 trevor_conn = None
+                # The exception text stays MACHINE-side (it reaches the log via the
+                # results dict); the health detail the Hub renders stays English.
+                replica_err = f"replica unreadable: {exc}"
                 for chk in ("loop_freshness", "stuck_testing", "alerting_canary"):
-                    record_health(watcher_conn, chk, "unknown", f"replica unreadable: {exc}")
+                    record_health(watcher_conn, chk, "unknown",
+                                  "Couldn't read the copy of the trading database.")
         if removed_loops is None:
             removed_loops = fetch_removed_loops(run=vm_run)
         if trevor_conn is not None:
@@ -573,7 +679,7 @@ def run_surface_checks(*, watcher_conn: Optional[sqlite3.Connection] = None,
             results["alerting_canary"] = _guard(check_alerting_canary, watcher_conn, trevor_conn)
         else:
             results["loop_freshness"] = results["stuck_testing"] = \
-                results["alerting_canary"] = {"status": "unknown", "error": "replica unreadable"}
+                results["alerting_canary"] = {"status": "unknown", "error": replica_err}
         results["critical_units"] = _guard(check_critical_units, watcher_conn, run=vm_run)
         results["cron_liveness"] = _guard(
             check_cron_liveness, watcher_conn, run_vm=vm_run, run_local=local_run)

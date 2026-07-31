@@ -43,7 +43,7 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from lib.watcher_db import get_connection
-from watcher_surface import record_health, run_surface_checks
+from watcher_surface import _plain_join, record_health, run_surface_checks
 import watcher_review        # the review-brain MODULE (NOT lib.watcher_integrity_db) — RF2-B4 W6 orchestration
 import watcher_integrity     # the integrity MODULE — exact-dotted-component ≠ 'watcher_integrity_db' (denial-1a clean)
 
@@ -304,11 +304,28 @@ def run_cycle(*, watcher_conn=None, heartbeat: Optional[WatcherHeartbeat] = None
 
         emitted = heartbeat.emit()
         status = "ok" if (emitted and surface_ok and review_ok and integrity_ok) else "degraded"
-        record_self_health(watcher_conn, status,
-                           f"cycle {'ok' if surface_ok else 'DEGRADED (surface error)'}; "
-                           f"{n_fired} malfunction(s) surfaced, {n_unknown} check(s) UNKNOWN; "
-                           f"{n_critiques} critique(s), {n_findings} integrity finding(s); "
-                           f"heartbeat={'emitted' if emitted else 'FAILED (non-fatal)'}")
+        # 🚨 USER-FACING COPY (RM-HUB-CLEAN B2) — the Hub's WATCHER tab renders this
+        # detail verbatim. Name the counts in words; never a raw log line.
+        _parts = []
+        if n_fired:
+            _parts.append(f"found {n_fired} problem{'' if n_fired == 1 else 's'}")
+        if n_unknown:
+            _parts.append(f"couldn't complete {n_unknown} check{'' if n_unknown == 1 else 's'}")
+        if n_critiques:
+            _parts.append(f"raised {n_critiques} comment{'' if n_critiques == 1 else 's'} "
+                          "on the trainer")
+        if n_findings:
+            _parts.append(f"flagged {n_findings} integrity "
+                          f"{'issue' if n_findings == 1 else 'issues'}")
+        if not _parts:
+            _detail = "Last check found nothing wrong."
+        else:
+            _detail = "Last check " + _plain_join(_parts) + "."
+        if not surface_ok:
+            _detail += " Some checks could not run."
+        if not emitted:
+            _detail += " The watcher could not record that it ran."
+        record_self_health(watcher_conn, status, _detail)
         return {"enabled": True, "checks": checks, "heartbeat_emitted": emitted,
                 "surfaced": n_fired, "unknown_checks": n_unknown,
                 "critiques": n_critiques, "integrity_findings": n_findings}

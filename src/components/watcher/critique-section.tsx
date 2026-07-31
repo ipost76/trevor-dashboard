@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
+import { plainCheck, plainDecisionKind, plainSeverity } from "@/lib/plain-labels";
 import { fmtAge, fmtUpdated } from "./watcher-format";
 
 /**
@@ -17,7 +18,6 @@ import { fmtAge, fmtUpdated } from "./watcher-format";
 
 interface FiredCheck {
   check: string;
-  evidence: string;
 }
 interface Critique {
   id: number;
@@ -42,6 +42,19 @@ function severityIntent(sev: string): "error" | "warn" | undefined {
   if (sev === "problem") return "error";
   if (sev === "concern") return "warn";
   return undefined; // note -> neutral tone
+}
+
+const JUDGMENT_MAX = 400;
+
+/** Cut long prose at a real sentence end, never mid-word or mid-sentence. */
+function truncateToSentence(text: string): string {
+  const t = text.trim();
+  if (t.length <= JUDGMENT_MAX) return t;
+  const head = t.slice(0, JUDGMENT_MAX);
+  const end = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "));
+  if (end > 0) return head.slice(0, end + 1);
+  const space = head.lastIndexOf(" ");
+  return (space > 0 ? head.slice(0, space) : head) + "…";
 }
 
 export function CritiqueSection() {
@@ -80,11 +93,7 @@ export function CritiqueSection() {
       <div className="p-4 md:p-6 lg:px-8">
         <EmptyState
           title="Critiques unavailable"
-          body={
-            data?.error
-              ? `Couldn't read the watcher's critique store right now: ${data.error}`
-              : "Couldn't read the watcher's critique store right now."
-          }
+          body="Couldn't read the watcher's records right now."
         />
       </div>
     );
@@ -103,7 +112,7 @@ export function CritiqueSection() {
         </div>
         <EmptyState
           title="Nothing wrong found"
-          body="The watcher critiques only problems — an empty list means no problem was flagged, not that nothing was checked. Pre-cutover the trainer hasn't decided anything yet."
+          body="Nothing wrong found. The watcher only records problems, so an empty list means it checked and found nothing."
         />
       </div>
     );
@@ -119,7 +128,7 @@ export function CritiqueSection() {
         <span className="text-fg-faint">·</span>
         <span>
           {critiques.length} problem{critiques.length === 1 ? "" : "s"} the watcher
-          flagged — read + adjust the trainer via CC
+          flagged while reviewing the bot&apos;s own learning decisions
         </span>
       </div>
 
@@ -129,12 +138,10 @@ export function CritiqueSection() {
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
                 <Pill intent={severityIntent(c.severity)} tone={severityIntent(c.severity) ? undefined : "neutral"} size="sm">
-                  {c.severity}
+                  {plainSeverity(c.severity)}
                 </Pill>
-                <CardTitle>
-                  {c.decision_kind} · {c.decision_ref}
-                </CardTitle>
-                <span className="font-sans text-micro text-fg-faint">level {c.level_id}</span>
+                <CardTitle>{plainDecisionKind(c.decision_kind)}</CardTitle>
+                <span className="font-sans text-micro text-fg-faint">Level {c.level_id}</span>
                 <span className="ml-auto font-sans text-micro text-fg-faint">
                   {fmtAge(c.ts)} ago
                 </span>
@@ -145,15 +152,16 @@ export function CritiqueSection() {
                   surfaced. The R11 memory hook is never shown (that's R11). */}
               <div className="space-y-1">
                 <div className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-                  what fired ({c.fired_checks.length} of {c.checks_applicable} checks)
+                  {c.fired_checks.length} of {c.checks_applicable} checks flagged something
                 </div>
                 {c.fired_checks.length === 0 ? (
-                  <p className="font-sans text-micro text-fg-faint">no mechanical check recorded</p>
+                  <p className="font-sans text-micro text-fg-faint">
+                    No automatic checks were recorded for this one.
+                  </p>
                 ) : (
                   c.fired_checks.map((f, i) => (
-                    <div key={i} className="font-mono text-micro text-fg-primary">
-                      <span className="text-accent-gold">{f.check}</span>
-                      {f.evidence ? <span className="text-fg-muted"> — {f.evidence}</span> : null}
+                    <div key={i} className="font-sans text-micro text-fg-primary">
+                      <span className="text-accent-gold">{plainCheck(f.check)}</span>
                     </div>
                   ))
                 )}
@@ -164,14 +172,14 @@ export function CritiqueSection() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-                      judgment
+                      assessment
                     </span>
                     <Pill tone="neutral" size="sm">
-                      {c.llm_used ? "llm" : "template"}
+                      {c.llm_used ? "written by AI" : "standard wording"}
                     </Pill>
                   </div>
                   <p className="font-sans text-caption leading-relaxed text-fg-primary">
-                    {c.judgment_text}
+                    {truncateToSentence(c.judgment_text)}
                   </p>
                 </div>
               )}

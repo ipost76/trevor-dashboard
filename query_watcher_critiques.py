@@ -83,32 +83,77 @@ def _freshness(ts_pool: list[Optional[str]]) -> tuple[Optional[int], Optional[st
     return age, newest.isoformat().replace("+00:00", "Z")
 
 
+# Unit -> plain name, mirroring watcher_surface.UNIT_PLAIN. Duplicated on purpose:
+# this reader must never import a watcher writer (see the module docstring).
+_UNIT_PLAIN = {
+    "trevor.service": "the trading bot",
+    "trevor-monitor-center.service": "the monitor service",
+    "trevor-observatory.service": "the observatory service",
+    "trevor-regime-transitions.service": "market-regime transitions",
+}
+_LOCATION_PLAIN = {"vm": "on the trading server", "wsl": "on this machine"}
+
+
+def _plain_age(seconds: Any) -> Optional[str]:
+    """Machine seconds -> the largest sensible human unit, or None if unusable."""
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return None
+    s = abs(float(seconds))
+    if s < 5400:
+        n, unit = round(s / 60), "minute"
+    elif s < 172800:
+        n, unit = round(s / 3600), "hour"
+    else:
+        n, unit = round(s / 86400), "day"
+    return f"{n} {unit}" if n == 1 else f"{n} {unit}s"
+
+
+def _plain_unit(key: Any) -> Optional[str]:
+    """Plain name for a unit key (optionally '<box>:<unit>'), or None if unmapped."""
+    if not isinstance(key, str):
+        return None
+    return _UNIT_PLAIN.get(key.split(":", 1)[-1])
+
+
 def _err_summary(source: str, detail: Any) -> str:
-    """One honest plain-English line per detection — never the raw blob."""
+    """One honest plain-English line per detection — never the raw blob.
+
+    🚨 These strings are USER-FACING COPY on the Hub's WATCHER tab. They must
+    carry no unit name, snake_case key, machine unit or serialized dict. They
+    also describe a MEASUREMENT taken when the detection was recorded, which may
+    be days old — so they are written in the past tense and must never read as a
+    statement about the present moment.
+    """
     d = detail if isinstance(detail, dict) else {}
     if source == "loop_stall":
-        age = d.get("age_seconds")
-        cad = d.get("cadence_seconds")
-        if isinstance(age, (int, float)):
-            h = age / 3600.0
-            base = f"stale {h:.1f}h"
-            return f"{base} (cadence {cad}s)" if cad is not None else base
-        return "loop stalled"
+        age = _plain_age(d.get("age_seconds"))
+        if age:
+            return f"A background loop hadn't updated for {age} when this was found."
+        return "A background loop had stopped updating when this was found."
     if source == "swallowed_canary":
-        age = d.get("hmm_age_seconds")
-        if isinstance(age, (int, float)):
-            return f"HMM canary age {age / 3600.0:.1f}h — alert swallowed"
-        return "alert canary swallowed"
+        age = _plain_age(d.get("hmm_age_seconds"))
+        if age:
+            return (f"Market-regime data was {age} out of date when this was found, "
+                    "and no alert was raised about it.")
+        return ("Market-regime data was out of date when this was found, and no alert "
+                "was raised about it.")
     if source == "cron_dead":
-        return f"dead cron: {d.get('key', 'unknown')}"
+        name = _plain_unit(d.get("key"))
+        loc = d.get("location")
+        where = _LOCATION_PLAIN.get(loc) if isinstance(loc, str) else None
+        if name:
+            return f"A scheduled job stopped running: {name}{' ' + where if where else ''}."
+        return "A scheduled job stopped running."
     if source == "systemctl_failed":
-        note = d.get("note")
-        key = d.get("key", "unknown")
-        return f"{key} — {note}" if note else f"{key}: unit not active"
-    # Generic fallback — a bounded, honest string (never the whole blob).
-    if isinstance(detail, dict):
-        return "; ".join(f"{k}={v}" for k, v in list(detail.items())[:3])[:160]
-    return str(detail)[:160] if detail is not None else ""
+        name = _plain_unit(d.get("key")) or _plain_unit(d.get("unit"))
+        if name:
+            return f"{name.capitalize()} was stopped when this was found."
+        return "A background service was stopped when this was found."
+    # 🚨 Generic fallback for an UNRECOGNISED source — a FIXED sentence. Never
+    # interpolate an unknown key or value here: this branch applies to every
+    # detection type that does not exist yet, so anything dynamic puts raw
+    # machine text back on screen the moment a new check is added.
+    return "Something the watcher flagged — details not recognised."
 
 
 def _summarize_critique(mechanical: Any) -> tuple[list[dict[str, Any]], int]:
@@ -123,12 +168,11 @@ def _summarize_critique(mechanical: Any) -> tuple[list[dict[str, Any]], int]:
     for f in fired_raw:
         if not isinstance(f, dict):
             continue
-        ev = f.get("evidence")
-        if isinstance(ev, dict):
-            ev_line = "; ".join(f"{k}={v}" for k, v in list(ev.items())[:4])[:200]
-        else:
-            ev_line = str(ev)[:200] if ev is not None else ""
-        fired.append({"check": f.get("check", "?"), "evidence": ev_line})
+        # 🚨 `evidence` is deliberately NOT projected. It was rendered verbatim on
+        # the WATCHER tab and was built by joining raw key=value pairs — the same
+        # serialize-a-dict-into-the-UI defect as the _err_summary fallback. The
+        # check NAME is the user-facing fact; the raw evidence is not.
+        fired.append({"check": f.get("check", "?")})
     applicable = sum(1 for f in all_raw if isinstance(f, dict) and f.get("applicable"))
     return fired, applicable
 

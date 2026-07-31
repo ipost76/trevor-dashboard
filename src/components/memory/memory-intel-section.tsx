@@ -76,14 +76,17 @@ const CRITERIA_PLAIN: Record<string, string> = {
 const HUMAN_DECIDES_NOTE =
   "Nothing changes automatically — a human reviews and decides.";
 
+// 🚨 Fallbacks are NEUTRAL PHRASES, never the raw key. A de-underscored
+// identifier is still an identifier — `?? raw` put the code on screen the
+// moment a map missed. Same rule as src/lib/plain-labels.ts.
 function plainLoopName(raw: string): string {
-  return LOOP_NAME_PLAIN[raw] ?? raw.replace(/_/g, " ");
+  return LOOP_NAME_PLAIN[raw] ?? "Unnamed loop";
 }
 function plainStage(raw: string): string {
-  return STAGE_PLAIN[raw] ?? raw;
+  return STAGE_PLAIN[raw] ?? "Unknown stage";
 }
 function plainCriteria(raw: string): string {
-  return CRITERIA_PLAIN[raw] ?? raw;
+  return CRITERIA_PLAIN[raw] ?? "Another check";
 }
 
 // Plain one-line status per loop, derived from the fields the route already sends
@@ -312,7 +315,7 @@ export function MemoryIntelSection() {
           title={data?.error ? "Learning brain unavailable" : "No learning loops yet"}
           body={
             data?.error
-              ? `Couldn't load the learning loops right now: ${data.error}`
+              ? "Couldn't load the learning loops right now."
               : "The learning brain has no active loops to report yet."
           }
         />

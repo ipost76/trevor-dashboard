@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
+import { plainCheck, plainKind, plainOutcome } from "@/lib/plain-labels";
 import { fmtAge, fmtUpdated } from "./watcher-format";
 
 /**
@@ -48,11 +49,6 @@ interface Resp {
   error?: string;
 }
 
-const KIND_LABEL: Record<string, string> = {
-  undeclared_trading_change: "detected but undeclared",
-  declared_not_detected: "declared, not detected",
-};
-
 function findingPill(f: IntegrityFinding): { intent?: "active" | "warn" | "error"; tone?: "neutral"; label: string } {
   if (!f.ok) return { intent: "error", label: "finding" };
   if (f.vacuous) return { tone: "neutral", label: "nothing to check yet" };
@@ -95,11 +91,7 @@ export function IntegritySection() {
       <div className="p-4 md:p-6 lg:px-8">
         <EmptyState
           title="Integrity store unavailable"
-          body={
-            data?.error
-              ? `Couldn't read the watcher integrity store right now: ${data.error}`
-              : "Couldn't read the watcher integrity store right now."
-          }
+          body="Couldn't read the integrity records right now."
         />
       </div>
     );
@@ -124,7 +116,7 @@ export function IntegritySection() {
       {allEmpty ? (
         <EmptyState
           title="No integrity findings yet"
-          body="The watcher's integrity checks and reconciliation haven't recorded anything — expected pre-cutover, with no money-path changes to reconcile."
+          body="Nothing has needed checking yet."
         />
       ) : (
         <>
@@ -145,25 +137,28 @@ export function IntegritySection() {
                         intent={r.kind_rank === 0 ? "error" : "warn"}
                         size="sm"
                       >
-                        {(r.kind && KIND_LABEL[r.kind]) ?? r.kind ?? "reconcile"}
+                        {plainKind(r.kind)}
                       </Pill>
                       {r.resolved && (
                         <Pill tone="neutral" size="sm">
                           resolved
                         </Pill>
                       )}
-                      <span className="font-sans text-caption text-fg-primary">{r.outcome}</span>
+                      <span className="font-sans text-caption text-fg-primary">
+                        {plainOutcome(r.outcome)}
+                      </span>
                       <span className="ml-auto font-sans text-micro text-fg-faint">
                         {fmtAge(r.ts)} ago
                       </span>
                     </div>
+                    {/* The raw triggers are prefixed file paths ("file:foo.py") —
+                        a count is the fact worth showing, not the paths. */}
                     {r.triggers.length > 0 && (
-                      <div className="font-mono text-micro text-fg-muted">
-                        {r.triggers.join(" · ")}
+                      <div className="font-sans text-micro text-fg-muted">
+                        {r.triggers.length === 1
+                          ? "Triggered by 1 change."
+                          : `Triggered by ${r.triggers.length} changes.`}
                       </div>
-                    )}
-                    {r.prompt_id && (
-                      <div className="font-sans text-micro text-fg-faint">{r.prompt_id}</div>
                     )}
                   </div>
                 ))}
@@ -190,11 +185,11 @@ export function IntegritySection() {
                           {p.label}
                         </Pill>
                         <span className="font-sans text-caption text-fg-primary">
-                          {f.check_name}
+                          {plainCheck(f.check_name)}
                         </span>
                         {f.level_id !== null && (
                           <span className="font-sans text-micro text-fg-faint">
-                            level {f.level_id}
+                            Level {f.level_id}
                           </span>
                         )}
                         <span className="ml-auto font-sans text-micro text-fg-faint">

@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { Card, CardHeader, CardTitle, Pill, EmptyState, Skeleton } from "@/components/ui";
+import { plainCheck, plainHealthDetail, plainSource, plainStatus } from "@/lib/plain-labels";
 import { fmtAge, fmtUpdated } from "./watcher-format";
 
 /**
@@ -34,13 +35,6 @@ interface Resp {
   updated_seconds: number | null;
   error?: string;
 }
-
-const SOURCE_LABEL: Record<string, string> = {
-  loop_stall: "loop stalled",
-  cron_dead: "dead cron",
-  systemctl_failed: "unit down",
-  swallowed_canary: "canary swallowed",
-};
 
 export function ErrorsSection() {
   const [data, setData] = React.useState<Resp | null>(null);
@@ -79,9 +73,7 @@ export function ErrorsSection() {
         <EmptyState
           title="Watcher errors unavailable"
           body={
-            data?.error
-              ? `Couldn't read the watcher's error store right now: ${data.error}`
-              : "Couldn't read the watcher's error store right now."
+            "Couldn't read the watcher's records right now."
           }
         />
       </div>
@@ -102,8 +94,8 @@ export function ErrorsSection() {
         </span>
         <span className="text-fg-faint">·</span>
         <span>
-          the watcher watches the loops + daemons and surfaces drift that would
-          otherwise die silently
+          Checks that the bot&apos;s background jobs are still running, and flags
+          the ones that quietly stopped.
         </span>
       </div>
 
@@ -133,7 +125,7 @@ export function ErrorsSection() {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <Pill intent={e.resolved ? undefined : "error"} tone={e.resolved ? "neutral" : undefined} size="sm">
-                    {SOURCE_LABEL[e.source] ?? e.source}
+                    {plainSource(e.source)}
                   </Pill>
                   {e.resolved && (
                     <Pill tone="neutral" size="sm">
@@ -166,18 +158,21 @@ export function ErrorsSection() {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <Pill intent={h.status === "ok" ? "active" : "warn"} size="sm">
-                    {h.status}
+                    {plainStatus(h.status)}
                   </Pill>
-                  <span className="font-sans text-caption text-fg-primary">{h.check_name}</span>
+                  <span className="font-sans text-caption text-fg-primary">
+                    {plainCheck(h.check_name)}
+                  </span>
                   <span className="ml-auto font-sans text-micro text-fg-faint">
                     {fmtAge(h.updated_at)} ago
                   </span>
                 </div>
-                {h.detail && (
-                  <span className="font-sans text-micro leading-relaxed text-fg-muted">
-                    {h.detail}
-                  </span>
-                )}
+                {/* The store still holds rows written before the writer spoke English,
+                    and nothing rewrites them — so degrade anything that doesn't read
+                    as a sentence to a neutral phrase rather than printing it raw. */}
+                <span className="font-sans text-micro leading-relaxed text-fg-muted">
+                  {plainHealthDetail(h.detail, h.status)}
+                </span>
               </div>
             ))}
           </div>
