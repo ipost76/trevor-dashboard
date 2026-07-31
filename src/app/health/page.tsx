@@ -1,6 +1,7 @@
 import { HealthSection } from "@/components/memory/health-section";
 import { AiDocsFeed } from "@/components/memory/ai-docs-feed";
 import { CostTrackerCard } from "@/components/memory/cost-tracker-card";
+import { ActivityFeedSection } from "@/components/memory/activity-feed-section";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 //     surface entirely separate from the bottom-nav DOCS zone (/docs).
 //   - "cost": <CostTrackerCard> — the GCP cost tracker (B4), reading the
 //     data/hub.db cost_snapshots cache (never BigQuery on page load).
+//   - "activity" (B7, labelled "Digest"): <ActivityFeedSection> — per-day
+//     nightly-digest cards from the replica's `digest` table (built VM-side by
+//     B1-B6), expandable inline, downloadable as .md or PDF. Read-only.
 // The <ZoneSubTabs> strip (auto-rendered from navigation.ts subTabs) writes ?tab=.
 // The /memory?tab=health deep link still 308-redirects here via middleware.ts.
 // The centering wrapper mirrors MemoryZoneView's `mx-auto w-full max-w-screen-2xl`.
@@ -26,6 +30,8 @@ export default async function HealthPage({ searchParams }: HealthPageProps) {
         <CostTrackerCard />
       ) : tab === "docs" ? (
         <AiDocsFeed />
+      ) : tab === "activity" ? (
+        <ActivityFeedSection />
       ) : (
         <HealthSection />
       )}

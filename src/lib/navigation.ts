@@ -144,8 +144,15 @@ export const ZONES: ReadonlyArray<Zone> = [
     // route, and storage (ai_findings.recon_md, not the downloads file system).
     // B4 (2026-06-22): + "cost" sub-tab → the GCP cost tracker card
     // (/health?tab=cost), reading the data/hub.db cost_snapshots cache.
+    // B7 (2026-07-30): + "activity" sub-tab → the nightly-digest feed
+    // (/health?tab=activity), reading the replica's `digest` table.
+    // 🚨 Labelled "Digest", NOT "Activity": the AUTO zone already has an
+    // "Activity" sub-tab (the change_log audit timeline), and two tabs sharing
+    // that label in one nav would be genuinely ambiguous. The key stays
+    // "activity"; only the human-facing label differs.
     subTabs: [
       { key: "health", label: "Health" },
+      { key: "activity", label: "Digest" },
       { key: "docs", label: "Docs" },
       { key: "cost", label: "Cost" },
     ],
