@@ -18,25 +18,33 @@ import { cn } from "@/lib/utils";
 type Decision = "approve" | "reject";
 type Phase = "idle" | "pending" | "done" | "error";
 
-// Map an HTTP status (+ optional body error) → a clear, honest inline message.
-function messageForStatus(status: number, bodyError?: string): { text: string; tone: "ok" | "warn" | "err" } {
+// 🚨 THE ONE SHARED SENTENCE. The promotion list shows this too — it lived as two
+// separately-worded copies, which is how two surfaces drift into saying different
+// things about the same rule. Exported so there is exactly one to change.
+// It deliberately does NOT say a level will be minted: nothing here mints one.
+export const APPROVAL_RECORDING_NOTE =
+  "Approving here records your decision. Nothing changes on the bot until it is applied separately.";
+
+// Map an HTTP status → a fixed, plain sentence. Neither the status code nor the
+// response body reaches the screen — a number and a server's error string tell
+// the reader nothing they can act on.
+function messageForStatus(status: number): { text: string; tone: "ok" | "warn" | "err" } {
   switch (status) {
     case 200:
-      return { text: "Recorded — CC applies it later.", tone: "ok" };
+      return { text: "Recorded. It gets applied to the bot separately.", tone: "ok" };
     case 400:
-      return { text: bodyError ? `Rejected: ${bodyError}` : "Invalid request.", tone: "err" };
+      return { text: "That request wasn't valid — nothing was recorded.", tone: "err" };
     case 401:
-      return { text: "Session expired — reload the page.", tone: "err" };
+      return { text: "Your session expired. Reload the page and try again.", tone: "err" };
     case 423:
-      return { text: "Writes locked — HUB_PROMOTION_WRITE_ENABLED is off on the VM.", tone: "warn" };
+      return { text: "Approving is switched off right now.", tone: "warn" };
     case 500:
-      return { text: bodyError ? `Server error: ${bodyError}` : "Server error.", tone: "err" };
+      return { text: "Something went wrong — nothing was recorded.", tone: "err" };
     case 502:
-      return { text: "VM gateway unreachable — try again shortly.", tone: "warn" };
     case 504:
-      return { text: "VM gateway timed out — try again shortly.", tone: "warn" };
+      return { text: "Couldn't reach the bot — nothing was recorded. Try again.", tone: "warn" };
     default:
-      return { text: bodyError ? `Error (${status}): ${bodyError}` : `Error (${status}).`, tone: "err" };
+      return { text: "Something went wrong — nothing was recorded.", tone: "err" };
   }
 }
 
@@ -61,8 +69,8 @@ export function ApproveRejectControl({
   if (!writeEnabled || !candidateId) {
     return (
       <div className="flex shrink-0 items-center">
-        <Pill tone="neutral" size="sm" title="Approvals are recorded via the gateway only when HUB_PROMOTION_WRITE_ENABLED is on. The Hub records; CC applies.">
-          {writeEnabled ? "no candidate id" : "approvals disabled"}
+        <Pill tone="neutral" size="sm" title={APPROVAL_RECORDING_NOTE}>
+          {writeEnabled ? "Can't be approved" : "Approving is off"}
         </Pill>
       </div>
     );
@@ -85,23 +93,19 @@ export function ApproveRejectControl({
             ...(note.trim() ? { note: note.trim() } : {}),
           }),
         });
-        let bodyError: string | undefined;
-        try {
-          const b = (await res.json()) as { error?: unknown };
-          if (typeof b?.error === "string") bodyError = b.error;
-        } catch {
-          /* body may be empty / non-JSON */
-        }
-        const m = messageForStatus(res.status, bodyError);
-        setMsg(m);
+        setMsg(messageForStatus(res.status));
         if (res.status === 200) {
           setPhase("done");
         } else {
           setPhase("error");
         }
-      } catch (e) {
-        // fetch/network failure — never an uncaught reject.
-        setMsg({ text: `Couldn't reach the Hub: ${String(e)}`, tone: "err" });
+      } catch {
+        // fetch/network failure — never an uncaught reject, and never an
+        // exception object stringified into the UI.
+        setMsg({
+          text: "Couldn't reach the Hub. Check your connection and try again.",
+          tone: "err",
+        });
         setPhase("error");
       }
     },

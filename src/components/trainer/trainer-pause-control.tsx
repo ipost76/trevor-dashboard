@@ -1,30 +1,42 @@
 "use client";
 import * as React from "react";
 import { Pill } from "@/components/ui";
+import { fmtAge } from "@/components/watcher/watcher-format";
 import { cn } from "@/lib/utils";
 
-// TrainerPauseControl — R12-B3 (H5), the trainer PAUSE control on the TRAINER page.
+// TrainerPauseControl — the trainer PAUSE control on the TRAINER page.
 //
-// 🚨 THE HONESTY CONTRACT. This records a durable pause REQUEST; the Hub itself
-// never stops a running loop. trainer_loop.run_trainer_loop() historically read
-// TRAINER_LOOP_ENABLED once at entry with no re-read (H5) — so R13-P1 wired a
-// per-cycle POLL of trainer_pause_state (trainer_pause.py) that the daemon actually
-// enforces: when it's running with the poll armed (TRAINER_PAUSE_POLL_ENABLED,
-// default OFF), it stops the trainer + R8 loop within ~30s (the poll TTL). The Hub
-// can't see the daemon's internal state, so the copy below NEVER renders "trainer
-// paused" as an asserted daemon state — only "pause requested / recorded / takes
-// effect within ~30s when armed + running".
+// 🚨 THE HONESTY CONTRACT. This reports a durable pause REQUEST and NOTHING ELSE.
+// The Hub reads the replica; it has NO input describing the trainer daemon — not
+// its unit state, not its process, not a heartbeat. So this control must never
+// make a claim about the daemon.
 //
-// Gated by HUB_PAUSE_CONTROL_ENABLED (default OFF): when off the control renders
-// NOTHING (returns null). The pause covers the trainer + R8 loop only — it writes
-// ONLY the trainer_pause_state row (VM-side), never a WATCHER_* flag. THE WATCHER
-// STAYS ON.
+// It used to render `paused ? "PAUSE REQUESTED" : "RUNNING"` — a pure binary on a
+// single flag — under the heading "Trainer pause", where a green RUNNING pill read
+// as "the trainer is running". Measured 2026-07-31: the unit is installed but
+// disabled and has never started, no process exists, and there is no trainer unit
+// on the VM at all. The badge was vouching for a daemon it cannot see.
+//
+// It compounded: trainer_pause_state does not exist in the replica, and the reader
+// fail-softed that absence straight to paused:false — so the TOTAL ABSENCE of any
+// pause record was rendered as positive evidence of health. The reader now returns
+// three states and this renders three, none of them green, none of them naming the
+// daemon.
+//
+// Gated by the Hub's pause-control flag (default OFF): when off the control renders
+// NOTHING (returns null). The pause covers the trainer only — it writes ONLY the
+// trainer_pause_state row (VM-side), never a watcher flag. THE WATCHER STAYS ON.
 
 type Phase = "idle" | "pending" | "error";
 
+// "unknown" = the pause table is absent, the read failed, or no record has ever
+// existed. It is NEVER folded into "not_paused"; that collapse was the bug.
+type PauseDiscriminator = "paused" | "not_paused" | "unknown";
+
 interface PauseState {
   enabled: boolean;
-  paused: boolean;
+  pause_state: PauseDiscriminator;
+  paused: boolean | null;
   scope: string | null;
   requested_at: string | null;
   requested_by: string | null;
@@ -33,35 +45,36 @@ interface PauseState {
   error?: string | null;
 }
 
-// Map an HTTP status (+ optional body error) → a clear, honest inline message.
+// Map an HTTP status → a fixed, plain sentence. The status code and the response
+// body never reach the screen: a number and a server's error string tell the
+// reader nothing they can act on.
 function messageForStatus(
   status: number,
   action: "pause" | "resume",
-  bodyError?: string,
 ): { text: string; tone: "ok" | "warn" | "err" } {
+  const what = action === "pause" ? "pause" : "resume";
   switch (status) {
     case 200:
       return {
         text:
           action === "pause"
-            ? "Pause requested — recorded. When the trainer daemon is running with the pause poll armed, it stops the trainer + R8 loop within ~30s (the poll interval)."
-            : "Resume requested — recorded. The running daemon resumes within ~30s of picking this up.",
+            ? "Pause requested. It takes effect within about 30 seconds."
+            : "Resume requested. It takes effect within about 30 seconds.",
         tone: "ok",
       };
     case 400:
-      return { text: bodyError ? `Rejected: ${bodyError}` : "Invalid request.", tone: "err" };
+      return { text: `That request wasn't valid — the ${what} was not recorded.`, tone: "err" };
     case 401:
-      return { text: "Session expired — reload the page.", tone: "err" };
+      return { text: "Your session expired. Reload the page and try again.", tone: "err" };
     case 423:
-      return { text: "Pause control is disabled — HUB_PAUSE_CONTROL_ENABLED is off on the VM.", tone: "warn" };
+      return { text: "Pausing is switched off right now.", tone: "warn" };
     case 500:
-      return { text: bodyError ? `Server error: ${bodyError}` : "Gateway not configured.", tone: "err" };
+      return { text: "Couldn't send the request — the connection to the bot isn't set up.", tone: "err" };
     case 502:
-      return { text: "VM gateway unreachable — pause not recorded.", tone: "warn" };
     case 504:
-      return { text: "VM gateway timed out — pause not recorded.", tone: "warn" };
+      return { text: `Couldn't reach the bot — the ${what} was not recorded. Try again.`, tone: "warn" };
     default:
-      return { text: bodyError ? `Error (${status}): ${bodyError}` : `Error (${status}).`, tone: "err" };
+      return { text: `Something went wrong — the ${what} was not recorded.`, tone: "err" };
   }
 }
 
@@ -77,8 +90,22 @@ export function TrainerPauseControl() {
       const b = (await res.json()) as PauseState;
       setData(b);
     } catch {
-      // fail-soft: leave data null → the control stays hidden rather than erroring
-      setData((prev) => prev ?? { enabled: false, paused: false, scope: null, requested_at: null, requested_by: null, reason: null, replica_age_seconds: null });
+      // Fail-soft: keep the last good read; otherwise the control stays hidden
+      // rather than erroring. The fallback state is UNKNOWN — a failed read is
+      // not a reading of "not paused".
+      setData(
+        (prev) =>
+          prev ?? {
+            enabled: false,
+            pause_state: "unknown",
+            paused: null,
+            scope: null,
+            requested_at: null,
+            requested_by: null,
+            reason: null,
+            replica_age_seconds: null,
+          },
+      );
     }
   }, []);
 
@@ -98,32 +125,41 @@ export function TrainerPauseControl() {
           cache: "no-store",
           body: JSON.stringify({ action, ...(reason.trim() ? { reason: reason.trim() } : {}) }),
         });
-        let bodyError: string | undefined;
         let result: { paused?: unknown } | undefined;
         try {
-          result = (await res.json()) as { paused?: unknown; error?: unknown };
-          if (typeof (result as { error?: unknown })?.error === "string") {
-            bodyError = (result as { error?: string }).error;
-          }
+          result = (await res.json()) as { paused?: unknown };
         } catch {
           /* body may be empty / non-JSON */
         }
-        setMsg(messageForStatus(res.status, action, bodyError));
+        setMsg(messageForStatus(res.status, action));
         if (res.status === 200) {
           // Optimistic: the gateway 200 unwraps the helper result (carries `paused`).
           // The GET reads the ~15-30min-lagging replica, so trust the write here.
-          setData((prev) =>
-            prev
-              ? { ...prev, paused: typeof result?.paused === "number" ? result.paused === 1 : action === "pause" }
-              : prev,
-          );
+          //
+          // 🚨 A successful write is a KNOWN state — it must move `pause_state` off
+          // "unknown" as well as setting `paused`. Updating only `paused` would
+          // leave the badge reading "Pause state unknown" straight after the user
+          // watched their own request succeed.
+          setData((prev) => {
+            if (!prev) return prev;
+            const nowPaused =
+              typeof result?.paused === "number" ? result.paused === 1 : action === "pause";
+            return {
+              ...prev,
+              paused: nowPaused,
+              pause_state: nowPaused ? "paused" : "not_paused",
+            };
+          });
           setPhase("idle");
           setReason("");
         } else {
           setPhase("error");
         }
-      } catch (e) {
-        setMsg({ text: `Couldn't reach the Hub: ${String(e)}`, tone: "err" });
+      } catch {
+        setMsg({
+          text: "Couldn't reach the Hub. Check your connection and try again.",
+          tone: "err",
+        });
         setPhase("error");
       }
     },
@@ -135,22 +171,32 @@ export function TrainerPauseControl() {
   if (!data || !data.enabled) return null;
 
   const busy = phase === "pending";
-  const paused = data.paused;
+  const state = data.pause_state;
+  const paused = state === "paused";
+
+  // 🚨 Three badges, and NONE of them is green. This reports the pause request,
+  // never the trainer — the Hub has no way to know whether the trainer is running.
+  const badge =
+    state === "paused" ? (
+      <Pill intent="warn" size="sm">
+        Pause requested
+      </Pill>
+    ) : state === "not_paused" ? (
+      <Pill tone="neutral" size="sm">
+        No pause requested
+      </Pill>
+    ) : (
+      <Pill intent="warn" size="sm">
+        Pause state unknown
+      </Pill>
+    );
 
   return (
     <div className="rounded-lg border border-accent-plum-subtle bg-bg-card p-3 md:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="font-sans text-caption font-semibold text-fg-primary">Trainer pause</h3>
-          {paused ? (
-            <Pill intent="warn" size="sm">
-              PAUSE REQUESTED
-            </Pill>
-          ) : (
-            <Pill intent="running" size="sm">
-              RUNNING
-            </Pill>
-          )}
+          {badge}
         </div>
         <div className="flex items-center gap-2">
           {!paused && (
@@ -182,17 +228,21 @@ export function TrainerPauseControl() {
         </div>
       </div>
 
+      {/* Three states, three explanations — and not one of them claims the
+          trainer is running. */}
       <p className="mt-2 font-sans text-micro leading-relaxed text-fg-muted">
-        {paused
-          ? "Pause requested — recorded. The daemon polls this each cycle: when running with the poll armed, the trainer + R8 loop stop within ~30s. This only records the request — it never asserts a stopped loop. The watcher stays on."
-          : "Running — no pause requested. Recording a pause never stops an already-running loop by itself — the daemon's next per-cycle poll does (R13-P1), within ~30s, when armed + running."}
+        {state === "paused"
+          ? "Pause requested. The trainer stops within about 30 seconds. Monitoring keeps running."
+          : state === "not_paused"
+            ? "Nobody has asked the trainer to pause. Asking it to pause takes up to 30 seconds to take effect. This says nothing about whether the trainer is running."
+            : "There is no pause record to read, so nobody can tell from here whether a pause has been asked for. This is expected before the trainer is switched on for the first time."}
       </p>
 
       {paused && (data.requested_by || data.reason || data.requested_at) && (
         <p className="mt-1 font-sans text-micro leading-tight text-fg-faint">
           {data.requested_by ? `by ${data.requested_by}` : ""}
           {data.reason ? ` · ${data.reason}` : ""}
-          {data.requested_at ? ` · ${data.requested_at}` : ""}
+          {data.requested_at ? ` · ${fmtAge(data.requested_at)} ago` : ""}
         </p>
       )}
 

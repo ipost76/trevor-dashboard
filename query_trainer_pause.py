@@ -9,17 +9,33 @@ Returns:
   - enabled: is HUB_PAUSE_CONTROL_ENABLED on? (the UI renders the control only
     when true; default OFF=absent → false → hidden). The gate is enforced
     AUTHORITATIVELY VM-side by gw_exec; this read is display-only.
-  - paused / scope / requested_at / requested_by / reason: the durable pause
-    REQUEST recorded by set_trainer_pause.py (VM-side, via the gateway). The
-    trainer daemon must POLL this to actually stop — wiring lands in R13; until
-    then it records INTENT only. NEVER surfaced as an asserted daemon state.
+  - pause_state / paused / scope / requested_at / requested_by / reason: the
+    durable pause REQUEST recorded by set_trainer_pause.py (VM-side, via the
+    gateway). The trainer daemon must POLL this to actually stop — wiring lands
+    in R13; until then it records INTENT only. NEVER surfaced as an asserted
+    daemon state.
   - replica_age_seconds / replica_mtime: honest freshness of this read (the pause
     state is written VM-side, so the Hub sees it after the ~15-30 min litestream
     lag; the POST response reflects a write immediately regardless).
 
-🚨 PRE-CUTOVER EMPTY IS THE DISPLAY: an absent trainer_pause_state table / absent
-flag row is the EXPECTED state (both default OFF) → enabled:false, paused:false,
-never an error.
+🚨 THREE STATES, NOT TWO — `pause_state` is the discriminator:
+    "paused"      a pause record exists and says paused
+    "not_paused"  a pause record exists and says running
+    "unknown"     the table is absent, the read failed, or no record has ever
+                  existed
+
+`paused` mirrors it as True / False / **None**, and None is the unknown value —
+never False. This is B3's `watcher_cycle_ever_ran` precedent: an unreadable store
+is no evidence of a state, and collapsing unknown into not-paused is exactly the
+bug this file used to have. It initialised `paused: False`, guarded the table with
+`_table_exists`, and on absence simply left the False in place — so the TOTAL
+ABSENCE of any pause record was emitted as positive evidence that nothing was
+paused, which the Hub then rendered as a green RUNNING pill.
+
+🚨 PRE-CUTOVER EMPTY IS STILL THE DISPLAY, NOT AN ERROR: an absent
+trainer_pause_state table / absent flag row is the EXPECTED state (both default
+OFF) → enabled:false, pause_state:"unknown". Fail-soft is preserved; only the
+value it fails soft TO has changed.
 """
 import json
 import os
@@ -55,9 +71,12 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 
 def main() -> int:
     age, mtime = _replica_age()
+    # 🚨 The unknown default. Nothing below may set these to a not-paused reading
+    # unless it has actually READ a pause record saying so.
     out: dict[str, Any] = {
         "enabled": False,
-        "paused": False,
+        "pause_state": "unknown",
+        "paused": None,
         "scope": None,
         "requested_at": None,
         "requested_by": None,
@@ -78,14 +97,19 @@ def main() -> int:
                 if r is not None and r["value"] is not None:
                     out["enabled"] = str(r["value"]).strip().lower() in _TRUE
 
-            # the durable pause request — absent table = pre-cutover empty (not paused)
+            # The durable pause request. An absent table and an absent id=1 row are
+            # both UNKNOWN — pre-cutover empty is expected, but "no record exists"
+            # is not evidence that nothing is paused. Only a row we actually read
+            # may move this off "unknown".
             if _table_exists(conn, "trainer_pause_state"):
                 p = conn.execute(
                     "SELECT paused, scope, requested_at, requested_by, reason "
                     "FROM trainer_pause_state WHERE id=1"
                 ).fetchone()
                 if p is not None:
-                    out["paused"] = bool(p["paused"])
+                    is_paused = bool(p["paused"])
+                    out["pause_state"] = "paused" if is_paused else "not_paused"
+                    out["paused"] = is_paused
                     out["scope"] = p["scope"]
                     out["requested_at"] = p["requested_at"]
                     out["requested_by"] = p["requested_by"]

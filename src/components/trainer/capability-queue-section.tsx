@@ -79,21 +79,21 @@ export function CapabilityQueueSection() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-cyan-soft" />
-          replica {fmtReplicaAge(replicaAge)} · refreshes ~15 min
+          Read {fmtReplicaAge(replicaAge)} ago · updates about every 15 minutes
         </span>
         <span className="text-fg-faint">·</span>
         <span>{requests.length} requests</span>
       </div>
 
       <p className="font-sans text-micro leading-relaxed text-fg-muted">
-        The loop routed a capability request; Ghost turns it into a CC prompt. Read
-        only — the Hub never services the queue.
+        Things the trainer has asked for that it can&apos;t do on its own. This is a
+        list to read — nothing here is acted on from this page.
       </p>
 
       {requests.length === 0 ? (
         <EmptyState
           title="No capability requests"
-          body="The loop hasn't routed a request — this lights up when the trainer proposes a growth change."
+          body="The trainer hasn't asked for anything new yet."
         />
       ) : (
         <div className="space-y-1.5">

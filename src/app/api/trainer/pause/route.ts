@@ -40,9 +40,16 @@ import { callGateway, gatewayResponse } from "@/lib/gateway-client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// 🚨 THREE STATES. `pause_state` is the discriminator and `paused` is nullable:
+// null/"unknown" means the pause table is absent, the read failed, or no record
+// has ever existed. A missing record is NOT evidence that nothing is paused, and
+// the fail-soft shape must never claim otherwise.
+type PauseDiscriminator = "paused" | "not_paused" | "unknown";
+
 interface PauseState {
   enabled: boolean;
-  paused: boolean;
+  pause_state: PauseDiscriminator;
+  paused: boolean | null;
   scope: string | null;
   requested_at: string | null;
   requested_by: string | null;
@@ -54,7 +61,8 @@ interface PauseState {
 
 const FALLBACK: PauseState = {
   enabled: false,
-  paused: false,
+  pause_state: "unknown",
+  paused: null,
   scope: null,
   requested_at: null,
   requested_by: null,

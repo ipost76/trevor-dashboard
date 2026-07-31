@@ -2,7 +2,7 @@
 import * as React from "react";
 import { EmptyState, Pill, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { ApproveRejectControl } from "./approve-reject-control";
+import { APPROVAL_RECORDING_NOTE, ApproveRejectControl } from "./approve-reject-control";
 import { PromotionsList } from "@/components/intel/promotions-list";
 
 // TRAINER · "promotions" sub-tab (R12-B1). The PRIMARY surface = R8's
@@ -119,21 +119,20 @@ export function PromotionCandidatesList() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-cyan-soft" />
-            replica {fmtReplicaAge(replicaAge)} · refreshes ~15 min
+            Read {fmtReplicaAge(replicaAge)} ago · updates about every 15 minutes
           </span>
           <span className="text-fg-faint">·</span>
           <span>{candidates.length} candidates</span>
           {!writeEnabled && (
-            <Pill tone="neutral" size="sm" title="Approvals record only when HUB_PROMOTION_WRITE_ENABLED is on. The Hub records; CC applies.">
+            <Pill tone="neutral" size="sm" title={APPROVAL_RECORDING_NOTE}>
               read-only
             </Pill>
           )}
         </div>
 
         <p className="font-sans text-micro leading-relaxed text-fg-muted">
-          Promotion candidates the loop surfaced for a one-glance decision. Approve
-          or reject RECORDS an approval — CC applies the config + mints the level later.
-          The Hub never applies.
+          Changes the trainer has proposed, for a one-glance decision.{" "}
+          {APPROVAL_RECORDING_NOTE}
         </p>
 
         {loading && data === null ? (
@@ -141,7 +140,7 @@ export function PromotionCandidatesList() {
         ) : candidates.length === 0 ? (
           <EmptyState
             title="No promotion candidates yet"
-            body="The loop hasn't surfaced one — this lights up post-cutover when R8 writes a candidate."
+            body="The trainer hasn't proposed a change yet."
           />
         ) : (
           <div className="space-y-1.5">

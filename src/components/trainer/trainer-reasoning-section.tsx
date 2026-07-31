@@ -1,12 +1,17 @@
 "use client";
 import * as React from "react";
 import { EmptyState, Pill, Skeleton } from "@/components/ui";
+import { fmtAge } from "@/components/watcher/watcher-format";
 
-// TRAINER · "reasoning" sub-tab (R12-B1). The "why it was rejected" narrative
-// from /api/trainer/reasoning (trainer.db rejection_log): the fired gates + the
-// real rationale + the statistics (p_value, dsr) that killed each proposed
-// config. READ-ONLY. Pre-cutover EMPTY is the display — 0 rows render a friendly
+// TRAINER · "reasoning" sub-tab. The "why it was rejected" narrative from
+// /api/trainer/reasoning (trainer.db rejection_log): the checks that failed, the
+// real rationale, and the two numbers that killed each proposed setting.
+// READ-ONLY. Pre-cutover EMPTY is the display — 0 rows render a friendly
 // <EmptyState>, never an error.
+//
+// 🚨 The detail line used to read `{hash} · p={n} · dsr={n}` — a truncated hash
+// nobody can act on plus two pieces of statistical notation. The numbers are
+// kept; the notation and the hash are not.
 
 interface Rejection {
   id: number | null;
@@ -26,13 +31,23 @@ interface ReasoningResponse {
   error?: string;
 }
 
-function short(h: string | null): string {
-  if (!h) return "—";
-  return h.length > 12 ? `${h.slice(0, 12)}…` : h;
-}
 function num(v: number | null | undefined, d = 4): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
   return v.toFixed(d);
+}
+/** A 0–1 probability as a readable percentage. */
+function chance(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  const p = v * 100;
+  return p < 0.1 && p > 0 ? "<0.1%" : `${p.toFixed(1)}%`;
+}
+/** snake_case / kebab-case → Title Case English. */
+function titleCase(raw: string): string {
+  const words = raw.replace(/[_-]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  return words
+    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
 }
 // failing_gates may be an array of names or an object {gate: bool} — render as chips.
 function gateNames(g: unknown): string[] {
@@ -80,14 +95,14 @@ export function TrainerReasoningSection() {
   return (
     <div className="space-y-4">
       <p className="font-sans text-micro leading-relaxed text-fg-muted">
-        Why proposals were rejected — the gates that fired, the rationale, and the
-        statistics (p-value, deflated Sharpe) that killed each config.
+        Why the trainer turned settings down — the checks that failed, its
+        reasoning, and how strong the evidence was.
       </p>
 
       {rejections.length === 0 ? (
         <EmptyState
           title="Nothing rejected yet"
-          body="The trainer hasn't logged a verdict — this fills in as the search loop evaluates configs."
+          body="The trainer hasn't rejected anything yet. This fills in as it tests settings."
         />
       ) : (
         <div className="space-y-1.5">
@@ -104,14 +119,17 @@ export function TrainerReasoningSection() {
                 {gates.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1">
                     {gates.map((g) => (
-                      <Pill key={g} intent="warn" size="sm">{g}</Pill>
+                      <Pill key={g} intent="warn" size="sm">{titleCase(g)}</Pill>
                     ))}
                   </div>
                 )}
-                <span className="font-mono text-micro text-fg-faint">
-                  {short(r.arm_hash)} · p={num(r.p_value)} · dsr={num(r.dsr)}
-                  {r.level_id !== null ? ` · L${r.level_id}` : ""}
-                  {r.ts ? ` · ${r.ts}` : ""}
+                <span className="font-sans text-micro text-fg-faint">
+                  Setting {i + 1} ·{" "}
+                  <span className="font-mono">{chance(r.p_value)}</span> chance this was
+                  luck · quality score{" "}
+                  <span className="font-mono">{num(r.dsr, 2)}</span>
+                  {r.level_id !== null ? ` · Level ${r.level_id}` : ""}
+                  {r.ts ? ` · ${fmtAge(r.ts)} ago` : ""}
                 </span>
               </div>
             );
