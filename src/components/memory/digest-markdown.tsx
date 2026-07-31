@@ -16,8 +16,14 @@ import { cn } from "@/lib/utils";
 // a javascript: URL can never become a live link.
 //
 // Deliberate omissions (absent from the digest format): setext headings,
-// reference links, images, nested lists, fenced code blocks with language
-// highlighting (fences render as preformatted text), HTML passthrough.
+// reference links, images, fenced code blocks with language highlighting
+// (fences render as preformatted text), HTML passthrough.
+//
+// Nested lists ARE supported (B7, 2026-07-31). They were previously omitted,
+// which meant an indented sub-bullet silently FLATTENED into a sibling. The
+// VM renderer emits only flat bullets today — measured: zero indented markers
+// in the 559-line report — so this was a latent trap rather than a live
+// defect, and the fix is proven not to move today's flat output.
 
 /* ---------------------------------------------------------------- inline -- */
 
@@ -111,8 +117,12 @@ type Align = "left" | "center" | "right";
 
 const RE_HEADING = /^(#{1,6})\s+(.*)$/;
 const RE_HR = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
-const RE_UL = /^\s*[-*+]\s+(.*)$/;
-const RE_OL = /^\s*\d+[.)]\s+(.*)$/;
+// Group 1 is the indent, group 3 the content. The `\s*` prefix is deliberately
+// UNCHANGED from the flat-only version — narrowing it to `[ \t]*` would move
+// which lines count as list items at all, and this fix must not do that. The
+// indent is now captured instead of discarded, which is the whole defect.
+const RE_UL = /^(\s*)([-*+])\s+(.*)$/;
+const RE_OL = /^(\s*)(\d+)[.)]\s+(.*)$/;
 const RE_QUOTE = /^\s*>\s?(.*)$/;
 const RE_FENCE = /^\s*```/;
 /** A whole paragraph wrapped in underscores — the digest's italic-aside idiom.
@@ -159,6 +169,133 @@ const HEADING_CLASS: Record<number, string> = {
   5: "text-label-ui text-fg-muted mt-4 mb-1.5",
   6: "text-label-ui text-fg-muted mt-4 mb-1.5",
 };
+
+/* ------------------------------------------------------------------ lists -- */
+
+/** Six levels of nesting. Deeper indentation is clamped, never rendered. */
+const MAX_LIST_DEPTH = 6;
+const TAB_WIDTH = 4;
+
+/** Visual width of a leading-whitespace run, tabs expanded to a tab stop. */
+function indentWidth(ws: string): number {
+  let w = 0;
+  for (const ch of ws) w = ch === "\t" ? w + TAB_WIDTH - (w % TAB_WIDTH) : w + 1;
+  return w;
+}
+
+interface ListItem {
+  ordered: boolean;
+  text: string;
+  children: ListItem[];
+}
+
+/**
+ * Group a run of list lines into a tree by indentation.
+ *
+ * Depth comes from a STACK of open indent widths, so a mixed-width document
+ * resolves each item to its NEAREST ENCLOSING level rather than to an absolute
+ * column — 3-space, 4-space and tab indents interleave without confusing it.
+ *
+ * The degenerate shapes are clamped rather than fatal:
+ *   - a sub-bullet with no parent (the run opens indented) lands at depth 0;
+ *   - indentation past MAX_LIST_DEPTH is clamped, deeper items becoming
+ *     siblings at the deepest allowed level;
+ *   - a level can never be SKIPPED — depth is the stack height, which grows by
+ *     exactly one per nesting step, so a 0 → 12-space jump still yields depth 1.
+ */
+function buildListTree(runLines: string[]): ListItem[] {
+  const roots: ListItem[] = [];
+  const stack: { width: number; items: ListItem[] }[] = [
+    { width: -1, items: roots },
+  ];
+
+  for (const line of runLines) {
+    const ul = RE_UL.exec(line);
+    const m = ul ?? RE_OL.exec(line);
+    if (!m) continue; // unreachable — the caller only passes matching lines
+    const width = indentWidth(m[1]);
+    const item: ListItem = { ordered: ul === null, text: m[3], children: [] };
+
+    // Close every level indented at least as far as this item...
+    while (stack.length > 1 && width <= stack[stack.length - 1].width) {
+      stack.pop();
+    }
+    stack[stack.length - 1].items.push(item);
+    // ...then open a level for its children, while depth budget remains.
+    if (stack.length < MAX_LIST_DEPTH) stack.push({ width, items: item.children });
+  }
+  return roots;
+}
+
+/**
+ * Render one level of the tree.
+ *
+ * Consecutive siblings are grouped by ordered-ness, so a `-` run followed by a
+ * `1.` run emits two list elements — matching what the flat-only parser did
+ * when its single-type run loop broke at the type change. That equivalence is
+ * why today's output is unchanged.
+ *
+ * `allocKey` hands out the document-level key for each emitted list, keeping
+ * the top-level key sequence identical to the flat parser's `key++` per list.
+ */
+function renderListGroups(
+  items: ListItem[],
+  depth: number,
+  allocKey: () => string,
+): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let g = 0;
+
+  while (g < items.length) {
+    const ordered = items[g].ordered;
+    const group: ListItem[] = [];
+    while (g < items.length && items[g].ordered === ordered) {
+      group.push(items[g]);
+      g++;
+    }
+
+    const lkey = allocKey();
+    const ListTag = ordered ? "ol" : "ul";
+    out.push(
+      <ListTag
+        key={lkey}
+        className={cn(
+          depth === 0
+            ? "my-2 space-y-1 pl-5 text-prose-ui text-fg-primary"
+            : "mt-1 space-y-1 pl-5 text-prose-ui text-fg-primary",
+          ordered ? "list-decimal" : "list-disc",
+          "marker:text-accent-cyan-soft/70",
+        )}
+      >
+        {group.map((it, n) => {
+          const inline = parseInline(it.text, `${lkey}-l${n}`);
+          // A leaf li is given EXACTLY ONE child — the inline array — so its
+          // element tree is byte-identical to the flat parser's. The nested
+          // branch is only ever taken by content that could not render before.
+          let sub = 0;
+          return (
+            <li key={n} className="break-words">
+              {it.children.length > 0 ? (
+                <React.Fragment>
+                  {inline}
+                  {renderListGroups(
+                    it.children,
+                    depth + 1,
+                    () => `${lkey}-l${n}-s${sub++}`,
+                  )}
+                </React.Fragment>
+              ) : (
+                inline
+              )}
+            </li>
+          );
+        })}
+      </ListTag>,
+    );
+  }
+
+  return out;
+}
 
 /** Parse a whole markdown document into React nodes. */
 function parseBlocks(md: string): React.ReactNode[] {
@@ -293,33 +430,18 @@ function parseBlocks(md: string): React.ReactNode[] {
       continue;
     }
 
-    // lists
-    const listRe = RE_UL.test(line) ? RE_UL : RE_OL.test(line) ? RE_OL : null;
-    if (listRe) {
-      const items: string[] = [];
-      while (i < lines.length && listRe.test(lines[i])) {
-        items.push(listRe.exec(lines[i])![1]);
+    // lists — the run is collected across BOTH markers, then grouped by
+    // indentation. A blank line still ends the run, so loose lists split
+    // exactly as they did before.
+    if (RE_UL.test(line) || RE_OL.test(line)) {
+      const run: string[] = [];
+      while (i < lines.length && (RE_UL.test(lines[i]) || RE_OL.test(lines[i]))) {
+        run.push(lines[i]);
         i++;
       }
-      const lkey = key++;
-      const ordered = listRe === RE_OL;
-      const ListTag = ordered ? "ol" : "ul";
-      out.push(
-        <ListTag
-          key={`k${lkey}`}
-          className={cn(
-            "my-2 space-y-1 pl-5 text-prose-ui text-fg-primary",
-            ordered ? "list-decimal" : "list-disc",
-            "marker:text-accent-cyan-soft/70",
-          )}
-        >
-          {items.map((it, n) => (
-            <li key={n} className="break-words">
-              {parseInline(it, `k${lkey}-l${n}`)}
-            </li>
-          ))}
-        </ListTag>,
-      );
+      for (const node of renderListGroups(buildListTree(run), 0, () => `k${key++}`)) {
+        out.push(node);
+      }
       continue;
     }
 

@@ -71,6 +71,10 @@ const PRINT_CSS = `
   blockquote { margin: 0.7em 0; padding: 0.3em 0 0.3em 0.8em; border-left: 3px solid #ccc; color: #444; }
   ul, ol { margin: 0.5em 0; padding-left: 1.4em; }
   li { margin: 0.2em 0; }
+  /* Nested lists sit tighter than a top-level one. This selector can only match
+     content the renderer could not produce before nesting landed, so it cannot
+     change how any existing digest prints. */
+  li > ul, li > ol { margin: 0.2em 0; }
   table { border-collapse: collapse; width: 100%; margin: 0.7em 0; font-size: 9.5pt; page-break-inside: avoid; }
   th, td { border: 1px solid #ccc; padding: 4px 7px; text-align: left; }
   th { background: #f0f0f2; font-weight: 600; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.04em; }
