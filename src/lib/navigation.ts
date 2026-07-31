@@ -82,7 +82,7 @@ export const ZONES: ReadonlyArray<Zone> = [
     // Shadows view renders when it's off. Accent stays magenta → refined plum
     // (accentTextClass), the TRAINER identity.
     label: "Trainer",
-    shortLabel: "TRAINER",
+    shortLabel: "Trainer",
     icon: Brain,
     accent: "magenta",
     // H1 (2026-07-09): the "Impact" ($-rank) + "Daily Edge" tabs were removed —

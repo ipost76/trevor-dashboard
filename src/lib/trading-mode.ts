@@ -136,7 +136,7 @@ export function resolveModeBadge(input: {
         intent: "warn",
         // Covers both a missing row and an unparseable one — in either case
         // auto_config is not telling us the mode.
-        detail: "mode unconfirmed · no usable PAPER_WINDOW_ENABLED value",
+        detail: "Mode unconfirmed — the bot didn't report whether it's on paper",
       };
     case "error":
     default:

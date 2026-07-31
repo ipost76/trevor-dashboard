@@ -64,8 +64,11 @@ interface BreakerGauge {
   key: string;
   label: string;
   status: BreakerStatus;
-  value: number;
-  limit: number;
+  // Nullable BY DESIGN. The writer omits a breaker's reading/limit on its
+  // flat-day path; the reader emits null rather than inventing a 0, so a
+  // safety gauge can never show a number nobody measured. See fmtGauge.
+  value: number | null;
+  limit: number | null;
   unit: string;
 }
 
@@ -120,11 +123,29 @@ function statusText(s: BreakerStatus): string {
   return "text-fg-muted";
 }
 
+// Render one gauge number. null/non-finite → em-dash, NEVER 0 — a fabricated
+// zero on a safety gauge is indistinguishable from a real reading of zero.
+// Trailing zeros are trimmed only past a decimal point, so an integral cap reads
+// "-25" while a fractional one SURVIVES: the old `.toFixed(0)` rounded a real
+// 0.4% cap to "0%", producing the same false zero by rounding rather than by
+// default. Keep the number, lose the notation.
+// The unit rides WITH the number, so an unknown renders a bare "—" rather than
+// a stray "—%" that reads like a broken template.
+function fmtGaugeNum(
+  n: number | null | undefined,
+  places: number,
+  suffix = "",
+): string {
+  if (n === null || n === undefined || !Number.isFinite(Number(n))) return "—";
+  const text = Number(n).toFixed(places);
+  return (text.includes(".") ? text.replace(/\.?0+$/, "") : text) + suffix;
+}
+
 function fmtGauge(g: BreakerGauge): string {
   if (g.unit === "%") {
-    return `${Number(g.value).toFixed(1)}% / ${Number(g.limit).toFixed(0)}% cap`;
+    return `${fmtGaugeNum(g.value, 1, "%")} / ${fmtGaugeNum(g.limit, 2, "%")} cap`;
   }
-  return `${Math.round(Number(g.value))} / ${Math.round(Number(g.limit))}`;
+  return `${fmtGaugeNum(g.value, 0)} / ${fmtGaugeNum(g.limit, 0)}`;
 }
 
 function fmtRiskPct(p: number | null): string {
@@ -386,12 +407,14 @@ export function ProfitRiskPanel() {
                         size="sm"
                       >
                         <Lock size={10} aria-hidden />
-                        {t.breakeven_armed ? "BE ARMED" : "BE OFF"}
+                        {t.breakeven_armed
+                          ? "Break-even stop set"
+                          : "No break-even stop"}
                       </Pill>
                       {t.ratchet_locked_r > 0 && (
                         <Pill tone="cyan" size="sm">
                           <Anchor size={10} aria-hidden />
-                          RATCHET{" "}
+                          Profit locked in:{" "}
                           {live ? (
                             <LiveValue
                               value={t.ratchet_locked_r}
@@ -400,12 +423,13 @@ export function ProfitRiskPanel() {
                           ) : (
                             t.ratchet_locked_r.toFixed(2)
                           )}
-                          R
+                          × the risk
                         </Pill>
                       )}
                       {t.partials_taken > 0 && (
                         <Pill tone="violet" size="sm">
                           <Scissors size={10} aria-hidden />
+                          Sold{" "}
                           {live ? (
                             <LiveValue
                               value={t.partials_taken}
@@ -414,7 +438,7 @@ export function ProfitRiskPanel() {
                           ) : (
                             t.partials_taken
                           )}{" "}
-                          PARTIAL{t.partials_taken > 1 ? "S" : ""}
+                          slice{t.partials_taken > 1 ? "s" : ""} already
                         </Pill>
                       )}
                     </div>
@@ -518,12 +542,16 @@ export function ProfitRiskPanel() {
                   )}
                 </div>
                 <span className="text-micro leading-snug text-fg-muted">
-                  The breaker has not been asked — it only runs when a signal reaches
-                  the entry gate, and none has in {fmtEvalAge(evalAgeS).replace(" ago", "")}
-                  {" "}(over the {fmtBound(evalBoundS)} freshness bound). This is
-                  &ldquo;no recent answer&rdquo;, NOT a fault. Last answer was{" "}
+                  The safety check hasn&rsquo;t run yet — it only runs when a trade is
+                  about to be placed, and none has been in{" "}
+                  {fmtEvalAge(evalAgeS).replace(" ago", "")} (longer than the{" "}
+                  {fmtBound(evalBoundS)} we wait before saying so). This means
+                  &ldquo;no recent answer&rdquo;, not a fault. Last time it ran, the
+                  answer was{" "}
                   <span className="text-fg-default">
-                    {breakers.entries_allowed ? "entries allowed" : "entries halted"}
+                    {breakers.entries_allowed
+                      ? "new trades allowed"
+                      : "new trades blocked"}
                   </span>
                   , {fmtEvalAge(evalAgeS)}.
                 </span>
@@ -542,8 +570,7 @@ export function ProfitRiskPanel() {
                   )}
                 </div>
                 <span className="text-micro text-fg-muted">
-                  Evaluated {fmtEvalAge(evalAgeS)} — the breaker was asked and
-                  answered.
+                  Safety check ran {fmtEvalAge(evalAgeS)}.
                 </span>
               </div>
             )}

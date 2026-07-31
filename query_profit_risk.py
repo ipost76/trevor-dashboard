@@ -60,6 +60,7 @@ pass through and override the derived values.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import sys
 import time
@@ -192,22 +193,89 @@ _BREAKER_LABELS = {
 }
 
 
-def _breaker_gauge(code: str, info: dict) -> dict:
-    """Map one live risk_breakers `detail` entry → a display gauge."""
+# Per-breaker: which `detail` key carries the READING, which carries the LIMIT,
+# and the display unit. Both are Optional — see _breaker_gauge.
+_BREAKER_FIELDS = {
+    "daily_loss": ("loss_pct", "limit_pct", "%"),
+    "consecutive_losses": ("streak", "limit", "count"),
+    "frequency": ("trades_today", "cap", "count"),
+    "equity_curve": ("current_equity", "ma", "$"),
+}
+
+# auto_config keys that authoritatively hold a breaker's LIMIT. A limit is a
+# CONFIGURED CONSTANT, so it is readable even when the writer omitted it from the
+# state JSON — which is exactly the case this map exists to cover.
+#
+# `equity_curve` is deliberately ABSENT: its "limit" is a moving average computed
+# at evaluation time, not a config value. There is nothing to fall back to, so it
+# honestly resolves to None rather than to a plausible-looking wrong constant.
+_BREAKER_LIMIT_CONFIG_KEYS = {
+    "daily_loss": "DAILY_LOSS_LIMIT_PCT",
+    "consecutive_losses": "MAX_CONSECUTIVE_LOSSES",
+    "frequency": "MAX_DAILY_ROUND_TRIPS",
+}
+
+
+def _num(raw):
+    """Coerce to a finite float, else None. NEVER substitutes a default.
+
+    Absent stays absent. A non-finite value (NaN/inf) is also None — it is not a
+    reading, and formatting it would print "nan% cap" on a safety gauge.
+    """
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _fmt_num(value, places: int = 2) -> str:
+    """Render a gauge number. None → em-dash, NEVER 0.
+
+    Trailing zeros are trimmed only when a decimal point is present, so an
+    integral cap reads "-25" rather than "-25.00" while "10" survives intact.
+    A fractional cap survives too: the old `:.0f` rounded a real 0.4% cap to
+    "0%" — the same fabricated zero this module exists to stop, arriving by
+    rounding instead of by default.
+    """
+    if value is None:
+        return "—"
+    text = f"{value:.{places}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _breaker_gauge(code: str, info: dict, config_limits: dict) -> dict:
+    """Map one live risk_breakers `detail` entry → a display gauge.
+
+    🚨 AN ABSENT KEY RESOLVES TO None, NEVER 0 — for EVERY breaker, not just the
+    one observed failing. The writer (`auto_trader/risk_breakers.py`, VM) early-
+    returns a four-key dict on the flat/up path, omitting BOTH the reading and the
+    limit. The previous `.get(key, 0.0)` per-branch turned that omission into a
+    fabricated "0.0% / 0% cap" for a breaker whose real cap is -25% — a safety
+    gauge reporting a number nobody measured, indistinguishable on screen from a
+    real reading of zero. None flows through as an em-dash: honest, and visibly
+    not a measurement.
+
+    The LIMIT additionally falls back to its auto_config constant, which is
+    present regardless of which path the writer took. The READING has no such
+    fallback by design — it is a live measurement, and inventing one would be the
+    same defect wearing a different hat.
+
+    Status is unchanged: it is driven by the writer's own `active` flag, never by
+    comparing these two numbers, so a None here cannot repaint a green dot red.
+    """
     label = _BREAKER_LABELS.get(code, code.replace("_", " ").title())
-    active = bool(info.get("active"))
-    status = "RED" if active else "OK"
-    if code == "daily_loss":
-        value, limit, unit = info.get("loss_pct", 0.0), info.get("limit_pct", 0.0), "%"
-    elif code == "consecutive_losses":
-        value, limit, unit = info.get("streak", 0), info.get("limit", 0), "count"
-    elif code == "frequency":
-        value, limit, unit = info.get("trades_today", 0), info.get("cap", 0), "count"
-    elif code == "equity_curve":
-        value, limit, unit = info.get("current_equity", 0.0), info.get("ma", 0.0), "$"
-    else:
-        value, limit, unit = info.get("value", 0.0), info.get("limit", 0.0), ""
-    return {"key": code, "label": label, "status": status,
+    value_key, limit_key, unit = _BREAKER_FIELDS.get(code, ("value", "limit", ""))
+    value = _num(info.get(value_key))
+    limit = _num(info.get(limit_key))
+    if limit is None:
+        limit = _num(config_limits.get(_BREAKER_LIMIT_CONFIG_KEYS.get(code)))
+    return {"key": code, "label": label,
+            "status": "RED" if bool(info.get("active")) else "OK",
             "value": value, "limit": limit, "unit": unit}
 
 
@@ -275,7 +343,11 @@ def build_breakers() -> dict:
                 for key, value, updated_at in conn.execute(
                     "SELECT key, value, updated_at FROM auto_config "
                     "WHERE key IN ('RISK_BREAKERS_STATE_JSON','RISK_BREAKERS_ENABLED',"
-                    "'RISK_BREAKERS_LAST_EVAL')"
+                    "'RISK_BREAKERS_LAST_EVAL',"
+                    # The configured LIMITS — read alongside the state so a gauge
+                    # whose limit the writer omitted still renders its real cap.
+                    "'DAILY_LOSS_LIMIT_PCT','MAX_CONSECUTIVE_LOSSES',"
+                    "'MAX_DAILY_ROUND_TRIPS')"
                 ).fetchall()
             }
         state = json.loads((rows.get("RISK_BREAKERS_STATE_JSON") or (None, None))[0] or "{}")
@@ -307,14 +379,20 @@ def build_breakers() -> dict:
     entries_allowed = bool(state.get("entries_allowed", True))
     active_codes = state.get("active_breakers", []) or []
 
-    all_breakers = [_breaker_gauge(code, info) for code, info in detail.items()]
+    config_limits = {
+        key: (rows.get(key) or (None, None))[0]
+        for key in _BREAKER_LIMIT_CONFIG_KEYS.values()
+    }
+    all_breakers = [
+        _breaker_gauge(code, info, config_limits) for code, info in detail.items()
+    ]
 
     def _fmt(b: dict) -> str:
         if b["unit"] == "%":
-            return f"{float(b['value']):.1f}% vs {float(b['limit']):.0f}% cap"
+            return f"{_fmt_num(b['value'], 1)}% vs {_fmt_num(b['limit'], 2)}% cap"
         if b["unit"] == "$":
-            return f"${float(b['value']):.2f} vs ${float(b['limit']):.2f} MA"
-        return f"{int(b['value'])} / {int(b['limit'])}"
+            return f"${_fmt_num(b['value'], 2)} vs ${_fmt_num(b['limit'], 2)} MA"
+        return f"{_fmt_num(b['value'], 0)} / {_fmt_num(b['limit'], 0)}"
 
     active = [
         {"key": b["key"], "label": b["label"], "status": b["status"], "detail": _fmt(b)}

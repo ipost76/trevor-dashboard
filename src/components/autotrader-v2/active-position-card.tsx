@@ -466,7 +466,7 @@ export function ActivePositionCard() {
       {!loading && positions && positions.length === 0 && (
         <EmptyState
           title="No open positions"
-          body="Awaiting next signal that clears the per-ticker threshold."
+          body="No open positions right now."
           className="min-h-[100px]"
         />
       )}

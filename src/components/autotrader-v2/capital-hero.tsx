@@ -453,8 +453,15 @@ export function CapitalHero() {
               Separate from the realized/floating/total P&L trio below. */}
           <div className="flex items-baseline justify-between gap-3">
             <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+              {/* E14b: "live" denoted PROVENANCE (a true exchange balance, not a
+                  derived figure) but READ as latency. The number is real and
+                  correct; it reaches us via the replica and can be up to ~45 min
+                  old, which is exactly what the staleness gate below bounds. The
+                  label now says where it came from, not how fresh it is. */}
               Account value{" "}
-              <span className="text-fg-faint">· live HL balance</span>
+              <span className="text-fg-faint">
+                · balance on the exchange, updated periodically
+              </span>
             </span>
             {liveAccountValue === null ? (
               <span

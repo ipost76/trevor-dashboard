@@ -147,7 +147,7 @@ export function WatchlistGrid() {
 
       {!loading && thresholds && thresholds.length === 0 && (
         <div className="py-6 text-center text-caption text-fg-muted">
-          Per-ticker thresholds unavailable.
+          Couldn&rsquo;t load each coin&rsquo;s score-to-trade bar.
         </div>
       )}
 

@@ -103,10 +103,10 @@ export function ScalperHeader() {
           This is the exact state that shipped the false LIVE badge. */}
       {showConfiguredSplit && (
         <p className="mt-2 font-sans text-micro text-fg-muted">
-          <span className="text-accent-gold">Configured</span> AUTO_LIVE_ENABLED=true ·{" "}
-          <span className="text-accent-gold">Effective</span> mode is{" "}
-          {label === "PAPER?" ? "unconfirmed" : "paper"} — the paper window is
-          what the bot gates on.
+          The bot is configured for live trading,{" "}
+          {label === "PAPER?"
+            ? "but it didn't report whether the paper window is open — so it is not confirmed whether real orders are being sent."
+            : "but the paper window is open, so it is only trading on paper. No real orders are being sent."}
         </p>
       )}
     </Card>

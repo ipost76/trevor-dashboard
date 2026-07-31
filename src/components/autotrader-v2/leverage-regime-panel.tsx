@@ -238,12 +238,20 @@ export function LeverageRegimePanel() {
           <CardTitle>
             <span className="flex flex-wrap items-center gap-2 uppercase tracking-wider">
               <Gauge size={14} aria-hidden />
+              {/* 🚨 The number is the OPEN-POSITION COUNT, not a leverage figure.
+                  A gauge icon and the word "Leverage" sitting immediately before a
+                  bare 0 read as "0× leverage" — both claims were true, the
+                  composition was not. The noun is what stops the misreading; do
+                  not drop it back to a bare number. */}
               Leverage ·{" "}
               {live ? (
                 <LiveValue value={data?.open_count ?? 0} format={(n) => String(n)} />
               ) : (
                 data?.open_count ?? 0
-              )}
+              )}{" "}
+              <span className="font-normal normal-case tracking-normal text-fg-muted">
+                open position{(data?.open_count ?? 0) === 1 ? "" : "s"}
+              </span>
               {/* B2: OPEN-NOTIONAL subtotal — Σ over the merged heartbeat open-set. */}
               {(data?.open_notional ?? 0) > 0 && (
                 <span className="font-normal normal-case tracking-normal text-fg-muted">
@@ -636,8 +644,10 @@ export function LeverageRegimePanel() {
               </>
             ) : (
               <div className="text-micro text-accent-gold">
-                margin read degraded
-                {margin.error ? `: ${margin.error}` : " — replica unavailable"}
+                {/* The raw `margin.error` is deliberately NOT interpolated: it is a
+                    Python exception string, and it told a reader nothing they
+                    could act on. Both causes read the same to a human. */}
+                Margin data couldn&rsquo;t be read just now.
               </div>
             )}
           </div>

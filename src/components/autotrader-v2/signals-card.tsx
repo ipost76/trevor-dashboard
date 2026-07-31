@@ -101,6 +101,34 @@ function fmtQuiet(seconds: number | null): string {
 }
 
 /**
+ * Rejection codes → plain English. The codes are the bot's own wire values,
+ * written verbatim by `query_signals.fetch_reject_reasons`.
+ *
+ * 🚨 An UNMAPPED code renders as "Other", NEVER as the raw code — a screen is
+ * not a log. Nothing is lost by that: the count still shows, and the raw string
+ * carried no meaning to a reader who does not already know the codebase.
+ *
+ * `entry_failed` is deliberately vague here because it is deliberately vague at
+ * the source — the helper's own docstring records that the specific gate behind
+ * it is not stored anywhere. Naming a gate would invent precision the data does
+ * not have, which is the defect this pass exists to remove.
+ */
+const REJECT_REASON_COPY: Record<string, string> = {
+  regime_blocked: "Market conditions were wrong",
+  entry_failed: "Couldn't place the trade",
+  "time_gate:utc_hour": "Outside trading hours",
+  correlation_limit: "Too similar to a trade already open",
+  chop_brake_loss_streak: "Paused after a losing streak",
+  insufficient_equity: "Not enough account balance",
+  duplicate_open_trade: "Already in this trade",
+};
+
+function fmtRejectReason(reason: string | null, n: number): string {
+  const copy = reason === null ? undefined : REJECT_REASON_COPY[reason];
+  return `${copy ?? "Other"} (${n})`;
+}
+
+/**
  * The three-state message. 🚨 This is the whole point of the card — every
  * branch NAMES which state it is and what that means, so an empty screen is
  * never ambiguous. There is deliberately no generic fallback string.
@@ -152,15 +180,18 @@ export function SignalsCard() {
         });
         if (cancelled) return;
         if (!res.ok) {
-          setError(`HTTP ${res.status}`);
+          setError("Couldn't reach the signals feed. Retrying.");
           return;
         }
         const j = (await res.json()) as SignalsResponse;
         if (cancelled) return;
         setData(j);
         setError(j.error ?? null);
-      } catch (e) {
-        if (!cancelled) setError(String(e));
+      } catch {
+        // The network-down branch. It renders the SAME sentence as the bad-status
+        // branch above on purpose: to a reader both mean "the feed isn't
+        // answering", and the exception object never said anything they could use.
+        if (!cancelled) setError("Couldn't reach the signals feed. Retrying.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -245,7 +276,7 @@ export function SignalsCard() {
             <span className="text-fg-faint">
               {" — "}
               {data.reject_reasons
-                .map((r) => `${r.reason ?? "unspecified"} ${r.n}`)
+                .map((r) => fmtRejectReason(r.reason, r.n))
                 .join(" · ")}
             </span>
           )}

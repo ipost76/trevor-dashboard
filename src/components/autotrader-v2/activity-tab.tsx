@@ -90,7 +90,7 @@ export function ActivityTab() {
         });
         if (cancelled) return;
         if (!res.ok) {
-          setError(`HTTP ${res.status}`);
+          setError("Couldn't load the activity log. Retrying.");
           return;
         }
         const j = (await res.json()) as ActivityResponse;
@@ -98,8 +98,9 @@ export function ActivityTab() {
         if (j.error) setError(j.error);
         setEntries(j.entries ?? []);
         setTotal(j.total ?? 0);
-      } catch (err) {
-        if (!cancelled) setError(String(err));
+      } catch {
+        // Network-down branch — same sentence as the bad-status branch above.
+        if (!cancelled) setError("Couldn't load the activity log. Retrying.");
       } finally {
         if (!cancelled) {
           loadingRef.current = false;
@@ -129,7 +130,7 @@ export function ActivityTab() {
         cache: "no-store",
       });
       if (!res.ok) {
-        setError(`HTTP ${res.status}`);
+        setError("Couldn't load more activity. Retrying.");
         return;
       }
       const j = (await res.json()) as ActivityResponse;
@@ -139,8 +140,9 @@ export function ActivityTab() {
       setEntries((prev) => [...prev, ...fresh]);
       // Defensive: API claimed more rows but returned none → force-stop.
       if (fresh.length === 0) setTotal((t) => Math.min(t, entries.length));
-    } catch (err) {
-      setError(String(err));
+    } catch {
+      // Network-down branch — same sentence as the bad-status branch above.
+      setError("Couldn't load more activity. Retrying.");
     } finally {
       loadingRef.current = false;
       setLoading(false);
