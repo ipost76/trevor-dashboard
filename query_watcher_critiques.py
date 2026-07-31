@@ -49,6 +49,18 @@ _EMPTY: dict[str, Any] = {
     "health": [],
     "updated_seconds": None,
     "updated_at": None,
+    "errors_updated_seconds": None,
+    "errors_updated_at": None,
+    "health_updated_seconds": None,
+    "health_updated_at": None,
+    "critiques_updated_seconds": None,
+    "critiques_updated_at": None,
+    # 🚨 None, NOT False. This shape is returned when the store could not be READ — and an
+    # unreadable store is no evidence that the watcher never ran. False would be a confident
+    # wrong answer on the exact failure path where a reader is least able to check.
+    "watcher_cycle_ever_ran": None,
+    "watcher_last_cycle_at": None,
+    "watcher_last_cycle_seconds": None,
 }
 
 
@@ -73,14 +85,33 @@ def _load_json(raw: Optional[str]) -> Any:
 
 
 def _freshness(ts_pool: list[Optional[str]]) -> tuple[Optional[int], Optional[str]]:
-    """Newest timestamp across all rows -> (age_seconds, iso). These stores are
-    WSL-local (no replica lag), so this is a real "updated Xs ago" value."""
+    """Newest timestamp across the rows GIVEN -> (age_seconds, iso). These stores are
+    WSL-local (no replica lag), so this is a real "updated Xs ago" value.
+
+    🚨 WHAT YOU PASS IN IS THE WHOLE CONTRACT. This used to be called ONCE over a single
+    pool holding critiques + errors + health together, and that global max() is what let a
+    SINGLE self-health bookkeeping row — written by a unit test, not by any real cycle —
+    re-badge the entire page as "updated 1h ago" while every actual detection was 8 days
+    old. The caller now keeps the pools separate and excludes self-health bookkeeping from
+    the headline; see _SELF_HEALTH_CHECKS."""
     dts = [d for d in (_parse_ts(t) for t in ts_pool) if d is not None]
     if not dts:
         return None, None
     newest = max(dts)
     age = max(0, int((datetime.now(tz=timezone.utc) - newest).total_seconds()))
     return age, newest.isoformat().replace("+00:00", "Z")
+
+
+# The watcher's own self-health row(s) — bookkeeping ABOUT the cycle, not a DETECTION made
+# by it. Excluded from the headline freshness so no future bookkeeping write can re-badge
+# the page the way the test-written `watcher_loop` row did. Their presence-vs-absence is
+# also how we tell a REAL cycle from a bare self-log: a real cycle writes the surface checks
+# too, a self-log alone writes only this.
+#
+# The literal is DUPLICATED from watcher_health.WATCHER_LOOP_NAME on purpose — this reader
+# must never import a watcher writer (see the module docstring), the same rule that governs
+# _UNIT_PLAIN below.
+_SELF_HEALTH_CHECKS = frozenset({"watcher_loop"})
 
 
 # Unit -> plain name, mirroring watcher_surface.UNIT_PLAIN. Duplicated on purpose:
@@ -188,7 +219,11 @@ def main() -> int:
         print(json.dumps(out))
         return 0
 
-    ts_pool: list[Optional[str]] = []
+    # Per-panel pools. Kept SEPARATE (never one shared list) — see _freshness.
+    critique_ts: list[Optional[str]] = []
+    error_ts: list[Optional[str]] = []
+    health_ts: list[Optional[str]] = []
+    surface_ts: list[Optional[str]] = []   # health rows EXCLUDING self-health bookkeeping
 
     # ── critiques (problems only) ───────────────────────────────────────────
     critiques: list[dict[str, Any]] = []
@@ -212,7 +247,7 @@ def main() -> int:
                 "llm_used": bool(r["llm_used"]),
                 "ts": r["ts"],
             })
-            ts_pool.append(r["ts"])
+            critique_ts.append(r["ts"])
     except sqlite3.OperationalError:
         pass  # no such table -> empty (pre-cutover)
 
@@ -220,8 +255,13 @@ def main() -> int:
     errors: list[dict[str, Any]] = []
     try:
         rows = conn.execute(
+            # WHERE resolved = 0 — a cleared malfunction drops off the panel instead of
+            # accumulating forever. A NO-OP TODAY (all 5 live rows are resolved=0, and no real
+            # cycle has run to clear any), but it is what gives watcher_surface.resolve_cleared()
+            # its meaning the moment one does: that mechanism is built, correct and wired, and
+            # has simply never executed. Do not read "no visible change" as "no effect".
             "SELECT id, source, detail_json, first_seen_ts, last_seen_ts, resolved "
-            "FROM watcher_errors ORDER BY resolved ASC, last_seen_ts DESC"
+            "FROM watcher_errors WHERE resolved = 0 ORDER BY last_seen_ts DESC"
         ).fetchall()
         for r in rows:
             detail = _load_json(r["detail_json"])
@@ -233,7 +273,7 @@ def main() -> int:
                 "last_seen_ts": r["last_seen_ts"],
                 "resolved": bool(r["resolved"]),
             })
-            ts_pool.append(r["last_seen_ts"])
+            error_ts.append(r["last_seen_ts"])
     except sqlite3.OperationalError:
         pass
 
@@ -252,13 +292,37 @@ def main() -> int:
                 "detail": r["detail"],
                 "updated_at": r["updated_at"],
             })
-            ts_pool.append(r["updated_at"])
+            health_ts.append(r["updated_at"])
+            if r["check_name"] not in _SELF_HEALTH_CHECKS:
+                surface_ts.append(r["updated_at"])
     except sqlite3.OperationalError:
         pass
 
     conn.close()
 
-    updated_seconds, updated_at = _freshness(ts_pool)
+    # ── freshness ───────────────────────────────────────────────────────────
+    # HEADLINE = newest DETECTION (critiques ∪ errors), self-health bookkeeping EXCLUDED.
+    # Categorical, not cosmetic: the defect was a bookkeeping row re-badging the page, so the
+    # whole CLASS is out of the headline rather than just the one pool that happened to lie.
+    # Both zones that render `updated_seconds` (errors-section, critique-section) now read an
+    # age that means "the newest thing the watcher actually FOUND".
+    updated_seconds, updated_at = _freshness(critique_ts + error_ts)
+
+    # Per-panel ages, so a component can show its OWN freshness instead of a shared number.
+    # Nothing renders these yet — they exist for the Wave C .tsx pass.
+    errors_updated_seconds, errors_updated_at = _freshness(error_ts)
+    health_updated_seconds, health_updated_at = _freshness(health_ts)
+    critiques_updated_seconds, critiques_updated_at = _freshness(critique_ts)
+
+    # ── arming signal ───────────────────────────────────────────────────────
+    # Has a REAL cycle ever run, and when? A real cycle writes the surface checks
+    # (loop_freshness / critical_units / cron_liveness / …); a bare self-log writes only the
+    # `watcher_loop` bookkeeping row. So surface-check rows are the evidence, and their newest
+    # timestamp is the last real cycle. With the daemon disabled by design until level 1, a
+    # green-looking WATCHER tab is ITSELF the false alarm — the honest end state is a surface
+    # that says "the watcher is not running", and that cannot be built until the API says so.
+    # 🚨 EMITTED, NOT RENDERED — the banner is a .tsx change and belongs to Wave C.
+    last_cycle_seconds, last_cycle_at = _freshness(surface_ts)
 
     print(json.dumps({
         "status": "ok",
@@ -267,6 +331,15 @@ def main() -> int:
         "health": health,
         "updated_seconds": updated_seconds,
         "updated_at": updated_at,
+        "errors_updated_seconds": errors_updated_seconds,
+        "errors_updated_at": errors_updated_at,
+        "health_updated_seconds": health_updated_seconds,
+        "health_updated_at": health_updated_at,
+        "critiques_updated_seconds": critiques_updated_seconds,
+        "critiques_updated_at": critiques_updated_at,
+        "watcher_cycle_ever_ran": bool(surface_ts),
+        "watcher_last_cycle_at": last_cycle_at,
+        "watcher_last_cycle_seconds": last_cycle_seconds,
     }, default=str))
     return 0
 

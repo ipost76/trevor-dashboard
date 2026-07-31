@@ -339,10 +339,20 @@ def run_watcher_loop(*, interval_seconds: Optional[int] = None, max_cycles: Opti
                      heartbeat: Optional[WatcherHeartbeat] = None,
                      surface_fn: Optional[Callable[..., Dict[str, Any]]] = None,
                      vm_run: Optional[Callable[..., Dict[str, Any]]] = None,
-                     local_run: Optional[Callable[..., Dict[str, Any]]] = None) -> Dict[str, Any]:
+                     local_run: Optional[Callable[..., Dict[str, Any]]] = None,
+                     watcher_conn=None) -> Dict[str, Any]:
     """The continuous surfacing daemon (explicit entrypoint — NEVER auto-started on import).
     Pre-registers the heartbeat once, then runs a gated cycle every ``interval_seconds`` (default
-    the heartbeat cadence). ``max_cycles`` bounds it (tests). FULLY INERT if the flag is OFF."""
+    the heartbeat cadence). ``max_cycles`` bounds it (tests). FULLY INERT if the flag is OFF.
+
+    ``watcher_conn`` is an OPTIONAL caller-owned store handle threaded straight through to
+    run_cycle. Default None ⇒ each cycle opens (and closes) its own via get_connection(), so the
+    production path through main() is byte-identical to before this parameter existed. It exists
+    so a TEST can hand in a scratch store: without it, run_cycle fell through to get_connection()
+    → resolve_db_path() → the REAL data/watcher.db, and every suite run stamped a fresh
+    ``watcher_loop`` self-health row into the live store — which then re-badged the whole WATCHER
+    tab as "updated 1h ago" while every real detection was 8 days old. Injecting the surface and
+    the heartbeat was not enough; the STORE has to be injectable too."""
     if not is_surfacing_enabled():
         logger.info("WATCHER_SURFACING_ENABLED off — watcher daemon inert, not starting.")
         return {"enabled": False, "cycles": 0}
@@ -352,7 +362,8 @@ def run_watcher_loop(*, interval_seconds: Optional[int] = None, max_cycles: Opti
     cycles = 0
     while max_cycles is None or cycles < max_cycles:
         try:
-            run_cycle(heartbeat=heartbeat, surface_fn=surface_fn, vm_run=vm_run, local_run=local_run)
+            run_cycle(watcher_conn=watcher_conn, heartbeat=heartbeat, surface_fn=surface_fn,
+                      vm_run=vm_run, local_run=local_run)
         except Exception as exc:  # a cycle must never kill the daemon
             logger.warning("watcher cycle raised (non-fatal): %s", exc)
         cycles += 1

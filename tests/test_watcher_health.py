@@ -166,13 +166,30 @@ def test_run_watcher_loop_bounded_flag_on():
             _ = (watcher_conn, vm_run, local_run)
             return {}
 
+        # 🚨 THE STORE IS INJECTED, exactly like the surface and the heartbeat. Without this the
+        # loop falls through to get_connection() -> resolve_db_path() -> the REAL
+        # <repo>/data/watcher.db, and every suite run stamps a live `watcher_loop` row that
+        # re-badges the whole WATCHER tab as fresh. A test must never write a production store.
+        w = _watcher()
+
         res = wh.run_watcher_loop(max_cycles=3, sleep_fn=lambda s: slept.append(s),
-                                  heartbeat=hb, surface_fn=fake_surface)
+                                  heartbeat=hb, surface_fn=fake_surface, watcher_conn=w)
         _assert(res == {"enabled": True, "cycles": 3}, f"bounded loop ran 3 cycles: {res}")
         pre = [c for c in vm.calls if c[0] == "pre_register"]
         _assert(len(pre) == 1, f"pre_register exactly once for the daemon lifetime: {vm.calls}")
         _assert(len(slept) == 2, "sleeps between cycles (3 cycles → 2 sleeps)")
-        print("  run_watcher_loop (flag on) bounded: 3 cycles, ONE pre_register, sleeps between: PASS")
+
+        # POSITIVE control — the self-health row landed in the SCRATCH store, proving the handle
+        # was honoured rather than silently ignored (an ignored kwarg would leave this empty and
+        # write the live store instead).
+        rows = w.execute(
+            "SELECT check_name FROM watcher_health WHERE check_name = ?", (wh.WATCHER_LOOP_NAME,)
+        ).fetchall()
+        _assert(len(rows) == 1,
+                f"self-health row must land in the INJECTED store, not the live one: {rows}")
+        w.close()
+        print("  run_watcher_loop (flag on) bounded: 3 cycles, ONE pre_register, sleeps between, "
+              "self-health row in the INJECTED store: PASS")
     finally:
         os.environ.pop("WATCHER_SURFACING_ENABLED", None)
 

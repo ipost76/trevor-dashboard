@@ -77,13 +77,19 @@ _HMM_STALE_SECONDS = 21600      # 6h — HMM inference logs every scan cycle whe
 # The critical DAEMONS that must run continuously (class a). A timer-backed oneshot
 # (e.g. trevor-regime-transitions) is INTENTIONALLY not here — between runs it is
 # legitimately 'inactive'; only a FAILED run is a fault, caught by check_cron_liveness.
-# monitor_center is included on purpose: it is masked/dead now, and the watcher reads the
-# underlying signals directly rather than trusting the monitor — surfacing the monitor's
-# own death as a finding (the "irony" A1 called out).
+#
+# 🚨 DO NOT RE-ADD trevor-monitor-center.service OR trevor-observatory.service, AND DO NOT
+# "FIX" THIS BY UNMASKING THEM. Both are masked DELIBERATELY on the VM — measured
+# LoadState=masked, UnitFileState=masked, inactive(dead). Masked is not a state systemd can
+# reach by accident: it is a symlink to /dev/null that a human had to create. monitor-center
+# was retired; the Observatory was DECOMMISSIONED in RM-DECOM. Asking `systemctl is-active`
+# about two units that no longer exist by choice made this check fire forever — two thirds of
+# its output was a permanent false alarm on the WATCHER tab, which is how a cockpit teaches
+# its operator to ignore it. Unmasking is reported to break ~69 display sites; the fix is to
+# stop asking. (The earlier comment here argued monitor_center belonged BECAUSE it was dead —
+# that reasoning surfaced a decommissioning as a malfunction.)
 CRITICAL_DAEMONS = (
     "trevor.service",
-    "trevor-monitor-center.service",
-    "trevor-observatory.service",
 )
 
 # ── plain-English helpers for the `detail` text (RM-HUB-CLEAN B2) ─────────────
