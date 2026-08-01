@@ -12,7 +12,10 @@ import {
 import { cn } from "@/lib/utils";
 import { ChevronDown, Download, Newspaper, Trash2 } from "lucide-react";
 import { DigestMarkdown } from "./digest-markdown";
-import { DigestDownloadSheet } from "./digest-download-sheet";
+import {
+  DigestDownloadSheet,
+  DigestPrintDocument,
+} from "./digest-download-sheet";
 
 // Activity feed [B7] — per-day nightly-digest cards. READ-ONLY except for the
 // D2 delete control (below).
@@ -484,12 +487,6 @@ export function ActivityFeedSection() {
   // Keyed by digest_date. Holds the route's structured `outcome`, never a
   // message — the copy is chosen at render time by deleteFailureCopy().
   const [deletes, setDeletes] = React.useState<Record<string, DeleteState>>({});
-  // Print source. Deliberately NOT the expanded card's DOM: a user can hit
-  // Download on a collapsed card, so the printable copy is rendered off-screen
-  // for whichever digest the sheet is open on, independent of expansion.
-  const printRef = React.useRef<HTMLDivElement | null>(null);
-
-  const getPrintNode = React.useCallback(() => printRef.current, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -732,20 +729,23 @@ export function ActivityFeedSection() {
         </p>
       )}
 
-      {/* Off-screen printable copy for the digest the download sheet is open
-          on. `hidden` keeps it out of the a11y tree and the visual flow while
-          leaving innerHTML intact for the print clone. */}
-      <div hidden ref={printRef}>
-        {sheetDetail?.phase === "ready" && (
-          <DigestMarkdown source={sheetDetail.body} />
-        )}
-      </div>
+      {/* 🚨 D3 — the printable document. It is built from `body_md` (the same
+          column the .md download serves), NEVER from the DOM, and NEVER from
+          the card: a user can hit Download on a COLLAPSED card, so nothing
+          here may depend on `expanded`. It renders off-screen and is revealed
+          only in print media — see digest-download-sheet.PRINT_CSS. It used to
+          be a `hidden` div that the PDF path cloned into an iframe; the
+          browser printed the live page instead of that iframe, which is the
+          defect this replaced. */}
+      <DigestPrintDocument
+        date={sheetDate}
+        body={sheetDetail?.phase === "ready" ? sheetDetail.body : null}
+      />
 
       <DigestDownloadSheet
         open={sheetDate !== null}
         onClose={() => setSheetDate(null)}
         date={sheetDate}
-        getPrintNode={getPrintNode}
         printReady={printReady}
       />
     </div>

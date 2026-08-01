@@ -1,10 +1,12 @@
 "use client";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { BottomSheet, HapticButton } from "@/components/ui";
 import { FileText, FileDown } from "lucide-react";
+import { DigestMarkdown } from "./digest-markdown";
 
 /**
- * DigestDownloadSheet — B7.
+ * DigestDownloadSheet + DigestPrintDocument — B7, rebuilt by D3.
  *
  * Mirrors the Hub's established download UX (src/components/docs/
  * download-format-sheet.tsx): a "DOWNLOAD AS" BottomSheet with two rows,
@@ -17,15 +19,31 @@ import { FileText, FileDown } from "lucide-react";
  *   (convert_md_to_pdf.py → weasyprint) is NOT usable here: weasyprint is not
  *   installed on the WSL box, so that route is already broken on this host —
  *   a pre-existing defect this component deliberately neither depends on nor
- *   attempts to fix. Instead the already-rendered digest DOM is cloned into a
- *   hidden same-origin iframe carrying a print-only stylesheet, and the
- *   browser's own print-to-PDF produces the file. Zero new dependencies, real
- *   selectable text, correct tables, and on iOS the system share sheet offers
- *   "Save to Files".
+ *   attempts to fix.
  *
- * If the iframe print path is unavailable, it falls back to opening the same
- * standalone document in a new tab so the user can print or share it there.
- * It never silently does nothing.
+ * 🚨 D3 (2026-07-31) — WHAT THIS USED TO DO, AND WHY IT WAS WRONG.
+ *
+ * The previous implementation cloned the rendered digest into a hidden 0×0
+ * same-origin iframe carrying a standalone stylesheet and called
+ * `iframe.contentWindow.print()`. The document it CONSTRUCTED was correct —
+ * measured: full body, 8 tables, zero chrome. The browser simply did not print
+ * it. `contentWindow.print()` is not scoped to the frame on WebKit/iOS, so the
+ * TOP-LEVEL page printed instead: nav, live ticker strip, tab row, bottom nav,
+ * the collapsed card summary, and no digest body at all.
+ *
+ * 🚨 That is why the print target is now the MAIN DOCUMENT and the isolation is
+ * done in `@media print` (below). There is no iframe, no `srcdoc`, no popup and
+ * no timer. Do not reintroduce an iframe print path: a correctly constructed
+ * document that the browser declines to print is indistinguishable, from the
+ * code's point of view, from one that printed fine.
+ *
+ * 🚨 THE PRINT ROOT MUST STAY MOUNTED FOR THE WHOLE PRINT LIFETIME. The old
+ * path also carried a `setTimeout(cleanup, 1000)` that removed the iframe one
+ * second after calling print() — printing is asynchronous on most engines, so
+ * that tears the document out from under a slow render. Nothing here unmounts
+ * the print root as a side effect of printing; in particular `handlePdf` does
+ * NOT call `onClose()`, because closing the sheet drops `date` and would
+ * unmount the very document being printed.
  */
 
 interface DigestDownloadSheetProps {
@@ -33,61 +51,258 @@ interface DigestDownloadSheetProps {
   onClose: () => void;
   /** Digest date (YYYY-MM-DD). `null` collapses the sheet. */
   date: string | null;
-  /** Returns the live DOM node holding the rendered digest, for print. */
-  getPrintNode: () => HTMLElement | null;
   /** False while the printable document is still being fetched/rendered. */
   printReady: boolean;
 }
 
 type PdfPhase = "idle" | "pending" | "error";
 
-// Print-only stylesheet for the standalone document. Tailwind classes do not
-// resolve inside the iframe, so everything is styled by tag — which is what we
-// want: a clean black-on-white document rather than a dark-theme screenshot.
+/** Marks the one element that survives into the printed page. */
+export const PRINT_ROOT_CLASS = "digest-print-root";
+
+// Print stylesheet for the digest document.
+//
+// On SCREEN the print root is display:none. In PRINT media the page chrome is
+// removed and the print root is revealed. It is deliberately NOT hidden with
+// the `hidden` attribute: `hidden` is display:none, and a display:none element
+// cannot be printed either — that was D3 cause 3, and it is why the previous
+// implementation could never have produced a body even once the print target
+// was right.
 const PRINT_CSS = `
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    font-size: 11pt; line-height: 1.5; color: #111; background: #fff;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+.${PRINT_ROOT_CLASS} { display: none; }
+
+@media print {
+  /* ---- D3 cause 2: total isolation from the page chrome -------------------
+     The print root is portalled to <body>, so it is a DIRECT child of body.
+     ONE rule therefore removes the sidebar rail, the header and its live
+     ticker strip, the zone sub-tab row, the bottom nav, the notes widget and
+     any open BottomSheet. None of that belongs in a downloaded report, and
+     before D3 there was no @media print rule anywhere in the Hub at all. */
+  body > *:not(.${PRINT_ROOT_CLASS}) { display: none !important; }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
-  h1, h2, h3, h4, h5, h6 { color: #000; line-height: 1.25; margin: 1.1em 0 0.45em; page-break-after: avoid; }
-  h1 { font-size: 19pt; margin-top: 0; }
-  h2 { font-size: 15pt; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
-  h3 { font-size: 12.5pt; }
-  h4, h5, h6 { font-size: 11pt; text-transform: uppercase; letter-spacing: 0.05em; color: #444; }
-  p { margin: 0.5em 0; orphans: 3; widows: 3; }
-  em { color: #444; }
-  a { color: #0645ad; text-decoration: underline; }
-  code, pre {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 9.5pt; background: #f4f4f6; border: 1px solid #e0e0e4; border-radius: 3px;
-  }
-  code { padding: 0 3px; }
-  pre { padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; }
-  pre code { border: 0; padding: 0; background: none; }
-  hr { border: 0; border-top: 1px solid #ddd; margin: 1.2em 0; }
-  blockquote { margin: 0.7em 0; padding: 0.3em 0 0.3em 0.8em; border-left: 3px solid #ccc; color: #444; }
-  ul, ol { margin: 0.5em 0; padding-left: 1.4em; }
-  li { margin: 0.2em 0; }
-  /* Nested lists sit tighter than a top-level one. This selector can only match
-     content the renderer could not produce before nesting landed, so it cannot
-     change how any existing digest prints. */
-  li > ul, li > ol { margin: 0.2em 0; }
-  table { border-collapse: collapse; width: 100%; margin: 0.7em 0; font-size: 9.5pt; page-break-inside: avoid; }
-  th, td { border: 1px solid #ccc; padding: 4px 7px; text-align: left; }
-  th { background: #f0f0f2; font-weight: 600; text-transform: uppercase; font-size: 8.5pt; letter-spacing: 0.04em; }
-  td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
   @page { margin: 14mm; }
+
+  .${PRINT_ROOT_CLASS} {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: #111 !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---- D3 cause 5: neutralise the dark-theme utilities --------------------
+     The digest markup carries the Hub's Tailwind classes. Inside the old
+     iframe they never resolved, so styling by tag was enough. On THIS document
+     they do resolve, so they are overridden here — otherwise the report prints
+     pale-on-white. "overflow: visible" is load-bearing too: the renderer wraps
+     every table in an "overflow-x-auto" div, which clips on paper.
+     text-align is deliberately NOT set — digest-markdown always applies an
+     explicit alignment class to every th/td, and clobbering it here would
+     silently drop the tables' GFM column alignment. */
+  .${PRINT_ROOT_CLASS} * {
+    color: #111 !important;
+    background: transparent !important;
+    border-color: #ccc !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    position: static !important;
+    float: none !important;
+    overflow: visible !important;
+    max-height: none !important;
+    max-width: 100% !important;
+  }
+
+  /* ---- identifying header ------------------------------------------------ */
+  .${PRINT_ROOT_CLASS} .digest-print-header {
+    border-bottom: 2px solid #111 !important;
+    padding-bottom: 5px;
+    margin: 0 0 14px;
+  }
+  .${PRINT_ROOT_CLASS} .digest-print-header h1 {
+    margin: 0;
+    font-size: 12pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .${PRINT_ROOT_CLASS} .digest-print-header p {
+    margin: 2px 0 0;
+    font-size: 10pt;
+    color: #444 !important;
+  }
+
+  /* ---- document typography ----------------------------------------------
+     digest-markdown maps markdown "#" to <h2>, "##" to <h3> and so on (it
+     shifts one level so the page keeps a single document h1), so the scale
+     below is anchored on h2, not h1. */
+  .${PRINT_ROOT_CLASS} h1, .${PRINT_ROOT_CLASS} h2, .${PRINT_ROOT_CLASS} h3,
+  .${PRINT_ROOT_CLASS} h4, .${PRINT_ROOT_CLASS} h5, .${PRINT_ROOT_CLASS} h6 {
+    color: #000 !important;
+    font-weight: 700;
+    line-height: 1.25;
+    margin: 1.1em 0 0.45em;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .${PRINT_ROOT_CLASS} h2 { font-size: 17pt; margin-top: 0; }
+  .${PRINT_ROOT_CLASS} h3 {
+    font-size: 13.5pt;
+    border-bottom: 1px solid #ccc !important;
+    padding-bottom: 3px;
+  }
+  .${PRINT_ROOT_CLASS} h4 { font-size: 11.5pt; }
+  .${PRINT_ROOT_CLASS} h5, .${PRINT_ROOT_CLASS} h6 {
+    font-size: 10pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #444 !important;
+  }
+
+  .${PRINT_ROOT_CLASS} p { margin: 0.5em 0; orphans: 3; widows: 3; }
+  .${PRINT_ROOT_CLASS} strong { font-weight: 700; }
+  .${PRINT_ROOT_CLASS} em { font-style: italic; color: #444 !important; }
+  .${PRINT_ROOT_CLASS} a { color: #0645ad !important; text-decoration: underline; }
+  .${PRINT_ROOT_CLASS} hr {
+    border: 0 !important;
+    border-top: 1px solid #ddd !important;
+    margin: 1.2em 0;
+  }
+  .${PRINT_ROOT_CLASS} blockquote {
+    margin: 0.7em 0;
+    padding: 0.3em 0 0.3em 0.8em;
+    border-left: 3px solid #ccc !important;
+    color: #444 !important;
+  }
+
+  .${PRINT_ROOT_CLASS} ul { list-style: disc outside !important; }
+  .${PRINT_ROOT_CLASS} ol { list-style: decimal outside !important; }
+  .${PRINT_ROOT_CLASS} ul, .${PRINT_ROOT_CLASS} ol {
+    margin: 0.5em 0;
+    padding-left: 1.4em !important;
+  }
+  .${PRINT_ROOT_CLASS} li { margin: 0.2em 0; break-inside: avoid; page-break-inside: avoid; }
+  .${PRINT_ROOT_CLASS} li > ul, .${PRINT_ROOT_CLASS} li > ol { margin: 0.2em 0; }
+  .${PRINT_ROOT_CLASS} li::marker { color: #444 !important; }
+
+  .${PRINT_ROOT_CLASS} code, .${PRINT_ROOT_CLASS} pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 9pt;
+    background: #f4f4f6 !important;
+    border: 1px solid #e0e0e4 !important;
+    border-radius: 3px;
+  }
+  .${PRINT_ROOT_CLASS} code { padding: 0 3px; }
+  .${PRINT_ROOT_CLASS} pre {
+    padding: 8px 10px;
+    white-space: pre-wrap !important;
+    word-wrap: break-word;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .${PRINT_ROOT_CLASS} pre code {
+    border: 0 !important;
+    padding: 0;
+    background: none !important;
+  }
+
+  /* ---- D3 cause 4: degenerate shapes -------------------------------------
+     A 558-line report with 8 tables must PAGINATE, not clip.
+       - break-inside is set on ROWS, never on the table. A "page-break-inside:
+         avoid" on a table taller than one page pushes the whole table to the
+         next page and then clips it — the exact failure this must prevent.
+       - thead repeats on every page a table spans.
+       - table-layout: fixed plus word-break makes a table wider than the sheet
+         WRAP rather than run off the edge; digest-markdown sets
+         "whitespace-nowrap" on every th, which is undone here for the same
+         reason. */
+  .${PRINT_ROOT_CLASS} table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    table-layout: fixed !important;
+    margin: 0.7em 0;
+    font-size: 8.5pt;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+  .${PRINT_ROOT_CLASS} thead { display: table-header-group; }
+  .${PRINT_ROOT_CLASS} tfoot { display: table-footer-group; }
+  .${PRINT_ROOT_CLASS} tr { break-inside: avoid; page-break-inside: avoid; }
+  .${PRINT_ROOT_CLASS} th, .${PRINT_ROOT_CLASS} td {
+    border: 1px solid #ccc !important;
+    padding: 3px 5px;
+    vertical-align: top;
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  .${PRINT_ROOT_CLASS} th {
+    background: #f0f0f2 !important;
+    font-weight: 700;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .${PRINT_ROOT_CLASS} td {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+}
 `;
 
-function buildPrintDocument(date: string, innerHtml: string): string {
-  return (
-    '<!doctype html><html><head><meta charset="utf-8">' +
-    // The print dialog uses document.title as the default PDF filename.
-    `<title>trevor-digest-${date}</title>` +
-    `<style>${PRINT_CSS}</style></head><body>${innerHtml}</body></html>`
+/**
+ * The printable digest document.
+ *
+ * 🚨 THE INVARIANT, AND THE WHOLE POINT OF THIS COMPONENT: its content comes
+ * from `body` — the digest's `body_md`, the same column the .md download
+ * serves — and NEVER from the DOM. It does not read the card, it does not care
+ * whether the card is expanded, and it is not a clone of anything on screen. A
+ * download must not depend on what happens to be visible.
+ *
+ * It portals to <body> so it is a direct child of body, which is what lets the
+ * single `body > *:not(.digest-print-root)` rule above isolate it from every
+ * piece of page chrome at once.
+ */
+export function DigestPrintDocument({
+  date,
+  body,
+}: {
+  date: string | null;
+  body: string | null;
+}) {
+  // document.body does not exist during SSR; portal only once mounted.
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+
+  if (!mounted || !date || !body) return null;
+
+  return createPortal(
+    <div className={PRINT_ROOT_CLASS} aria-hidden="true">
+      {/* The stylesheet is passed as a TEXT CHILD. The Hub's no-raw-HTML-
+          injection design is preserved here exactly as it is in
+          digest-markdown: this component injects no markup of any kind. */}
+      <style>{PRINT_CSS}</style>
+      <header className="digest-print-header">
+        <h1>TREVOR nightly digest</h1>
+        <p>{date}</p>
+      </header>
+      <DigestMarkdown source={body} />
+    </div>,
+    document.body,
   );
 }
 
@@ -95,24 +310,46 @@ export function DigestDownloadSheet({
   open,
   onClose,
   date,
-  getPrintNode,
   printReady,
 }: DigestDownloadSheetProps) {
   const [pdfPhase, setPdfPhase] = React.useState<PdfPhase>("idle");
   const errorTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The print dialog offers document.title as the default PDF filename, so it
+  // is swapped for the digest's name across the print and restored afterwards.
+  const prevTitle = React.useRef<string | null>(null);
+  const afterPrint = React.useRef<(() => void) | null>(null);
+
+  const restoreTitle = React.useCallback(() => {
+    if (prevTitle.current !== null) {
+      document.title = prevTitle.current;
+      prevTitle.current = null;
+    }
+  }, []);
+
+  const detachAfterPrint = React.useCallback(() => {
+    if (afterPrint.current) {
+      window.removeEventListener("afterprint", afterPrint.current);
+      afterPrint.current = null;
+    }
+  }, []);
 
   // Clear any "Failed" badge when the sheet opens for a different digest so a
-  // previous error cannot leak across days.
+  // previous error cannot leak across days. This is also the guaranteed
+  // restore path for the document title: closing the sheet sets date to null.
   React.useEffect(() => {
     if (errorTimer.current) clearTimeout(errorTimer.current);
     setPdfPhase("idle");
-  }, [date]);
+    detachAfterPrint();
+    restoreTitle();
+  }, [date, detachAfterPrint, restoreTitle]);
 
   React.useEffect(
     () => () => {
       if (errorTimer.current) clearTimeout(errorTimer.current);
+      detachAfterPrint();
+      restoreTitle();
     },
-    [],
+    [detachAfterPrint, restoreTitle],
   );
 
   const failPdf = React.useCallback(() => {
@@ -132,91 +369,36 @@ export function DigestDownloadSheet({
     onClose();
   };
 
-  /** Last-resort path: hand the user the standalone document in a new tab. */
-  const openInNewTab = (html: string): boolean => {
-    try {
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const opened = window.open(url, "_blank");
-      if (!opened) {
-        URL.revokeObjectURL(url);
-        return false;
-      }
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const handlePdf = () => {
     if (!date || pdfPhase === "pending" || !printReady) return;
-    const node = getPrintNode();
-    if (!node) {
-      failPdf();
-      return;
-    }
-
     setPdfPhase("pending");
-    // The markup comes from our own React render (already escaped) — this is a
-    // DOM clone into a separate document, not markup injected into this page.
-    const html = buildPrintDocument(date, node.innerHTML);
 
-    let settled = false;
-    let iframe: HTMLIFrameElement | null = null;
+    prevTitle.current = document.title;
+    document.title = `trevor-digest-${date}`;
 
-    const cleanup = () => {
-      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      iframe = null;
+    // 🚨 Nothing in this handler may unmount the print root. onClose() is NOT
+    // called here: it would clear `date` and drop the document mid-print. The
+    // sheet is hidden by the print stylesheet anyway, so leaving it open costs
+    // nothing on paper. Where the browser fires `afterprint` (desktop; iOS
+    // Safari does not) the sheet is dismissed once printing is genuinely over.
+    // That listener is a convenience — it is never load-bearing, and the
+    // effects above restore the title with or without it.
+    detachAfterPrint();
+    const handler = () => {
+      detachAfterPrint();
+      restoreTitle();
+      onClose();
     };
-
-    const fallback = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (openInNewTab(html)) {
-        setPdfPhase("idle");
-        onClose();
-      } else {
-        failPdf();
-      }
-    };
+    afterPrint.current = handler;
+    window.addEventListener("afterprint", handler);
 
     try {
-      iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.setAttribute("tabindex", "-1");
-      iframe.style.cssText =
-        "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
-
-      iframe.onload = () => {
-        if (settled) return;
-        const win = iframe?.contentWindow;
-        if (!win) {
-          fallback();
-          return;
-        }
-        try {
-          settled = true;
-          win.focus();
-          win.print();
-          setPdfPhase("idle");
-          onClose();
-          window.setTimeout(cleanup, 1000);
-        } catch {
-          settled = false;
-          fallback();
-        }
-      };
-
-      // srcdoc (not the deprecated document.write) — same-origin, no navigation.
-      iframe.srcdoc = html;
-      document.body.appendChild(iframe);
-
-      // Safety net: if onload never fires we must not sit in "pending" forever.
-      window.setTimeout(fallback, 4000);
+      window.print();
+      setPdfPhase("idle");
     } catch {
-      fallback();
+      detachAfterPrint();
+      restoreTitle();
+      failPdf();
     }
   };
 
