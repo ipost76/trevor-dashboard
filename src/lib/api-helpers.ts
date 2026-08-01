@@ -15,6 +15,39 @@ export function safeJsonParse<T>(raw: string, fallback: T): T {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// safeDecodeSegment — the guard for a dynamic route segment.  [B4, 2026-08-01]
+//
+// 🚨 Next hands the dynamic segment ALREADY DECODED, so a request for `%25`
+// arrives at the handler as a bare `%` — and `decodeURIComponent("%")` THROWS
+// URIError. Unguarded, that escapes the handler as an unstructured HTTP 500:
+// measured on five routes before this fix, `%25`, `%2` and `%E0%A4%A` all
+// returned 500 with an empty or "Internal Server Error" body.
+//
+// A malformed segment is a CLIENT error. It must not be indistinguishable from
+// a genuine server failure — that is the whole point of the guard, not merely
+// suppressing a stack trace.
+//
+// The malformed value is passed through UNCHANGED rather than repaired or
+// blanked, so the caller's own shape check (a DATE_RE, a filename test) is what
+// rejects it and decides the 400. This function never decides a status.
+//
+// ⚠️ ORIGIN AND THE ONE DELIBERATE DEVIATION. D2 (2026-07-31) authored this as
+// a file-local `safeDecode` inside api/health/digests/[date]/route.ts for the
+// DELETE path, and its semantics are reproduced here EXACTLY. What changed is
+// the location, not the behaviour: five routes carry the identical defect, and
+// five copies of one guard is the same "two copies of one fact" failure that a
+// shared fix exists to prevent — the next correction would land in one copy and
+// silently not the others. One guard, one style, five call sites.
+// ─────────────────────────────────────────────────────────────────────────────
+export function safeDecodeSegment(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ASYNC child-process bridge (2026-05-29 — RM-DASH async-bridge wave).
 //
 // HISTORY / WHY ASYNC: the prior bridge was SYNCHRONOUS, which BLOCKS the single

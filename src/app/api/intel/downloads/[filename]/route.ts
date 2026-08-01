@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, statSync } from "fs";
-import { runPython } from "@/lib/api-helpers";
+import { runPython, safeDecodeSegment } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +42,10 @@ export async function GET(
   { params }: { params: Promise<Params> },
 ) {
   const { filename: rawFilename } = await params;
-  const filename = decodeURIComponent(rawFilename ?? "");
+  // B4: was a bare decodeURIComponent — `%25` arrives here as `%` and threw
+  // URIError, returning a 500 for what is a client error. The malformed value
+  // falls through to the path checks below, which reject it as a 400.
+  const filename = safeDecodeSegment(rawFilename ?? "");
   if (!filename || filename.includes("/") || filename.includes("..") || filename.startsWith(".")) {
     return new NextResponse("invalid filename", { status: 400 });
   }

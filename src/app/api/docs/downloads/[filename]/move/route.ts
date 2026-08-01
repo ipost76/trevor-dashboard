@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython } from "@/lib/api-helpers";
+import { runPython, safeDecodeSegment } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +11,10 @@ export async function PUT(
   { params }: { params: Promise<{ filename: string }> },
 ) {
   const { filename: rawFilename } = await params;
-  const filename = decodeURIComponent(rawFilename ?? "");
+  // B4: was a bare decodeURIComponent — `%25` arrives here as `%` and threw
+  // URIError, returning a 500 for what is a client error. The path checks below
+  // reject the malformed value as a 400.
+  const filename = safeDecodeSegment(rawFilename ?? "");
   if (
     !filename ||
     filename.includes("/") ||

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython } from "@/lib/api-helpers";
+import { runPython, safeDecodeSegment } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,13 +7,17 @@ export const dynamic = "force-dynamic";
 // Category ids are lowercase slugs (see download_manager._slugify).
 const VALID_ID = /^[a-z0-9-]+$/;
 
+// B4: both handlers below used a bare decodeURIComponent, which throws URIError
+// on a malformed percent-escape and surfaces as a 500. VALID_ID is what rejects
+// the malformed value, as the 400 it always should have been.
+
 // PUT /api/docs/categories/[id] — rename a category. The id is never changed.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: rawId } = await params;
-  const id = decodeURIComponent(rawId ?? "");
+  const id = safeDecodeSegment(rawId ?? "");
   if (!id || !VALID_ID.test(id)) {
     return NextResponse.json({ error: "invalid category id" }, { status: 400 });
   }
@@ -54,7 +58,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: rawId } = await params;
-  const id = decodeURIComponent(rawId ?? "");
+  const id = safeDecodeSegment(rawId ?? "");
   if (!id || !VALID_ID.test(id)) {
     return NextResponse.json({ error: "invalid category id" }, { status: 400 });
   }

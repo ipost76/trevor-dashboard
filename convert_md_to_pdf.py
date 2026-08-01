@@ -1,5 +1,30 @@
 """Hub API helper — converts a downloads/active/<filename>.md to a styled PDF.
 
+⚠️ SUPERSEDED — NOT ON THE RENDER PATH.  [B4, 2026-08-01]
+
+The Docs → PDF control no longer reaches this script. It now prints
+client-side, through the shared print document
+(src/components/ui/markdown-print-document.tsx) — the mechanism D3/D4 built and
+verified for the nightly digest, which needs no dependencies at all.
+
+🚨 THIS SCRIPT HAS NEVER WORKED ON THE WSL HUB. `weasyprint` (line ~29) and
+`pygments` (line ~28) are imported at MODULE TOP LEVEL, and both are absent
+here — measured 2026-08-01:
+
+    venv/bin/python3 -c "import weasyprint"
+    ModuleNotFoundError: No module named 'weasyprint'
+
+Because the failure is at import, it happens BEFORE main()'s try/except can
+emit the JSON error shape below, so runPython throws and the route returned a
+bare 500 on every call. Installing it needs root, which `trevor` does not have
+(FORTRESS-C4).
+
+LEFT IN PLACE DELIBERATELY, not overlooked. It is off the render path either
+way, removal is a behaviour change nothing measured asked for, and its PAGE_CSS
+remains the only record of the intended print styling. Do not "fix" it by
+installing a PDF library — the whole point of the replacement is that it needs
+none.
+
 Invoked by /api/docs/downloads/[filename]/pdf. Resolves the source under the
 Hub's runPython cwd (TREVOR_DIR=/home/trevor/trevor), so relative paths point
 at the bot's downloads tree.

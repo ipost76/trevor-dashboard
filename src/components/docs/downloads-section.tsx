@@ -19,7 +19,25 @@ import {
 import { CategoryTabs, UNCATEGORIZED_KEY, type DocsCategory } from "./category-tabs";
 import { MoveToSheet } from "./move-to-sheet";
 import { CategorySettingsSheet } from "./category-settings-sheet";
-import { DownloadFormatSheet } from "./download-format-sheet";
+import { DownloadFormatSheet, isPrintable } from "./download-format-sheet";
+import { DigestMarkdown } from "@/components/memory/digest-markdown";
+import { MarkdownPrintDocument } from "@/components/ui/markdown-print-document";
+
+// B4 — Docs → PDF source state.
+//
+// 🚨 The PDF prints from the FILE'S OWN BYTES, fetched here, never from the
+// DOM: the Docs zone is a file browser and renders no document on screen at
+// all, so there would be nothing to clone even if cloning were acceptable.
+// This is the same invariant the digest print path holds.
+//
+// The fetch reuses the existing .md download route rather than adding one.
+// That route sets Content-Disposition: attachment, which `fetch` ignores — it
+// only affects how a browser NAVIGATION is handled — so reading the body as
+// text is correct and needs no new endpoint.
+type DocSource =
+  | { phase: "loading" }
+  | { phase: "ready"; body: string }
+  | { phase: "error" };
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -257,6 +275,11 @@ export function DownloadsSection() {
   const [downloadSheetFile, setDownloadSheetFile] = React.useState<
     string | null
   >(null);
+  // B4 — the fetched markdown behind the PDF print path, keyed by filename so
+  // reopening a sheet for a file already read does not refetch it.
+  const [docSources, setDocSources] = React.useState<
+    Record<string, DocSource>
+  >({});
   // Category folders (Wave B1). `null` = the categories fetch has not resolved
   // yet; `[]` = resolved empty / endpoint unavailable → a lone Uncategorized
   // tab. `activeCategory` holds a category id or UNCATEGORIZED_KEY; it stays
@@ -369,11 +392,45 @@ export function DownloadsSection() {
     ? "Uncategorized"
     : (categories?.find((c) => c.id === activeKey)?.name ?? activeKey);
 
+  // B4 — read a file's markdown so the print document has something to render.
+  // Only .md is fetched: it is the only thing the renderer parses, and pulling
+  // a multi-MB .zip into memory to print it would be worse than useless.
+  const loadDocSource = React.useCallback(async (filename: string) => {
+    setDocSources((prev) =>
+      prev[filename]?.phase === "ready"
+        ? prev
+        : { ...prev, [filename]: { phase: "loading" } },
+    );
+    try {
+      const res = await fetch(
+        `/api/intel/downloads/${encodeURIComponent(filename)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) throw new Error("read failed");
+      const body = await res.text();
+      if (!body) throw new Error("empty document");
+      setDocSources((prev) => ({
+        ...prev,
+        [filename]: { phase: "ready", body },
+      }));
+    } catch {
+      // 🚨 The FAILURE is stored, never the error text. A route's error string
+      // reaching user-facing copy is the F1 defect class; the sheet chooses its
+      // own sentence from this phase.
+      setDocSources((prev) => ({ ...prev, [filename]: { phase: "error" } }));
+    }
+  }, []);
+
   // Opens the DownloadFormatSheet — the sheet hosts both the .md and PDF
   // download triggers. (Pre-Phase 2 this was a direct-link click; the sheet
   // now mediates so users can pick a format on every tap.)
   const handleDownload = (filename: string) => {
     setDownloadSheetFile(filename);
+    // The PDF path prints the rendered document, so fetch it on open — the
+    // Docs zone never renders the file on screen, so nothing else would.
+    if (isPrintable(filename) && docSources[filename]?.phase !== "ready") {
+      void loadDocSource(filename);
+    }
   };
 
   const handleMove = async (
@@ -554,14 +611,47 @@ export function DownloadsSection() {
         </ul>
       )}
 
+      {/* 🚨 B4 — the printable document. It is built from the file's own bytes
+          (the same bytes the .md download serves), NEVER from the DOM. The
+          Docs zone renders no document on screen, so the print root is the
+          only place this content exists — it is hidden on screen and revealed
+          only in print media by the shared @media print stylesheet.
+
+          Nothing here may unmount while a print is in flight: printing is
+          asynchronous, and download-format-sheet deliberately does not call
+          onClose() on the print path for exactly that reason. */}
+      <MarkdownPrintDocument
+        label={downloadSheetFile ? `TREVOR · ${downloadSheetFile}` : null}
+        ready={
+          downloadSheetFile !== null &&
+          docSources[downloadSheetFile]?.phase === "ready"
+        }
+      >
+        <DigestMarkdown
+          source={
+            downloadSheetFile && docSources[downloadSheetFile]?.phase === "ready"
+              ? (docSources[downloadSheetFile] as { body: string }).body
+              : ""
+          }
+        />
+      </MarkdownPrintDocument>
+
       {/* Download-format sheet — opens when the Download button on any card
           is tapped (Phase 2 — PDF download wave). Hosts the .md direct-link
-          flow and the on-demand PDF conversion. One shared instance, scoped
-          to whichever file's Download was tapped. */}
+          flow and the client-side print-to-PDF path. One shared instance,
+          scoped to whichever file's Download was tapped. */}
       <DownloadFormatSheet
         open={downloadSheetFile !== null}
         onClose={() => setDownloadSheetFile(null)}
         filename={downloadSheetFile}
+        printReady={
+          downloadSheetFile !== null &&
+          docSources[downloadSheetFile]?.phase === "ready"
+        }
+        printFailed={
+          downloadSheetFile !== null &&
+          docSources[downloadSheetFile]?.phase === "error"
+        }
       />
 
       {/* Move-to sheet — one shared instance; opens for whichever file's MOVE

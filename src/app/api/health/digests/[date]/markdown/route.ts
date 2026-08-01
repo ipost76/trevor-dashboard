@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython } from "@/lib/api-helpers";
+import { runPython, safeDecodeSegment } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +28,10 @@ export async function GET(
   { params }: { params: Promise<{ date: string }> },
 ) {
   const { date: rawDate } = await params;
-  const date = decodeURIComponent(rawDate ?? "");
+  // B4: was a bare decodeURIComponent — `%25` arrives here as `%` and threw
+  // URIError, returning a 500 for what is a client error. Same guard as the
+  // detail + delete siblings; DATE_RE below is what rejects it, as a 400.
+  const date = safeDecodeSegment(rawDate ?? "");
 
   if (!DATE_RE.test(date)) {
     return new NextResponse("invalid date (expected YYYY-MM-DD)", {

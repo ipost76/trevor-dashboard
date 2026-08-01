@@ -1,9 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, statSync } from "fs";
-import { runPython } from "@/lib/api-helpers";
+import { runPython, safeDecodeSegment } from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// ⚠️ SUPERSEDED — NOT ON THE RENDER PATH.  [B4, 2026-08-01]
+//
+// The Docs → PDF control no longer calls this route. It now prints client-side
+// through the shared print document (components/ui/markdown-print-document.tsx),
+// the same mechanism D3/D4 built and verified for the nightly digest — which
+// needs no dependencies at all.
+//
+// 🚨 This route has been DEAD ON THIS BOX for as long as it has existed:
+// convert_md_to_pdf.py imports `weasyprint` (and `pygments`) at module top
+// level, and MEASURED on WSL 2026-08-01 both are absent —
+// `ModuleNotFoundError: No module named 'weasyprint'`. The import fails before
+// the script's own try/except can emit its JSON error shape, so runPython
+// throws and every call returned 500. Installing them needs root, which the
+// `trevor` user does not have (FORTRESS-C4).
+//
+// LEFT IN PLACE DELIBERATELY, not overlooked: removing it is a behaviour change
+// nothing measured asked for, and it is now unreferenced by the UI either way.
+// The decode guard below was still applied — a superseded route is not an
+// excuse to leave a known 500 reachable.
 
 interface Params {
   filename: string;
@@ -21,7 +41,10 @@ export async function GET(
   { params }: { params: Promise<Params> },
 ) {
   const { filename: rawFilename } = await params;
-  const filename = decodeURIComponent(rawFilename ?? "");
+  // B4: was a bare decodeURIComponent — `%25` arrives here as `%` and threw
+  // URIError, returning a 500 for what is a client error. The path checks below
+  // reject the malformed value as a 400.
+  const filename = safeDecodeSegment(rawFilename ?? "");
   if (
     !filename ||
     filename.includes("/") ||

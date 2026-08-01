@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPython, runPythonResult, safeJsonParse } from "@/lib/api-helpers";
+import {
+  runPython,
+  runPythonResult,
+  safeDecodeSegment,
+  safeJsonParse,
+} from "@/lib/api-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +52,10 @@ export async function GET(
   { params }: { params: Promise<{ date: string }> },
 ) {
   const { date: rawDate } = await params;
-  const date = decodeURIComponent(rawDate ?? "");
+  // B4: was a bare decodeURIComponent, which threw URIError on a malformed
+  // percent-escape and surfaced as a 500. A malformed date is a client error;
+  // the raw value falls through to DATE_RE below and is rejected as a 400.
+  const date = safeDecodeSegment(rawDate ?? "");
 
   if (!DATE_RE.test(date)) {
     return NextResponse.json(
@@ -105,23 +113,23 @@ export async function GET(
 
 // Next hands the dynamic segment ALREADY DECODED, so a request for `%25`
 // arrives here as a bare `%` — and `decodeURIComponent("%")` THROWS URIError,
-// which without this guard escapes as an unstructured HTTP 500 (measured: an
+// which without a guard escapes as an unstructured HTTP 500 (measured: an
 // empty body, no `outcome` for the UI to key on). It always failed CLOSED — no
 // SQL ran, nothing was deleted — but a destructive route must return a shape
 // its caller can read, so the malformed value is passed through unchanged and
 // left for DATE_RE to reject as `invalid_date`.
 //
-// ⚠️ The GET handler above has the SAME pre-existing defect (verified: `%25`
-// → 500). It is deliberately NOT fixed here — this prompt is scoped to the
-// delete path and to preserving existing read behaviour. Reported, not silently
-// repaired, and not silently ignored.
-function safeDecode(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
+// ✅ CLOSED B4 (2026-08-01) — D2's note here read "the GET handler above has the
+// SAME pre-existing defect (verified: `%25` → 500). It is deliberately NOT fixed
+// here." It is fixed now, along with the /markdown sibling and three routes
+// outside this namespace that carried the identical shape. D2's file-local
+// `safeDecode` moved to api-helpers.safeDecodeSegment UNCHANGED in behaviour —
+// see the rationale there for why one shared guard beat five copies.
+//
+// The list route (../route.ts) does NOT share this defect and was ruled out by
+// measurement, not by inspection: it has no dynamic segment, reads `limit` via
+// URLSearchParams, and URLSearchParams decoding does not throw on a malformed
+// escape (`?limit=%25` and `?limit=%2` both measured 200).
 
 interface DeleteResult {
   ok?: boolean;
@@ -147,7 +155,7 @@ export async function DELETE(
   { params }: { params: Promise<{ date: string }> },
 ) {
   const { date: rawDate } = await params;
-  const date = safeDecode(rawDate ?? "");
+  const date = safeDecodeSegment(rawDate ?? "");
 
   // Shape gate BEFORE anything else. The helper validates independently too, and
   // the value is a bound SQL parameter on the VM — three layers, because this is
