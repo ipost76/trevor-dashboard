@@ -68,7 +68,12 @@ export const PRINT_ROOT_CLASS = "digest-print-root";
 // cannot be printed either — that was D3 cause 3, and it is why the previous
 // implementation could never have produced a body even once the print target
 // was right.
-const PRINT_CSS = `
+// The date is interpolated into an @page margin box (the running header), so it
+// is restricted to the digits and hyphens a YYYY-MM-DD digest date can contain.
+// Nothing else may reach the stylesheet.
+const cssSafeDate = (date: string) => date.replace(/[^0-9-]/g, "");
+
+const buildPrintCss = (date: string) => `
 .${PRINT_ROOT_CLASS} { display: none; }
 
 @media print {
@@ -80,6 +85,32 @@ const PRINT_CSS = `
      before D3 there was no @media print rule anywhere in the Hub at all. */
   body > *:not(.${PRINT_ROOT_CLASS}) { display: none !important; }
 
+  /* ---- D4 defect 1: what 'body > *' STRUCTURALLY CANNOT REACH -------------
+     D3 scoped the isolation by TREE POSITION. Two things that print have no
+     position in the tree, so no child selector can ever match them. Both were
+     measured on a real headless render of this page, by A/B probe:
+
+       1. body::before / body::after (globals.css) are position:fixed inset:0
+          grid + scanline overlays. Pseudo-elements are NOT children. They were
+          painting their texture over every page of the report: disabling them
+          moved page-1 content from grey 247 to 255 (pure white).
+
+       2. The root's dark 'color-scheme' paints the page CANVAS — including the
+          whole 14mm @page margin — #121212. An author background cannot
+          repaint a canvas the UA colours from color-scheme, which is why D3's
+          'background: #fff !important' on html/body did not (and could not)
+          fix it: measured margin grey 18, and 255 after this one line.
+
+     🚨 Isolate by INTENT, not by tree position. A rule that names 'body > *'
+     is a rule about where a node sits, and the things that broke this report
+     do not sit anywhere. */
+  body::before, body::after,
+  html::before, html::after {
+    display: none !important;
+    content: none !important;
+  }
+  :root { color-scheme: light !important; }
+
   html, body {
     margin: 0 !important;
     padding: 0 !important;
@@ -89,7 +120,42 @@ const PRINT_CSS = `
     overflow: visible !important;
   }
 
-  @page { margin: 14mm; }
+  /* ---- D4 defect 5: page furniture ---------------------------------------
+     Running header + page number, both as @page MARGIN BOXES.
+     MEASURED: Chrome 150 honours these — "N / M" appeared on pages 1, 2, 6 and
+     18 of a real 18-page render. WebKit does NOT implement @page margin boxes,
+     so on iOS this produces nothing at all. That is a graceful absence, and it
+     is deliberate — see below.
+
+     🚨 A position:fixed running-header ELEMENT was built as the WebKit half,
+     measured, and REMOVED. Two findings killed it:
+       1. It does not sit where it is told. With top:-9mm (i.e. inside the top
+          margin) Chrome painted it at the BOTTOM of the page area, on top of
+          the last line of content, on every page. Verified by giving it a
+          yellow background and rasterising: the strip lands over the text.
+          top:0 places it over the FIRST line instead. A fixed box cannot
+          reserve space per page, so there is no offset that makes it safe.
+       2. It is the same shape as the defect this stylesheet exists to remove.
+          The two things that escaped D3's isolation were inset:0 position:fixed
+          boxes; adding another fixed box to the print root would reintroduce
+          the exact mechanism on the one engine that cannot be tested here.
+     A margin box cannot overlap content — the margin is reserved by
+     definition. Absent furniture on iOS beats furniture printed over the
+     report. Do not "restore the WebKit fallback" without solving (1). */
+  @page {
+    margin: 16mm 14mm;
+    @top-center {
+      content: "TREVOR nightly digest · ${cssSafeDate(date)}";
+      font-size: 8pt;
+      color: #666;
+      letter-spacing: 0.06em;
+    }
+    @bottom-center {
+      content: counter(page) " / " counter(pages);
+      font-size: 8pt;
+      color: #666;
+    }
+  }
 
   .${PRINT_ROOT_CLASS} {
     display: block !important;
@@ -104,6 +170,20 @@ const PRINT_CSS = `
     background: #fff !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+
+    /* ---- D4 defect 2: ligatures ------------------------------------------
+       On iOS '-apple-system' resolves to SF Pro, WebKit forms the ff/fi/ffi
+       ligatures by default, and its PDF export writes those glyphs with a
+       mis-mapped index — "effective" prints e!ective / e"ective, "attempted"
+       prints a!empted. The giveaway that it is a glyph-index fault and not a
+       missing glyph: the SAME "!" stands in for BOTH the ff of "effective"
+       and the tt of "attempted".
+       Never forming the ligature is the cheapest correct fix — there is then
+       no ligature glyph to mis-map. This property inherits, so the whole
+       document is covered from here. */
+    font-variant-ligatures: none;
+    -webkit-font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "hlig" 0;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "hlig" 0;
   }
 
   /* ---- D3 cause 5: neutralise the dark-theme utilities --------------------
@@ -128,24 +208,14 @@ const PRINT_CSS = `
     max-width: 100% !important;
   }
 
-  /* ---- identifying header ------------------------------------------------ */
-  .${PRINT_ROOT_CLASS} .digest-print-header {
-    border-bottom: 2px solid #111 !important;
-    padding-bottom: 5px;
-    margin: 0 0 14px;
-  }
-  .${PRINT_ROOT_CLASS} .digest-print-header h1 {
-    margin: 0;
-    font-size: 12pt;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .${PRINT_ROOT_CLASS} .digest-print-header p {
-    margin: 2px 0 0;
-    font-size: 10pt;
-    color: #444 !important;
-  }
+  /* ---- D4: D3's identifying header block is GONE -------------------------
+     It rendered "TREVOR NIGHTLY DIGEST / <date>" immediately above body_md's
+     own H1, "TREVOR NIGHTLY DIGEST — <date> (ET)" — a literal duplicate, and
+     the "the header renders twice" Ghost reported on page 1. The H1 already
+     carries both the title and the date, so the wrapper bought nothing and
+     cost a repeated title. The document is now a faithful print of body_md
+     with no block bolted on top of it; the date survives as page furniture in
+     the running header above, which is where furniture belongs. */
 
   /* ---- document typography ----------------------------------------------
      digest-markdown maps markdown "#" to <h2>, "##" to <h3> and so on (it
@@ -234,6 +304,16 @@ const PRINT_CSS = `
   .${PRINT_ROOT_CLASS} table {
     border-collapse: collapse !important;
     width: 100% !important;
+    /* 🚨 DECLARED BUT NOT GOVERNING — do not read this line as "column widths
+       are pinned". MEASURED (D4): rendering the same page with
+       'table-layout: auto !important' and with 'fixed !important' produces a
+       BYTE-IDENTICAL page image (sha of the extracted text and the 174,308-byte
+       PNG both match). Under a governing fixed layout the columns would be
+       divided EQUALLY, and they are visibly not; that is also why the
+       overflow-wrap change below was able to move column widths at all, which
+       fixed layout would have made impossible. It is left in place rather than
+       removed because removing it is a behaviour change nothing measured asked
+       for — but the next reader should know it is inert here. */
     table-layout: fixed !important;
     margin: 0.7em 0;
     font-size: 8.5pt;
@@ -248,8 +328,21 @@ const PRINT_CSS = `
     padding: 3px 5px;
     vertical-align: top;
     white-space: normal !important;
-    word-break: break-word;
-    overflow-wrap: anywhere;
+    /* ---- D4 defect 3: narrow columns wrapping mid-token ------------------
+       This was 'word-break: break-word; overflow-wrap: anywhere', and
+       'anywhere' is the defect. It differs from 'break-word' in exactly one
+       way that matters here: it COLLAPSES THE CELL'S INTRINSIC MIN-CONTENT
+       WIDTH TO ONE CHARACTER. The auto table layout then had licence to
+       squeeze the narrow columns to nothing, so the equity reconciliation
+       table broke "+$0.00" as "+$0." / "00" and "UNKNOWN" as "UNKN" / "OWN".
+       'break-word' still breaks a genuinely over-long token rather than let
+       it overflow, but it does NOT feed back into min-content sizing, so the
+       columns size to their content again. Measured: with this pair, +$0.00,
+       +0.0% and UNKNOWN each render on one line and "since cutover" wraps at
+       the space, not mid-word.
+       🚨 Do not restore 'overflow-wrap: anywhere' here. */
+    word-break: normal;
+    overflow-wrap: break-word;
   }
   .${PRINT_ROOT_CLASS} th {
     background: #f0f0f2 !important;
@@ -295,11 +388,13 @@ export function DigestPrintDocument({
       {/* The stylesheet is passed as a TEXT CHILD. The Hub's no-raw-HTML-
           injection design is preserved here exactly as it is in
           digest-markdown: this component injects no markup of any kind. */}
-      <style>{PRINT_CSS}</style>
-      <header className="digest-print-header">
-        <h1>TREVOR nightly digest</h1>
-        <p>{date}</p>
-      </header>
+      <style>{buildPrintCss(date)}</style>
+      {/* 🚨 The print root now contains the stylesheet and body_md, and nothing
+          else. D3's flowed header block was removed here — it repeated the
+          title that body_md's own H1 already carries, which is the "header
+          renders twice" defect Ghost reported on page 1. Page furniture lives
+          entirely in @page margin boxes, so no element of ours can land on top
+          of the report. Everything below this line is body_md. */}
       <DigestMarkdown source={body} />
     </div>,
     document.body,
