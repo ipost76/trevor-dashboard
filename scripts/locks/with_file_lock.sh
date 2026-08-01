@@ -17,10 +17,13 @@ shift
 shift
 [ "$#" -ge 1 ] || { echo "with_file_lock: no command given after '--'" >&2; exit 1; }
 
-owner="${PROMPT_ID:-$$}"
 resolve_lock_dir
 export LOCK_DIR
-export LOCK_HOLDER_PID="$$"   # this process holds the lock for the command's life
+# Set the holder pid BEFORE deriving the owner: this process genuinely holds the
+# lock for the command's life, so it is the durable pid AND the session token's
+# basis. Both acquire and the release trap then compute the identical owner.
+export LOCK_HOLDER_PID="$$"
+owner=$(lock_owner_id)
 
 "$DIR/lock_acquire.sh" "$rel" "$owner" || exit 2
 trap '"$DIR/lock_release.sh" "$rel" "$owner" >/dev/null 2>&1 || true' EXIT INT TERM

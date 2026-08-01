@@ -46,11 +46,13 @@ if [ "$refuse" = 1 ]; then
 fi
 # -----------------------------------------------------------------------------
 
-owner="${PROMPT_ID:-$$}"
 GITLOCK="__git_index__"
 resolve_lock_dir
 export LOCK_DIR
+# Holder pid first, then the owner — see with_file_lock.sh for why the order
+# matters (the session token is derived from the durable pid).
 export LOCK_HOLDER_PID="$$"
+owner=$(lock_owner_id)
 
 "$DIR/lock_acquire.sh" "$GITLOCK" "$owner" || exit 2
 trap '"$DIR/lock_release.sh" "$GITLOCK" "$owner" >/dev/null 2>&1 || true' EXIT INT TERM
