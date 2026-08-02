@@ -456,3 +456,127 @@ export function plainCheckDetail(
   if (authored) return authored;
   return plainHealthDetail(detail, status);
 }
+
+/* ------------------------------------------------------------------------- *
+ * Write-gateway failure codes  [B12]
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The write gateway's failure identifiers → what happened AND what to do.
+ *
+ * 🚨 WHY THIS MAP EXISTS WHERE IT DOES. 11 of the 14 known codes are minted in
+ * `gateway/server.js` — Node.js, outside `src/`. That is a third language layer
+ * no sweep of this campaign covered: a TSX sweep misses it (wrong extension), a
+ * Python sweep misses it (wrong language), and a whole-`src/` sweep misses it
+ * (wrong directory). The remaining 3 are minted by `callGateway` in
+ * `gateway-client.ts`. Neither producer can be glossed from here — one is
+ * another process, the other runs before this layer — so the gloss is applied at
+ * the ONE point both converge on: `gatewayResponse()`.
+ *
+ * 🚨 THE CODE SET IS NOT CLOSED AT 14. `server.js` passes the VM gateway's body
+ * through VERBATIM for 200/400/401/423/504, so a VM-minted code this file has
+ * never seen can arrive. That is why this is an ALLOWLIST returning `null` and
+ * not a map with a raw-key fallback: an unrecognised code is structurally
+ * unrenderable rather than dependent on a fallback string staying neutral.
+ *
+ * Messages are OP-AGNOSTIC — one `gatewayResponse()` serves 18 routes, so
+ * nothing here may assume the killswitch. Every one opens "Not applied —":
+ * these render into an emergency-stop result banner, and a failed emergency stop
+ * must read unmistakably as failed.
+ */
+export const GATEWAY_ERROR_PLAIN: Record<string, string> = {
+  // --- minted in gateway-client.ts (Hub process, before the gateway is reached)
+  gateway_token_missing:
+    "Not applied — the Hub has no gateway credentials configured, so the request was never sent. Set GATEWAY_TOKEN in .env.local and restart the Hub.",
+  gateway_unreachable:
+    "Not applied — the Hub could not reach the local write gateway. Check that the gateway service is running, then retry.",
+  gateway_timeout:
+    "Not applied — the local write gateway did not respond in time. Retry; if it keeps timing out the gateway is wedged and needs attention.",
+
+  // --- minted in gateway/server.js (the local Node gateway)
+  unauthorized:
+    "Not applied — the write gateway rejected the Hub's credentials. The Hub and the gateway hold different tokens; re-sync GATEWAY_TOKEN and restart both.",
+  not_found:
+    "Not applied — the write gateway has no such endpoint. The Hub and the gateway are running different versions; redeploy the gateway.",
+  unknown_op:
+    "Not applied — the write gateway does not allow this operation. It is not on the gateway's allowlist, so nothing was changed and retrying will not help.",
+  validation:
+    "Not applied — the write gateway rejected the request as invalid. Correct the input and retry.",
+  invalid_json:
+    "Not applied — the write gateway could not read the request. Retry; if it repeats, the Hub is sending a malformed request and needs a fix.",
+  payload_too_large:
+    "Not applied — the request was too large for the write gateway. Reduce the size of the input and retry.",
+  vm_gateway_not_configured:
+    "Not applied — the VM write gateway is not configured, so writes are disabled. This needs the VM gateway deployed and its address set; it will not clear on its own.",
+  vm_gateway_unreachable:
+    "Not applied — the Hub could not reach the VM over the tailnet. Check the VM and the Tailscale link, then retry.",
+  // 🚨 A forward timeout is genuinely AMBIGUOUS — the VM may have applied the
+  // write before the Hub gave up. "Retry" is the wrong advice here and is
+  // exactly what a single generic message would have produced.
+  vm_gateway_timeout:
+    "Not applied by the Hub — the VM did not respond in time. The write may or may not have landed on the VM; check the VM's audit log before retrying.",
+  vm_gateway_error:
+    "Not applied — the VM write gateway failed while handling the request. Check the VM gateway's log; retrying is unlikely to help until it is fixed.",
+  internal_error:
+    "Not applied — the write gateway hit an internal fault. Check the gateway's log, retry once, then escalate.",
+};
+
+/**
+ * Status-code fallback, used ONLY when the body carries no recognised code.
+ *
+ * This tier exists because of the VM pass-through above: a 423 arrives as
+ * `{gate: …}` with no `error` key at all, and "locked by a flag" has a real
+ * remedy worth stating. The key here is an HTTP status — an integer the Hub
+ * chose or read off the response, never caller-controlled text — so this tier
+ * is as incapable of emitting a raw identifier as the allowlist is.
+ */
+const GATEWAY_STATUS_PLAIN: Record<number, string> = {
+  400: "Not applied — the write gateway rejected the request. Correct the input and retry.",
+  401: "Not applied — the write gateway rejected the Hub's credentials. Re-sync the gateway token and restart both.",
+  403: "Not applied — the write gateway refused this request. It is not permitted; nothing was changed.",
+  423: "Not applied — this write is locked by a gateway flag. It stays blocked until the flag is enabled; retrying now will not help.",
+  500: "Not applied — the write gateway hit an internal fault. Check the gateway's log, retry once, then escalate.",
+  502: "Not applied — the write gateway could not be reached. Check that the gateway and the VM are up, then retry.",
+  504: "Not applied by the Hub — the write gateway did not respond in time. The write may or may not have landed; check the audit log before retrying.",
+};
+
+/**
+ * The last-resort phrase. Neutral, names nothing, and — the load-bearing part —
+ * cannot be mistaken for success.
+ */
+export const GATEWAY_ERROR_FALLBACK =
+  "Not applied — the write gateway reported a failure the Hub does not recognise.";
+
+/**
+ * Gloss a write-gateway failure into plain English.
+ *
+ * 🚨 Own-property lookup via `ownLabel`: a bare `MAP[raw]` returns
+ * `Object.prototype` for `"__proto__"` and the `Object` function for
+ * `"constructor"`, neither of which is null, so `?? null` never fires and a
+ * non-string reaches React — which throws on an object child and blanks the
+ * panel. That crash is live in the older `plain*()` helpers; it is not
+ * reproduced here.
+ *
+ * ALWAYS returns a string, and that string is ALWAYS a failure sentence. There
+ * is no input — unmapped code, prototype key, empty, null, undefined, or a
+ * non-string of any shape — for which the raw value can be echoed back.
+ */
+export function plainGatewayError(
+  raw: string | null | undefined,
+  status?: number | null,
+): string {
+  if (typeof raw === "string" && raw) {
+    const mapped = ownLabel(GATEWAY_ERROR_PLAIN, raw);
+    if (mapped) return mapped;
+  }
+  if (typeof status === "number" && Number.isFinite(status)) {
+    const byStatus = Object.prototype.hasOwnProperty.call(
+      GATEWAY_STATUS_PLAIN,
+      status,
+    )
+      ? GATEWAY_STATUS_PLAIN[status]
+      : null;
+    if (byStatus) return byStatus;
+  }
+  return GATEWAY_ERROR_FALLBACK;
+}

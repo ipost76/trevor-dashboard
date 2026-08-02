@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+import { plainGatewayError } from "@/lib/plain-labels";
 
 /**
  * gateway-client — the Hub ROUTE side of the two-hop write path  [W-C-P2a]
@@ -98,6 +99,21 @@ export async function callGateway(
  * `result` payload so existing client contracts are byte-compatible with the
  * pre-gateway responses; on any non-200 we pass the gateway body + status
  * through faithfully (423/502/504 reach the client as-is).
+ *
+ * 🚨 [B12] THIS IS THE CHOKE POINT, and the only place a gateway failure can be
+ * glossed. Every failure from every producer converges here:
+ *   - 11 codes minted in `gateway/server.js` (Node, outside `src/` — unreachable
+ *     from TypeScript, which is why the gloss cannot live at the producer),
+ *   - 3 minted by `callGateway` above,
+ *   - plus anything the VM gateway mints, which `server.js` passes through
+ *     VERBATIM for 200/400/401/423/504 — so the set is NOT closed at 14.
+ * All 18 gateway-backed routes return through here and none bypasses it, so one
+ * allowlist closes every current and future code for every surface at once.
+ *
+ * What changes is ONLY what the failure is CALLED. The status code is untouched
+ * (a 502 stays a 502, `res.ok` stays false), the gateway's behaviour is
+ * untouched, and the raw identifier is PRESERVED under `error_code` so no
+ * machine contract is silently deleted.
  */
 export function gatewayResponse(result: GatewayResult): NextResponse {
   const { status, body } = result;
@@ -108,7 +124,21 @@ export function gatewayResponse(result: GatewayResult): NextResponse {
         : body;
     return NextResponse.json((payload ?? { ok: true }) as Record<string, unknown>, { status: 200 });
   }
-  return NextResponse.json(body, { status });
+  // Non-200 ⇒ a failure, by definition. `error` becomes a plain-English sentence
+  // that says what happened and what to do; a code we do not recognise — or a
+  // body with no code at all — still resolves to a neutral FAILURE phrase, never
+  // to the identifier. Only a string is ever considered a code: a body whose
+  // `error` is an object or a number falls straight through to the status tier.
+  const safeBody = body && typeof body === "object" ? body : {};
+  const rawError = typeof safeBody.error === "string" ? safeBody.error : null;
+  return NextResponse.json(
+    {
+      ...safeBody,
+      error: plainGatewayError(rawError, status),
+      error_code: rawError,
+    },
+    { status },
+  );
 }
 
 /**
