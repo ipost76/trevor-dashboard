@@ -68,6 +68,18 @@ export async function GET() {
     const data = safeJsonParse<WatcherIntegrityResponse>(raw, FALLBACK);
     return NextResponse.json(data);
   } catch (err) {
-    return NextResponse.json({ ...FALLBACK, error: String(err) }, { status: 200 });
+    // 🚨 B3 — `error` STAYS POPULATED, and that is load-bearing. Its consumer
+    // (`integrity-section.tsx`) branches on `if (!data || data.error)` and
+    // renders a hardcoded EmptyState; the string itself never reaches the
+    // screen. Renaming this key to `error_code` alone would stop the branch
+    // firing and drop the component through to render the empty FALLBACK
+    // arrays — an empty-but-healthy FALSE GREEN on an integrity surface.
+    // Only the VALUE changes: a stable code instead of the raw exception, so
+    // the next consumer of this field inherits a code, not a stack trace.
+    console.error("[watcher/integrity] reader failed:", err);
+    return NextResponse.json(
+      { ...FALLBACK, error: "reader_failed", error_code: "reader_failed" },
+      { status: 200 },
+    );
   }
 }

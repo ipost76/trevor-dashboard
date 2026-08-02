@@ -48,6 +48,15 @@ export async function GET() {
     const raw = await runPython("query_promotion_candidates.py", [], { timeout: 15_000 });
     return NextResponse.json(safeJsonParse<CandidatesResponse>(raw, FALLBACK));
   } catch (err) {
-    return NextResponse.json({ ...FALLBACK, error: String(err) }, { status: 200 });
+    // B3 — same shape as `watcher/integrity`: status 200 and the FALLBACK
+    // shape preserved, only the VALUE swapped raw→code. This component never
+    // reads `error` at all (it is declared on the type and nowhere else), so
+    // nothing on screen changes; the point is that the raw exception no longer
+    // sits in client state waiting for the next consumer to render it.
+    console.error("[trainer/promotion-candidates] reader failed:", err);
+    return NextResponse.json(
+      { ...FALLBACK, error: "reader_failed", error_code: "reader_failed" },
+      { status: 200 },
+    );
   }
 }

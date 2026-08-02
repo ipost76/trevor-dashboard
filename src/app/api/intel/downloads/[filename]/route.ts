@@ -55,7 +55,15 @@ export async function GET(
     const data = JSON.parse(stdout) as { path: string | null };
     path = data.path;
   } catch (err) {
-    return new NextResponse("lookup error: " + String(err), { status: 500 });
+    // B3: the exception is for the LOG, never the wire. This body was reachable
+    // by DIRECT BROWSER NAVIGATION — `download-format-sheet.handleMd` used to
+    // `<a download>` this URL, and a 500 made the browser SAVE a file named
+    // after the doc whose contents were a raw stack trace. `error_code` is the
+    // established contract (query_promotion_ready._fail); an unmapped code
+    // degrades through `plainReaderError` to READER_ERROR_FALLBACK, which names
+    // a failure and cannot read as an empty-but-healthy view.
+    console.error(`[intel/downloads] lookup failed for ${filename}:`, err);
+    return NextResponse.json({ error_code: "lookup_failed" }, { status: 500 });
   }
   if (!path) {
     return new NextResponse("not found", { status: 404 });
@@ -74,6 +82,9 @@ export async function GET(
       },
     });
   } catch (err) {
-    return new NextResponse("read error: " + String(err), { status: 500 });
+    // Distinct from the lookup failure above: the record resolved, the FILE did
+    // not read (EACCES, ENOENT after a move, a truncated mount). Same contract.
+    console.error(`[intel/downloads] read failed for ${filename} at ${path}:`, err);
+    return NextResponse.json({ error_code: "file_unreadable" }, { status: 500 });
   }
 }

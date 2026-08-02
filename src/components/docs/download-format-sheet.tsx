@@ -66,6 +66,11 @@ export function DownloadFormatSheet({
 }: DownloadFormatSheetProps) {
   const [pdfPhase, setPdfPhase] = React.useState<PdfPhase>("idle");
   const errorTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // B3 — the .md path gets the SAME phase machine as the PDF path. It used to
+  // have none, because `<a download>` cannot fail visibly: the browser simply
+  // saved whatever came back, including a 500 body.
+  const [mdPhase, setMdPhase] = React.useState<PdfPhase>("idle");
+  const mdErrorTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // The print dialog offers document.title as the default PDF filename, so it
   // is swapped for the document's name across the print and restored after.
   const prevTitle = React.useRef<string | null>(null);
@@ -93,7 +98,9 @@ export function DownloadFormatSheet({
   // restore path for the document title: closing the sheet clears filename.
   React.useEffect(() => {
     if (errorTimer.current) clearTimeout(errorTimer.current);
+    if (mdErrorTimer.current) clearTimeout(mdErrorTimer.current);
     setPdfPhase("idle");
+    setMdPhase("idle");
     detachAfterPrint();
     restoreTitle();
   }, [filename, detachAfterPrint, restoreTitle]);
@@ -101,6 +108,7 @@ export function DownloadFormatSheet({
   React.useEffect(
     () => () => {
       if (errorTimer.current) clearTimeout(errorTimer.current);
+      if (mdErrorTimer.current) clearTimeout(mdErrorTimer.current);
       detachAfterPrint();
       restoreTitle();
     },
@@ -113,15 +121,45 @@ export function DownloadFormatSheet({
     errorTimer.current = setTimeout(() => setPdfPhase("idle"), 2500);
   }, []);
 
-  const handleMd = () => {
-    if (!filename) return;
-    const link = document.createElement("a");
-    link.href = `/api/intel/downloads/${encodeURIComponent(filename)}`;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    onClose();
+  const failMd = React.useCallback(() => {
+    setMdPhase("error");
+    if (mdErrorTimer.current) clearTimeout(mdErrorTimer.current);
+    mdErrorTimer.current = setTimeout(() => setMdPhase("idle"), 2500);
+  }, []);
+
+  // 🚨 B3 — THE `res.ok` CHECK IS THE FIX. This was `<a download>` pointed
+  // straight at the route, so the browser saved the response body whatever the
+  // status: on a 500 the user got a file named `<doc>.md` containing
+  // `lookup error: Error: python exit=1: <stderr>`. Fetch-then-blob is the
+  // pattern already proven at `downloads-section.loadDocSource` — the body is
+  // never surfaced on the failure path, and the sheet chooses its own sentence.
+  const handleMd = async () => {
+    if (!filename || mdPhase === "pending") return;
+    setMdPhase("pending");
+    let url: string | null = null;
+    try {
+      const res = await fetch(
+        `/api/intel/downloads/${encodeURIComponent(filename)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) throw new Error("download failed");
+      const blob = await res.blob();
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setMdPhase("idle");
+      // 🚨 Dismiss ONLY on success. Closing on failure would make a failed
+      // download indistinguishable from a completed one.
+      onClose();
+    } catch {
+      failMd();
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
   };
 
   const handlePdf = () => {
@@ -158,6 +196,15 @@ export function DownloadFormatSheet({
   // disagree about why.
   const pdfDisabled =
     !printable || printFailed || pdfPhase === "pending" || !printReady;
+  // Same one-place rule for the .md row: the hint and the disabled state can
+  // never disagree about why. "Couldn't download" NAMES the failure — it is
+  // never blank and never reads as success.
+  const mdHint =
+    mdPhase === "pending"
+      ? "Downloading…"
+      : mdPhase === "error"
+        ? "Couldn't download"
+        : "Original file";
   const pdfHint = !printable
     ? "Markdown only"
     : printFailed
@@ -197,15 +244,22 @@ export function DownloadFormatSheet({
                 variant="ghost"
                 size="sm"
                 onClick={handleMd}
+                disabled={mdPhase === "pending"}
                 aria-label={`Download ${filename} as Markdown`}
-                className="flex w-full items-center justify-between gap-3 border border-accent-cyan-soft/40 bg-accent-cyan-soft/10 px-3 py-2 text-left text-accent-cyan-soft-strong hover:bg-accent-cyan-soft/20"
+                className={[
+                  "flex w-full items-center justify-between gap-3 border px-3 py-2 text-left",
+                  mdPhase === "error"
+                    ? "border-accent-red/40 bg-accent-red/15 text-accent-red"
+                    : "border-accent-cyan-soft/40 bg-accent-cyan-soft/10 text-accent-cyan-soft-strong hover:bg-accent-cyan-soft/20",
+                  mdPhase === "pending" ? "opacity-60" : "",
+                ].join(" ")}
               >
                 <span className="flex items-center gap-2 font-sans text-caption">
                   <FileText size={14} className="shrink-0" aria-hidden />
                   <span>Download .md</span>
                 </span>
                 <span className="shrink-0 font-sans text-micro text-fg-muted">
-                  Original file
+                  {mdHint}
                 </span>
               </HapticButton>
             </li>
