@@ -109,6 +109,95 @@ def _infer_source_type(stored: Optional[str], hint: str) -> str:
     return hint
 
 
+# ── B13 / UO-4 — the note serializer, replaced by STRUCTURE ──────────────────
+#
+# 🚨 THE RULE (F1): A READER EMITS STRUCTURE; THE RENDERER DECIDES THE ENGLISH.
+# This file used to weld four `k=v` strings and hand them to the Hub, which
+# printed them verbatim. It now emits `note_pairs: [{key, value}]` — the exact
+# shape `query_watcher_integrity.py` was converted to — and `ui/activity-row.tsx`
+# glosses each key through an own-property allowlist.
+#
+# 🚨 AND THE PART THAT MATTERS MORE: THE LIVE LEAK IS NOT MINTED HERE.
+# All four of this file's own serializers produce ZERO live rows. What is on
+# screen today arrives through `_fetch_change_log`'s RAW PASS-THROUGH of
+# `change_log.notes`: 1,592 of 1,764 non-null notes carry '=', and 1,573 read
+# `caller=models:close_trade:1723 via=db_writer:_run:189 status=ALLOWED` — bot
+# internals. That writer is on the VM and out of scope here, so an INBOUND k=v
+# string is parsed at this reader. Glossing at the reader is the only move
+# available, and it is the right one.
+#
+# ⚠️ CONSERVATIVE BY DESIGN: a string is converted ONLY if it parses cleanly and
+# ENTIRELY as key=value pairs (or as a JSON object). Anything else — authored
+# prose like 'Digest hard-deleted via Hub delete control [D2]', a gs:// backup
+# URI, 'pause' — is left EXACTLY as it is today, in `notes`. Never mangle prose
+# to close a machine-text leak.
+
+_KV_KEY_RE = re.compile(r"(?:^|[;\s])([A-Za-z_][A-Za-z0-9_]*)=")
+
+_MAX_PAIRS = 12
+_MAX_VALUE_LEN = 120
+
+
+def _pairs_from_dict(raw: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Dict -> [{key, value}], matching query_watcher_integrity.py:105 exactly."""
+    return [{"key": str(k), "value": str(v)[:_MAX_VALUE_LEN]}
+            for k, v in list(raw.items())[:_MAX_PAIRS]]
+
+
+def _note_pairs(note: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """Parse a machine-written note into structure, or None if it is prose.
+
+    Returns None for anything that is not unambiguously machine text, so the
+    caller keeps the original string. `str(dict)` is the same leak wearing
+    braces, so a JSON object is destructured rather than stringified.
+    """
+    if not note:
+        return None
+    text = note.strip()
+    if not text:
+        return None
+
+    # A serialized JSON object (circuit_breaker_trips.details, and 87 change_log
+    # rows) — destructure it; never render the blob.
+    if text.startswith("{"):
+        try:
+            loaded = json.loads(text)
+        except (ValueError, TypeError):
+            return None
+        return _pairs_from_dict(loaded) if isinstance(loaded, dict) else None
+
+    matches = list(_KV_KEY_RE.finditer(text))
+    if not matches:
+        return None
+    # Leading prose before the first key means this is a sentence that happens
+    # to contain '=', not a k=v record. Leave it alone.
+    if text[:matches[0].start()].strip():
+        return None
+
+    pairs: List[Dict[str, str]] = []
+    for i, m in enumerate(matches[:_MAX_PAIRS]):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        value = text[m.end():end].strip().rstrip(";").strip()
+        pairs.append({"key": m.group(1), "value": value[:_MAX_VALUE_LEN]})
+    return pairs or None
+
+
+def _with_notes(row: Dict[str, Any], note: Optional[str]) -> Dict[str, Any]:
+    """Attach a note as STRUCTURE when it is machine text, else as prose.
+
+    🚨 EXACTLY ONE OF THE TWO IS EVER SET. When a note parses to pairs, `notes`
+    is dropped — leaving the raw string in the payload would keep it in state for
+    the next consumer to render, which is the defect this closes, not a fix.
+    """
+    pairs = _note_pairs(note)
+    if pairs:
+        row["note_pairs"] = pairs
+        row["notes"] = None
+    else:
+        row["notes"] = note
+    return row
+
+
 def _fetch_change_log(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     if not _table_exists(conn, "change_log"):
         return []
@@ -119,7 +208,10 @@ def _fetch_change_log(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         "       session_id, prompt_id, notes "
         "FROM change_log"
     ):
-        out.append({
+        # 🚨 THE LIVE LEAK (B13). `r[11]` is `change_log.notes`, written by the
+        # VM, and 1,573 rows of it read `caller=… via=… status=…`. Parsed here
+        # because the producer is out of scope from this box.
+        out.append(_with_notes({
             "id": _composite_id("change_log", r[0]),
             "source_id": r[0],
             "timestamp": r[1],
@@ -132,8 +224,7 @@ def _fetch_change_log(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
             "source_type": r[8] or "unknown",
             "session_id": r[9],
             "prompt_id": r[10],
-            "notes": r[11],
-        })
+        }, r[11]))
     return out
 
 
@@ -163,7 +254,10 @@ def _fetch_autotrader_state_audit(
             "source_type": st,
             "session_id": sess,
             "prompt_id": None,
-            "notes": (f"source={source}" if source else None),
+            # B13 — was f"source={source}". Structure, not a welded string.
+            "note_pairs": ([{"key": "source", "value": str(source)[:_MAX_VALUE_LEN]}]
+                           if source else None),
+            "notes": None,
         })
     return out
 
@@ -193,15 +287,18 @@ def _fetch_aggressive_mode_history(
         (rid, evt, delta, dur, actor, reason, fired, ts,
          stored_st, sess) = r
         st = _infer_source_type(stored_st, _amh_hint(actor, reason))
-        bits: List[str] = []
+        # B13 — was a "; ".join of delta=/duration=/signals=/reason= bits, which
+        # is the shape A2 flagged: it re-leaks on any change to what `bits`
+        # collects. Emitting structure removes that failure mode entirely.
+        bits: List[Dict[str, str]] = []
         if delta is not None:
-            bits.append(f"delta={delta}")
+            bits.append({"key": "delta", "value": str(delta)[:_MAX_VALUE_LEN]})
         if dur is not None:
-            bits.append(f"duration={dur}h")
+            bits.append({"key": "duration", "value": f"{dur}h"[:_MAX_VALUE_LEN]})
         if fired is not None:
-            bits.append(f"signals={fired}")
+            bits.append({"key": "signals", "value": str(fired)[:_MAX_VALUE_LEN]})
         if reason:
-            bits.append(f"reason={reason}")
+            bits.append({"key": "reason", "value": str(reason)[:_MAX_VALUE_LEN]})
         out.append({
             "id": _composite_id("aggressive_mode_history", rid),
             "source_id": rid,
@@ -215,7 +312,8 @@ def _fetch_aggressive_mode_history(
             "source_type": st,
             "session_id": sess,
             "prompt_id": None,
-            "notes": "; ".join(bits) if bits else None,
+            "note_pairs": bits or None,
+            "notes": None,
         })
     return out
 
@@ -250,9 +348,11 @@ def _fetch_filter_rule_changelog(
         # most rows only flip field_changed='value', so keep the key concise.
         key = rule if (not field or field == "value") else f"{rule}.{field}"
         eff_actor = actor or changed_by
-        notes = None
+        # B13 — was f"changed_by={changed_by}".
+        note_pairs = None
         if changed_by and changed_by != actor:
-            notes = f"changed_by={changed_by}"
+            note_pairs = [{"key": "changed_by",
+                           "value": str(changed_by)[:_MAX_VALUE_LEN]}]
         out.append({
             "id": _composite_id("filter_rule_changelog", rid),
             "source_id": rid,
@@ -266,7 +366,8 @@ def _fetch_filter_rule_changelog(
             "source_type": st,
             "session_id": sess,
             "prompt_id": None,
-            "notes": notes,
+            "note_pairs": note_pairs,
+            "notes": None,
         })
     return out
 
@@ -295,7 +396,10 @@ def _fetch_circuit_breaker_trips(
     ):
         rid, layer, mode, details, ts, actor, stored_st, sess = r
         st = _infer_source_type(stored_st, "Trigger")
-        out.append({
+        # B13 — `details` is a raw pass-through and 105 live rows are a JSON blob
+        # ({"winrate": 0.0, "threshold": 0.0527…}). A serialized dict on screen is
+        # the same leak wearing braces; `_with_notes` destructures it.
+        out.append(_with_notes({
             "id": _composite_id("circuit_breaker_trips", rid),
             "source_id": rid,
             "timestamp": ts,
@@ -308,8 +412,7 @@ def _fetch_circuit_breaker_trips(
             "source_type": st,
             "session_id": sess,
             "prompt_id": None,
-            "notes": details,
-        })
+        }, details))
     return out
 
 
@@ -329,9 +432,10 @@ def _fetch_close_audit_log(
         if tid in already_indexed_trade_ids:
             continue
         st = _infer_source_type(stored_st, "Trigger")
-        notes = f"trade_id={tid}"
+        # B13 — was f"trade_id={tid}" + f" source={src}".
+        note_pairs = [{"key": "trade_id", "value": str(tid)[:_MAX_VALUE_LEN]}]
         if src:
-            notes += f" source={src}"
+            note_pairs.append({"key": "source", "value": str(src)[:_MAX_VALUE_LEN]})
         out.append({
             "id": _composite_id("close_audit_log", rid),
             "source_id": rid,
@@ -345,7 +449,8 @@ def _fetch_close_audit_log(
             "source_type": st,
             "session_id": sess,
             "prompt_id": None,
-            "notes": notes,
+            "note_pairs": note_pairs,
+            "notes": None,
         })
     return out
 

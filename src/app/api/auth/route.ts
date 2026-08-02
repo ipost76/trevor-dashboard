@@ -86,17 +86,21 @@ export async function POST(request: NextRequest) {
     };
     const { user, pass } = getCredentials();
 
+    // These two were already plain English. They carry a code as well (B13) so
+    // the modal can render EVERY failure through one hardened path — without
+    // codes here, hardening the modal would flatten these two useful, specific
+    // messages into a generic one, trading a leak for a worse defect.
     if (currentPassword !== pass) {
       await new Promise((r) => setTimeout(r, 500));
       return NextResponse.json(
-        { ok: false, error: "Current password is incorrect" },
+        { ok: false, error_code: "wrong_current_password" },
         { status: 401 }
       );
     }
 
     if (!newPassword || newPassword.length < 6) {
       return NextResponse.json(
-        { ok: false, error: "New password must be at least 6 characters" },
+        { ok: false, error_code: "new_password_too_short" },
         { status: 400 }
       );
     }
@@ -121,8 +125,13 @@ export async function POST(request: NextRequest) {
       }
 
       if (!envPath) {
+        // The candidate paths are a server-side detail; the client gets a code.
+        console.error(
+          "[api/auth] change-password: no .env.local found among candidates:",
+          candidates,
+        );
         return NextResponse.json(
-          { ok: false, error: "Could not find .env.local to update password" },
+          { ok: false, error_code: "config_not_found" },
           { status: 500 }
         );
       }
@@ -148,8 +157,14 @@ export async function POST(request: NextRequest) {
       });
       return res;
     } catch (err) {
+      // 🚨 B13 — this used to return `Failed to write password: ${String(err)}`,
+      // i.e. `EACCES: permission denied, open '/home/ghost/…/.env.local'`, to the
+      // CLIENT. The absolute path is an information disclosure on a
+      // Funnel-exposed surface. The raw error stays here, in the server log, at
+      // full fidelity; the client gets a code the modal glosses.
+      console.error("[api/auth] change-password: write failed:", err);
       return NextResponse.json(
-        { ok: false, error: `Failed to write password: ${String(err)}` },
+        { ok: false, error_code: "write_failed" },
         { status: 500 }
       );
     }

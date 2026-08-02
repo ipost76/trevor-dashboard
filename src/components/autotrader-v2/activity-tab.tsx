@@ -8,6 +8,7 @@ import {
   ActivityRow,
   EmptyState,
   Skeleton,
+  type ActivityNotePair,
 } from "@/components/ui";
 import { Activity } from "lucide-react";
 
@@ -23,7 +24,10 @@ interface ActivityEntry {
   source_type: string;
   session_id: string | null;
   prompt_id: string | null;
+  /** Authored PROSE only — machine text now arrives as `note_pairs` (B13). */
   notes: string | null;
+  /** Structured note pairs from `query_activity.py` (B13, UO-4). */
+  note_pairs?: ActivityNotePair[] | null;
 }
 
 interface ActivityResponse {
@@ -226,6 +230,7 @@ export function ActivityTab() {
                 sourceType={e.source_type}
                 promptId={e.prompt_id ?? undefined}
                 notes={e.notes ?? undefined}
+                notePairs={e.note_pairs ?? undefined}
               />
             ))}
 

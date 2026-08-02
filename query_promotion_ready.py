@@ -161,29 +161,51 @@ def _read_promotions(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
+def _error_code(exc: Exception) -> str:
+    """Classify a read failure into a code the route can translate.
+
+    🚨 A DIAGNOSTIC IS NOT USER COPY (B13). This used to emit
+    `OperationalError: no such table: promotion_ready` into an `error` field the
+    Hub rendered verbatim as the TRAINER empty state. The exception class and
+    the table name are for the server log; the SCREEN gets a sentence chosen by
+    `plainReaderError()` in `src/lib/plain-labels.ts`.
+    """
+    if isinstance(exc, sqlite3.OperationalError) and "no such table" in str(exc):
+        return "no_table"
+    return "query_failed"
+
+
+def _fail(age, mtime, code: str, exc: Exception) -> int:
+    """Fail-soft payload: a stable code for the client, the raw text for the log.
+
+    `error_detail` is READ AND STRIPPED by the route, which logs it server-side
+    (`console.error`) and never forwards it. Keeping it here rather than writing
+    to stderr is deliberate: this path exits 0, and `runPython` only surfaces
+    stderr on a NON-zero exit, so a stderr write would be silently discarded —
+    which would log LESS than today, not more.
+    """
+    print(json.dumps({
+        "promotions": [], "total": 0,
+        "replica_age_seconds": age, "replica_mtime": mtime,
+        "error_code": code,
+        "error_detail": f"{type(exc).__name__}: {exc}",
+    }))
+    return 0
+
+
 def main() -> int:
     age, mtime = _replica_age()
     try:
         conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=8.0)
         conn.row_factory = sqlite3.Row
     except Exception as exc:
-        print(json.dumps({
-            "promotions": [], "total": 0,
-            "replica_age_seconds": age, "replica_mtime": mtime,
-            "error": f"{type(exc).__name__}: {exc}",
-        }))
-        return 0
+        return _fail(age, mtime, "db_unavailable", exc)
 
     try:
         promotions = _read_promotions(conn)
     except Exception as exc:
         conn.close()
-        print(json.dumps({
-            "promotions": [], "total": 0,
-            "replica_age_seconds": age, "replica_mtime": mtime,
-            "error": f"{type(exc).__name__}: {exc}",
-        }))
-        return 0
+        return _fail(age, mtime, _error_code(exc), exc)
     conn.close()
 
     print(json.dumps({

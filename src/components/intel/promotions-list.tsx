@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { EmptyState, Skeleton, Pill } from "@/components/ui";
+import { plainReaderError } from "@/lib/plain-labels";
 import { cn } from "@/lib/utils";
 
 // PROMOTIONS subtab (RM-SHADOW-PROMOTE B2 · two-sided worklist B4) — Ghost's
@@ -31,7 +32,16 @@ interface PromotionsResponse {
   promotions: Promotion[];
   total: number;
   replica_age_seconds: number | null;
-  error?: string;
+  /** A stable code (B13) — the English lives in `plainReaderError()`. */
+  error_code?: string;
+  /**
+   * 🚨 LEGACY, AND DELIBERATELY STILL READ. The route no longer emits this, but
+   * a stale build or a future writer might. It is used ONLY as a signal that a
+   * failure happened — its VALUE is never rendered (it is what used to leak 500
+   * chars of Python stderr here). Dropping the check would let an error render
+   * as a healthy empty list, which is a worse defect than the one being fixed.
+   */
+  error?: unknown;
 }
 
 function fmtReplicaAge(sec: number | null | undefined): string {
@@ -250,10 +260,18 @@ export function PromotionsList() {
   const inProgress = promotions.filter((p) => p.state === "in_progress");
   const removed = promotions.filter((p) => p.state === "removed");
 
-  if (data?.error) {
+  // 🚨 THIS IS THE ENTIRE FAILURE SURFACE FOR THIS SUBTAB (B13). Whatever it
+  // renders is the only thing the user ever learns about the failure, so it must
+  // NAME a failure — never fall silent, never read as an empty-but-healthy list.
+  // Either field means "a read failed"; `plainReaderError` decides the sentence
+  // and structurally cannot echo a payload back (unmapped → neutral fallback).
+  if (data?.error_code || data?.error) {
     return (
       <div className="p-4 md:p-6 lg:px-8">
-        <EmptyState title="Couldn't load" body={data.error} />
+        <EmptyState
+          title="Couldn't load"
+          body={plainReaderError(data.error_code)}
+        />
       </div>
     );
   }

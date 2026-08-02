@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { X, Lock, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
+import { plainAuthError } from "@/lib/plain-labels";
 
 export function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [current, setCurrent] = useState("");
@@ -35,7 +36,14 @@ export function ChangePasswordModal({ open, onClose }: { open: boolean; onClose:
       });
       const data = await res.json();
       if (data.ok) setSuccess(true);
-      else setError(data.error || "Failed");
+      // 🚨 B13 — THIS LINE IS THE ENTIRE FAILURE SURFACE for a password change,
+      // so it must always name a failure. It used to render `data.error`
+      // verbatim, which is how `EACCES: permission denied, open
+      // '/home/ghost/…/.env.local'` reached the screen. `plainAuthError` always
+      // returns a failure sentence and structurally cannot echo the payload —
+      // an unrecognised or absent code still yields a neutral failure line,
+      // never silence and never anything readable as success.
+      else setError(plainAuthError(data.error_code));
     } catch { setError("Connection error"); }
     setLoading(false);
   };

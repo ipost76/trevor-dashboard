@@ -2,6 +2,7 @@
 import * as React from "react";
 import { Card, CardHeader, CardTitle, CollapsibleSection, MetricTile, Pill, Skeleton, EmptyState } from "@/components/ui";
 import { Layers } from "lucide-react";
+import { plainReaderError } from "@/lib/plain-labels";
 import { ShadowTableCard, type ShadowTableInfo } from "./shadow-table-card";
 
 interface ShadowState {
@@ -18,7 +19,10 @@ interface ShadowState {
 interface ShadowResponse {
   shadow: ShadowState;
   tables?: ShadowTableInfo[];
-  error?: string;
+  /** A stable code (B13) — the English lives in `plainReaderError()`. */
+  error_code?: string;
+  /** Legacy failure SIGNAL only; its value is never rendered. See promotions-list. */
+  error?: unknown;
 }
 
 function fmtDate(iso: string | null | undefined): string {
@@ -56,10 +60,12 @@ export function ShadowSection() {
     };
   }, []);
 
-  if (data?.error) {
+  // 🚨 The Intel zone's LANDING tab — the whole failure surface for this view.
+  // Must always NAME a failure; never silence, never a false empty state.
+  if (data?.error_code || data?.error) {
     return (
       <div className="p-4 md:p-6 lg:px-8 animate-fade-in">
-        <EmptyState title="Failed" body={data.error} />
+        <EmptyState title="Failed" body={plainReaderError(data.error_code)} />
       </div>
     );
   }

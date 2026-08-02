@@ -33,7 +33,19 @@ interface PromotionsResponse {
   total: number;
   replica_age_seconds: number | null;
   replica_mtime: string | null;
-  error?: string;
+  /**
+   * 🚨 A STABLE CODE, NEVER A MESSAGE (B13). This field used to be
+   * `error?: string` carrying `String(err)` — i.e. `runPython`'s
+   * `python exit=N: <500 chars of stderr>` or a bare `OperationalError:
+   * no such table: promotion_ready` — straight into the renderer's empty state.
+   * The client now receives only a code; `plainReaderError()` owns the English.
+   */
+  error_code?: string;
+}
+
+/** The reader's raw text, read here and NEVER forwarded. */
+interface PromotionsPayload extends PromotionsResponse {
+  error_detail?: string;
 }
 
 const FALLBACK: PromotionsResponse = {
@@ -46,11 +58,42 @@ const FALLBACK: PromotionsResponse = {
 export async function GET() {
   try {
     const raw = await runPython("query_promotion_ready.py", [], { timeout: 15_000 });
-    const data = safeJsonParse<PromotionsResponse>(raw, FALLBACK);
-    return NextResponse.json(data);
+    const data = safeJsonParse<PromotionsPayload>(raw, FALLBACK);
+
+    // 🚨 EXPLICIT RE-SHAPE, NOT PASS-THROUGH. `safeJsonParse` returns whatever
+    // the reader printed, and a TS interface strips nothing at runtime — so
+    // returning `data` would forward any future raw field the reader grew. Only
+    // the fields named here can reach the client.
+    if (data.error_code || data.error_detail) {
+      // The detail belongs in the server log, and ONLY there.
+      console.error(
+        "[api/shadow/promotions] reader failed:",
+        data.error_detail ?? "(no detail)",
+      );
+      return NextResponse.json(
+        {
+          ...FALLBACK,
+          replica_age_seconds: data.replica_age_seconds ?? null,
+          replica_mtime: data.replica_mtime ?? null,
+          error_code: data.error_code ?? "reader_failed",
+        },
+        { status: 200 },
+      );
+    }
+
+    return NextResponse.json({
+      promotions: data.promotions ?? [],
+      total: data.total ?? 0,
+      replica_age_seconds: data.replica_age_seconds ?? null,
+      replica_mtime: data.replica_mtime ?? null,
+    });
   } catch (err) {
+    // `runPython` throws `python exit=N: <500 chars of stderr>` (api-helpers.ts).
+    // That message is the diagnostic — it stays here, in the log, and the client
+    // gets a code. `runPython` itself is UNCHANGED: 65 consumers read it.
+    console.error("[api/shadow/promotions] runPython threw:", err);
     return NextResponse.json(
-      { ...FALLBACK, error: String(err) },
+      { ...FALLBACK, error_code: "reader_failed" },
       { status: 200 },
     );
   }

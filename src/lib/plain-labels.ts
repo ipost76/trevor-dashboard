@@ -580,3 +580,155 @@ export function plainGatewayError(
   }
   return GATEWAY_ERROR_FALLBACK;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * READ-PATH failures (B13) — the gloss for a Python reader that could not answer.
+ *
+ * 🚨 WHY A CODE AND NOT A MESSAGE. The routes used to put `String(err)` into the
+ * payload, so `runPython`'s own throw — `python exit=N: <500 chars of stderr>` —
+ * and a bare `OperationalError: no such table: promotion_ready` both landed in
+ * an <EmptyState body>. The reader now emits a STABLE CODE; the English lives
+ * here. `runPython`'s message is DELIBERATELY UNCHANGED (65 consumers, and that
+ * message is the server-log detail) — the ROUTE decides what the client sees.
+ *
+ * Every phrase NAMES A FAILURE and points at the server log. None can be read as
+ * success, and none echoes a path, a table name, an exception class or stderr.
+ * ────────────────────────────────────────────────────────────────────────────*/
+
+export const READER_ERROR_PLAIN: Record<string, string> = {
+  db_unavailable:
+    "Couldn't load this — the Hub could not open its copy of the trading database. This is a read-only view, so nothing was changed. The detail is in the Hub's server log; try again in a few minutes.",
+  no_table:
+    "Couldn't load this — the table this view reads has not been created yet. Nothing is wrong with your account or your trades; the job that builds it may not have run. The detail is in the Hub's server log.",
+  query_failed:
+    "Couldn't load this — the Hub reached its copy of the trading database but the read failed. This is a read-only view, so nothing was changed. The detail is in the Hub's server log.",
+  reader_failed:
+    "Couldn't load this — the reader that supplies this view did not return a usable answer. This is a read-only view, so nothing was changed. The detail is in the Hub's server log; try again in a few minutes.",
+};
+
+/**
+ * The last-resort read-path phrase. Neutral, names nothing, and — the
+ * load-bearing part — cannot be mistaken for an empty-but-healthy view.
+ */
+export const READER_ERROR_FALLBACK =
+  "Couldn't load this — the Hub hit a failure it does not recognise. This is a read-only view, so nothing was changed. The detail is in the Hub's server log.";
+
+/**
+ * Gloss a read-path failure into plain English.
+ *
+ * 🚨 Own-property lookup via `ownLabel` — see `plainGatewayError` for why a bare
+ * `MAP[raw]` is unsafe on a key set this file does not control.
+ *
+ * ALWAYS returns a string, and that string ALWAYS names a failure. There is no
+ * input — unmapped code, prototype key, empty, null, undefined, or a non-string
+ * of any shape — for which a raw value can be echoed back.
+ */
+export function plainReaderError(raw: unknown): string {
+  if (typeof raw === "string" && raw) {
+    const mapped = ownLabel(READER_ERROR_PLAIN, raw);
+    if (mapped) return mapped;
+  }
+  return READER_ERROR_FALLBACK;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ACTIVITY-FEED note keys (B13, UO-4) — the `k=v` serializer's replacement.
+ *
+ * 🚨 THE LIVE LEAK WAS NOT THE HUB'S OWN SERIALIZERS. `query_activity.py` welds
+ * four `k=v` strings of its own, and all four produce ZERO live rows. What is on
+ * screen today is `change_log.notes` PASSED THROUGH RAW from the VM writer:
+ * 1,592 of 1,764 non-null notes carry `=`, and 1,573 of them read
+ * `caller=models:close_trade:1723 via=db_writer:_run:189 status=ALLOWED`.
+ * The producer is on the VM and out of scope, so the reader parses the inbound
+ * string into structure and the renderer decides the English.
+ *
+ * 🚨 WHY `caller`, `via` AND `idem` ARE DELIBERATELY ABSENT. This is an
+ * ALLOWLIST (returns `null`; the caller drops and counts, rendering "+N more").
+ * A mapped key still ships its VALUE to the screen, and those three carry a
+ * source location, a call path and an idempotency hash — bot internals that are
+ * not the thing the user asked to see. Omitting them costs a counted row; the
+ * durable record is untouched in `change_log`. When in doubt, omit.
+ * ────────────────────────────────────────────────────────────────────────────*/
+
+export const NOTE_KEY_PLAIN: Record<string, string> = {
+  // ── observed in change_log.notes (VM writers) ─────────────────────────────
+  status: "Write guard",
+  reason: "Reason",
+  op: "Operation",
+  money_path: "Touches the money path",
+  equity: "Equity",
+  // ── minted by query_activity.py's own readers ─────────────────────────────
+  source: "Source",
+  changed_by: "Changed by",
+  trade_id: "Trade",
+  delta: "Threshold change",
+  duration: "Duration",
+  signals: "Signals fired",
+  // ── circuit_breaker_trips.details (JSON blob, 7 keys) ─────────────────────
+  winrate: "Win rate",
+  baseline_winrate: "Baseline win rate",
+  threshold: "Threshold",
+  sigma_threshold: "Sigma threshold",
+  window: "Window",
+  wins: "Wins",
+  losses: "Losses",
+};
+
+/**
+ * An activity-note key, for the expanded row's detail list.
+ *
+ * ALLOWLIST semantics: `null` means the caller MUST drop the pair and count it,
+ * rendering the tally through `bitsWithDropped()`. An unmapped key is therefore
+ * structurally unrenderable — it does not depend on a fallback staying neutral.
+ */
+export function plainNoteKey(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return ownLabel(NOTE_KEY_PLAIN, raw);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CHANGE-PASSWORD failures (B13, UO-3).
+ *
+ * 🚨 WHAT THIS REPLACES. `api/auth/route.ts` returned
+ * `Failed to write password: Error: EACCES: permission denied, open
+ * '/home/ghost/…/.env.local'` — a raw Node exception carrying an ABSOLUTE
+ * FILESYSTEM PATH, rendered verbatim by `change-password-modal.tsx`. That is an
+ * information disclosure on a Tailscale-Funnel-exposed surface, and the modal is
+ * the ONLY place a user learns the change failed.
+ *
+ * So every phrase below does three things: it says the password was NOT changed,
+ * it says the OLD password still works (so nobody is locked out wondering), and
+ * it says whether retrying helps. None can be read as success.
+ *
+ * ⚠️ SCOPE: change-password only. The LOGIN branches of that route keep their
+ * own plain `error` strings and are untouched — the login page renders those.
+ * ────────────────────────────────────────────────────────────────────────────*/
+
+export const AUTH_ERROR_PLAIN: Record<string, string> = {
+  wrong_current_password:
+    "That current password is not correct. Your password was not changed — check it and try again.",
+  new_password_too_short:
+    "Your new password must be at least 6 characters. Your password was not changed — choose a longer one and try again.",
+  config_not_found:
+    "Your password was NOT changed — the Hub could not find the file it stores the password in. Your existing password still works. The detail is in the Hub's server log; retrying will not help until that is fixed.",
+  write_failed:
+    "Your password was NOT changed — the Hub could not save the new one. Your existing password still works. The detail is in the Hub's server log; retrying will not help until that is fixed.",
+};
+
+/** Neutral last resort. Names the failure, and says the old password still works. */
+export const AUTH_ERROR_FALLBACK =
+  "Your password was NOT changed — the Hub hit a failure it does not recognise. Your existing password still works. The detail is in the Hub's server log.";
+
+/**
+ * Gloss a change-password failure into plain English.
+ *
+ * 🚨 Own-property lookup, and ALWAYS a failure sentence — there is no input for
+ * which a raw server string, a path, or an exception can be echoed back.
+ */
+export function plainAuthError(raw: unknown): string {
+  if (typeof raw === "string" && raw) {
+    const mapped = ownLabel(AUTH_ERROR_PLAIN, raw);
+    if (mapped) return mapped;
+  }
+  return AUTH_ERROR_FALLBACK;
+}

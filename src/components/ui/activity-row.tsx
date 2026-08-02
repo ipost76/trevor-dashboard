@@ -2,7 +2,14 @@
 import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { Pill, type PillProps } from "./pill";
+import { bitsWithDropped, plainNoteKey } from "@/lib/plain-labels";
 import { cn } from "@/lib/utils";
+
+/** One structured note pair as `query_activity.py` emits it (B13). */
+export interface ActivityNotePair {
+  key: string;
+  value: string;
+}
 
 export interface ActivityRowProps {
   timestamp: string;
@@ -12,7 +19,13 @@ export interface ActivityRowProps {
   actor: string;
   sourceType: string;
   promptId?: string;
+  /** Authored PROSE only. Machine text arrives as `notePairs`. */
   notes?: string;
+  /**
+   * Structured note pairs (B13, UO-4). The reader emits `[{key, value}]`; this
+   * component decides the English via the `plainNoteKey` allowlist.
+   */
+  notePairs?: ActivityNotePair[];
 }
 
 function parseUTC(ts: string | null | undefined): Date {
@@ -54,9 +67,31 @@ export function ActivityRow({
   sourceType,
   promptId,
   notes,
+  notePairs,
 }: ActivityRowProps) {
   const [expanded, setExpanded] = React.useState(false);
   const intent = sourceIntent(sourceType);
+
+  // B13 — gloss the structured note pairs. `plainNoteKey` is an ALLOWLIST using
+  // own-property lookup: an unmapped key (and `__proto__` / `constructor`) comes
+  // back null, so it is DROPPED and COUNTED rather than rendered. The tally goes
+  // through `bitsWithDropped` as "+N more", keeping the loss visible instead of
+  // silent. A raw key can never reach the screen through this path.
+  const glossedNotes = React.useMemo(() => {
+    if (!Array.isArray(notePairs) || notePairs.length === 0) return null;
+    let dropped = 0;
+    const labelled: { label: string; value: string }[] = [];
+    for (const pair of notePairs) {
+      const label = plainNoteKey(pair?.key);
+      if (!label) {
+        dropped += 1;
+        continue;
+      }
+      labelled.push({ label, value: String(pair?.value ?? "") });
+    }
+    if (labelled.length === 0 && dropped === 0) return null;
+    return { labelled, extra: bitsWithDropped([], dropped) };
+  }, [notePairs]);
 
   return (
     <div className="border-b border-border-subtle last:border-b-0">
@@ -105,6 +140,18 @@ export function ActivityRow({
               <dd className="text-accent-plum-strong">{promptId}</dd>
             </>
           )}
+          {glossedNotes?.labelled.map((n) => (
+            <React.Fragment key={n.label}>
+              <dt className="font-sans text-fg-muted">{n.label}</dt>
+              <dd className="font-sans text-fg-primary">{n.value}</dd>
+            </React.Fragment>
+          ))}
+          {glossedNotes?.extra.map((e) => (
+            <React.Fragment key={e}>
+              <dt className="font-sans text-fg-muted" />
+              <dd className="font-sans text-fg-faint">{e}</dd>
+            </React.Fragment>
+          ))}
           {notes && (
             <>
               <dt className="font-sans text-fg-muted">notes</dt>
