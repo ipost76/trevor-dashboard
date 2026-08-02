@@ -16,6 +16,7 @@ Covers both phase gates:
     absent from the trainer/watcher globs · full independence suite 5/5.
 """
 import ast
+import atexit
 import hashlib
 import os
 import re
@@ -27,6 +28,19 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── MODULE-LEVEL store protection (B11) ───────────────────────────────────────
+# 🚨 The `_Env` harness below already points MEMORY_DB_PATH at a temp db — but it does
+# so in `__enter__`, i.e. only once a test CONSTRUCTS it. Until B11 this file had NO
+# protection above that point, so a new test function added ahead of the first `_Env`
+# would reach the live data/memory.db and nothing would say so. Ordering is not a
+# safety mechanism. This sets a scratch default at import, before any store call can
+# happen; `_Env` still overrides it per-test and still restores its own snapshot.
+_B11_SCRATCH = tempfile.mkdtemp(
+    prefix="memq_module_", dir="/home/ghost/tmp" if os.path.isdir("/home/ghost/tmp") else None
+)
+os.environ["MEMORY_DB_PATH"] = os.path.join(_B11_SCRATCH, "memory.db")
+atexit.register(shutil.rmtree, _B11_SCRATCH, True)
 
 # is_known_dead_end must be byte-identical to the recorded baseline sha256.
 # RF1-B2 (2026-07-23): re-baselined — the authorized _level_of conversion (silent 0 default →

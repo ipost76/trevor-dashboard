@@ -17,7 +17,9 @@ Proves, over SYNTHETIC adopted rows in isolated temp DBs (MEMORY_DB_PATH / TRAIN
   * flag OFF ⇒ every public fn is inert (empty reads, no-op writes).
 """
 import ast
+import atexit
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -26,6 +28,19 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
+
+# ── MODULE-LEVEL store protection (B11) ───────────────────────────────────────
+# 🚨 `main()` below already points MEMORY_DB_PATH / TRAINER_DB_PATH at temp dbs — but
+# only once main() RUNS. Until B11 this file had NO protection above that point, so a
+# new test function added ahead of main()'s setup (or any import-time store call) would
+# reach the live data/*.db and nothing would say so. Ordering is not a safety mechanism.
+# This sets scratch defaults at import; main() still overrides them with its own dirs.
+_B11_SCRATCH = tempfile.mkdtemp(
+    prefix="r11b3_module_", dir="/home/ghost/tmp" if os.path.isdir("/home/ghost/tmp") else None
+)
+os.environ["MEMORY_DB_PATH"] = os.path.join(_B11_SCRATCH, "memory.db")
+os.environ["TRAINER_DB_PATH"] = os.path.join(_B11_SCRATCH, "trainer.db")
+atexit.register(shutil.rmtree, _B11_SCRATCH, True)
 
 _PASS = 0
 _FAIL = 0

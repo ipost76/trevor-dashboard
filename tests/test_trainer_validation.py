@@ -16,8 +16,10 @@ Proves the per-candidate sequence + its load-bearing invariants:
 Dependency-free: ``python3 tests/test_trainer_validation.py``. pytest-compatible.
 The live VM tests SKIP (never fail) when TRAINER_VM is unreachable.
 """
+import atexit
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,26 @@ import tokenize
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── MODULE-LEVEL store protection (B11) ───────────────────────────────────────
+# 🚨 THIS FILE REACHED THE LIVE data/trainer.db AND NOBODY KNEW — found by the B11
+# guard, and NOT named in A1's escape census. It is the SAME INDIRECT SHAPE as the
+# compass_metrics escape: `test_live_validation_sequence` calls `validate_candidate`
+# without `n_trials`, which internally calls `family_k(level_id)` with `db_path=None`,
+# which does a FUNCTION-LOCAL `from lib.trainer_db import get_connection` and opens the
+# live store — running `PRAGMA journal_mode=WAL` and `init_schema()`'s 7 DDL statements
+# inside a real COMMIT. Nothing on the test side named a database.
+#
+# It hid for two extra reasons worth recording: the call is behind a `_vm_up()` gate, so
+# it only fired when the VM pipe was up; and `family_k` floors at 1, so with live
+# `bandit_posteriors` empty (measured 0 rows at B11) it returned the same 1 a scratch
+# store returns — correct by coincidence. Redirecting to scratch is therefore
+# semantics-preserving, not a behaviour change.
+_B11_SCRATCH = tempfile.mkdtemp(
+    prefix="tvalid_module_", dir="/home/ghost/tmp" if os.path.isdir("/home/ghost/tmp") else None
+)
+os.environ["TRAINER_DB_PATH"] = os.path.join(_B11_SCRATCH, "trainer.db")
+atexit.register(shutil.rmtree, _B11_SCRATCH, True)
 
 import trainer_validation as tv  # noqa: E402
 

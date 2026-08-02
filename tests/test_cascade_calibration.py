@@ -11,13 +11,43 @@ Proves, against the ACTUAL seeded level-0 thresholds in trainer.db:
      numbers computed + shown. This is the evidence that justifies TWO gates.
 
 Dependency-free: `python3 tests/test_cascade_calibration.py`. pytest-compatible.
+
+🚨 THIS FILE USED TO WRITE THE LIVE ``data/trainer.db`` — TWICE PER RUN (B11).
+It reached the live store by TWO DISTINCT MECHANISMS, and they needed different fixes:
+
+  * DIRECTLY, in ``_seeded_thresholds()``: a zero-arg ``get_connection()`` that opened
+    the live store, set ``PRAGMA journal_mode=WAL`` and ran ``init_schema()`` — 7 DDL
+    statements inside a real COMMIT — with every failure eaten by ``except Exception:
+    pass``. Fixed by the module-level scratch store below.
+  * INDIRECTLY, at the ``evaluate_compass(...)`` call: that function defaults
+    ``conn=None`` and then does a FUNCTION-LOCAL ``from lib.trainer_db import
+    get_connection``. Nothing on the test side named a database at all, so no grep of
+    ``tests/`` for ``get_connection`` could ever have surfaced it. The same scratch
+    store closes it, because the redirect happens at path-resolution time inside
+    ``get_connection`` rather than at the call site.
+
+Both are now additionally backstopped by the ``_under_test()`` guard inside all four
+``lib/*_db.py`` modules, which refuses a live-store resolution from a test entry point.
 """
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "tests"))
+
+# ── The scratch store (B11) ───────────────────────────────────────────────────────
+# Set BEFORE any store call so every resolution in this process — direct or indirect,
+# ours or a production default's — lands here and never on data/trainer.db.
+_SCRATCH_DIR = tempfile.mkdtemp(
+    prefix="cascade_calib_",
+    dir="/home/ghost/tmp" if os.path.isdir("/home/ghost/tmp") else None,
+)
+os.environ["TRAINER_DB_PATH"] = os.path.join(_SCRATCH_DIR, "trainer.db")
+atexit.register(shutil.rmtree, _SCRATCH_DIR, True)
 
 from compass_metrics import (  # noqa: E402
     SEED_CVAR_FLOOR,
@@ -25,6 +55,7 @@ from compass_metrics import (  # noqa: E402
     cvar_95,
     evaluate_compass,
     max_drawdown_frac,
+    seed_compass_weights_level0,
     survival_gates,
 )
 from fixtures.cascade_2025_10_10 import (  # noqa: E402
@@ -37,21 +68,72 @@ from fixtures.cascade_2025_10_10 import (  # noqa: E402
 )
 
 
+def _seed_scratch_store():
+    """Seed the scratch store's level-0 row with the SEED_* constants.
+
+    Uses the production seeder so the row is written exactly the way production
+    writes it. (This is also the only caller ``seed_compass_weights_level0`` has —
+    it was a zero-caller live-store writer before B11; see the report at the bottom
+    of this file. It is exercised here against the SCRATCH store, never the live one.)
+    """
+    seed_compass_weights_level0()
+
+
+# Seeded at MODULE level, not from __main__: this file is also importable and claims
+# pytest compatibility, and a seed that only runs under one entry point is the same
+# shape as the harness-ordering trap the memory tests carry — a new test function
+# added above the harness would run against an unseeded store.
+_seed_scratch_store()
+
+
 def _seeded_thresholds():
-    """The level-0 thresholds actually in trainer.db (falls back to SEED_* if
-    the DB isn't reachable, so the test still runs standalone)."""
+    """The level-0 thresholds actually in the SCRATCH trainer.db.
+
+    🚨 THIS NO LONGER SWALLOWS, AND THAT IS THE POINT (B11, defect D1).
+    It used to be ``except Exception: pass`` → silently return the SEED_* constants
+    with ``source="seed"``. Three separate bugs lived in that one line:
+
+      1. The live-store read could fail for ANY reason and the test still passed —
+         the failure was indistinguishable from success, because
+      2. ``source`` was computed and then NEVER ASSERTED ON by any caller, and
+      3. the live row happened to be byte-identical to the SEED_* constants, so the
+         fallback produced the same numbers and was invisible. It was correct by
+         coincidence, not by construction.
+
+    Now: a failed read RAISES, and ``source`` is asserted on by every caller.
+    """
+    from lib.trainer_db import get_connection
+
+    c = get_connection()
     try:
-        from lib.trainer_db import get_connection
-        c = get_connection()
         row = c.execute(
             "SELECT dd_ceiling, cvar_floor FROM compass_weights WHERE level_id = 0"
         ).fetchone()
+    finally:
         c.close()
-        if row is not None:
-            return {"dd_ceiling": float(row[0]), "cvar_floor": float(row[1]), "source": "db"}
-    except Exception:
-        pass
-    return {"dd_ceiling": SEED_DD_CEILING, "cvar_floor": SEED_CVAR_FLOOR, "source": "seed"}
+    if row is None:
+        raise AssertionError(
+            "no level-0 compass_weights row in the scratch store — the seeder did not "
+            "run. This used to fall back to SEED_* silently and pass."
+        )
+    return {"dd_ceiling": float(row[0]), "cvar_floor": float(row[1]), "source": "db"}
+
+
+def _assert_fixed_bounds(thr):
+    """Pin the thresholds to FIXED constants, never to whatever is in a live store.
+
+    🚨 The old test asserted ``cvar < thr["cvar_floor"]`` where ``cvar_floor`` came
+    from live production config. That assertion gets EASIER as the live floor rises:
+    the bound drifts with the thing it is supposed to be checking, so the test can
+    keep passing while the behaviour it guards silently changes. A test must assert
+    against a fixed expectation.
+    """
+    assert thr["source"] == "db", (
+        f"thresholds came from {thr['source']!r}, not the seeded store — a swallowed "
+        "read must never pass as a seeded default", thr,
+    )
+    assert abs(thr["dd_ceiling"] - SEED_DD_CEILING) < 1e-12, (thr, SEED_DD_CEILING)
+    assert abs(thr["cvar_floor"] - SEED_CVAR_FLOOR) < 1e-12, (thr, SEED_CVAR_FLOOR)
 
 
 # --------------------------------------------------------------------------
@@ -68,6 +150,7 @@ def test_fixture_reproduces_wicks():
 # --------------------------------------------------------------------------
 def test_cascade_fails_seeded_cvar_floor():
     thr = _seeded_thresholds()
+    _assert_fixed_bounds(thr)
     series = cascade_net_pnl_series()
     cvar = cvar_95(series)
     assert cvar is not None
@@ -96,6 +179,7 @@ def test_cascade_fails_seeded_cvar_floor():
 # --------------------------------------------------------------------------
 def test_dd_misses_cvar_catches():
     thr = _seeded_thresholds()
+    _assert_fixed_bounds(thr)
     dd_close = max_drawdown_frac(close_based_equity_curve())
     dd_intra = max_drawdown_frac(intraday_equity_curve())
     cvar = cvar_95(cascade_net_pnl_series())
@@ -124,6 +208,7 @@ ALL = [
 
 if __name__ == "__main__":
     print("=== Phase-3 2025-10-10 cascade calibration ===")
+    print(f"  scratch store: {os.environ['TRAINER_DB_PATH']}")
     for fn in ALL:
         fn()
     print("ALL PHASE-3 TESTS PASS")

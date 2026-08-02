@@ -55,6 +55,7 @@ Python 3, stdlib sqlite3 only. No ORM, no numpy, no LLM, no watcher logic (B2).
 """
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -82,9 +83,69 @@ def resolve_db_path() -> str:
     override = os.environ.get("WATCHER_INTEGRITY_DB_PATH")
     if override:
         return os.path.abspath(override)
+    return _live_default_path()
+
+
+def _live_default_path() -> str:
+    """The repo-local LIVE watcher_integrity.db, recomputed from this file per call.
+
+    Split out of resolve_db_path so the test guard below can ask "is this the live
+    store?" without re-deriving the path or caring what the env override says.
+    Still call-time, still no module-level constant — the DB-path trap is unchanged.
+    """
     # lib/watcher_integrity_db.py  ->  repo root is one directory up from lib/
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(repo_root, "data", "watcher_integrity.db")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  THE LIVE-STORE TEST GUARD (B11) — DUPLICATED IN ALL FOUR STORE MODULES
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🚨 DO NOT factor this into a shared ``_common_db.py``. THE "WHY A SEPARATE DB"
+# BLOCK AT THE TOP OF THIS FILE IS EXACTLY WHY: this module and ``lib/watcher_db.py``
+# must have ZERO cross-import in BOTH directions so the fragile LLM review-brain
+# physically cannot write the integrity store, and that is AST-proven by
+# ``tests/test_watcher_independence.py``. A shared helper would give both a common
+# import and destroy the guarantee — the same reasoning that already duplicates
+# resolve_db_path / init_schema / utc_now / the replica guard between them. The guard
+# below is DUPLICATED ON PURPOSE in all four store modules. Four copies is the design,
+# not debt; DRYing it out would silently delete a structural safety property.
+#
+# WHAT IT DOES: refuses to resolve THIS module's live repo-local store when the
+# process entry point is a test. The canonical invocation on this box is
+# ``python3 tests/test_X.py``, so ``sys.argv[0]`` IS the test file — the guard needs
+# no runner, no conftest and no pytest (pytest is genuinely absent here, and a
+# conftest would be inert because nothing loads one).
+#
+# 🚨 IT FAILS TOWARD REFUSING. When it cannot tell whether it is under test —
+# argv[0] is ``-`` (a stdin script), ``-c``, or empty — it treats that as UNDER TEST
+# and refuses. A false refusal costs an error message naming the escape hatch; a
+# false permit costs the live store. Measured at B11: no production entry point on
+# this box reaches these four modules with an indeterminate argv[0]; the Hub's
+# inline-python routes (argv[0] == "-") touch trevor.db through raw sqlite3.connect
+# and import none of lib/*_db.py. A future inline caller fails LOUDLY with the hatch
+# named, never silently against the live store.
+#
+# ⚠️ SCOPE LIMIT, stated here so it is not discovered later: the guard lives INSIDE
+# get_connection(), so it only sees callers that come through get_connection().
+# Sites that open ``sqlite3.connect(...)`` directly are structurally invisible to it
+# (16 such sites on this box at B11) and must be given an explicit path by hand.
+_INDETERMINATE_ARGV0 = ("", "-", "-c")
+
+
+def _under_test() -> bool:
+    """True when this process looks like a test — or when that cannot be determined.
+
+    Indeterminate reads as True on purpose: see the FAILS TOWARD REFUSING note above.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    if "pytest" in sys.modules:
+        return True
+    base = os.path.basename(sys.argv[0]) if sys.argv else ""
+    if base.startswith("test_") or base.startswith("pytest"):
+        return True
+    return base in _INDETERMINATE_ARGV0
 
 
 # All schema is additive: CREATE TABLE IF NOT EXISTS only. Column definitions are
@@ -127,7 +188,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             conn.execute(stmt)
 
 
-def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+def get_connection(
+    db_path: Optional[str] = None, *, allow_live_under_test: bool = False
+) -> sqlite3.Connection:
     """Open (lazily creating) watcher_integrity.db and ensure its schema; return it.
 
     Path resolution is at CALL TIME: explicit db_path arg wins, else resolve_db_path()
@@ -148,6 +211,23 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
             f"{_REPLICA_PATH}; the integrity store must use its own WSL-local db, "
             "never the replica."
         )
+
+    # Live-store test guard (B11). Fires ONLY on this module's own live default, so an
+    # explicit db_path or WATCHER_INTEGRITY_DB_PATH pointing at a scratch file is
+    # untouched.
+    if path == os.path.abspath(_live_default_path()) and _under_test():
+        if not (
+            allow_live_under_test
+            or os.environ.get("ALLOW_LIVE_STORE_UNDER_TEST") == "1"
+        ):
+            raise ValueError(
+                f"REFUSED: watcher_integrity.db resolved to the LIVE store {path} from "
+                f"a test entry point (argv[0]={sys.argv[0]!r}). A test must not read or "
+                "write the live store. Point WATCHER_INTEGRITY_DB_PATH at a scratch "
+                "file, or pass an explicit db_path. To touch the live store on purpose, "
+                "call get_connection(allow_live_under_test=True) or set "
+                "ALLOW_LIVE_STORE_UNDER_TEST=1 — both have to be typed deliberately."
+            )
 
     parent = os.path.dirname(path)
     if parent:

@@ -22,8 +22,10 @@ Dependency-free: ``python3 tests/test_memory_tiers.py``. Uses a temp MEMORY_DB_P
 test (never touches the real data/memory.db).
 """
 import ast
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +33,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── MODULE-LEVEL store protection (B11) ───────────────────────────────────────
+# 🚨 `_setup()` below already points MEMORY_DB_PATH at a temp db — but only once a test
+# CALLS it. Until B11 this file had NO protection above that point, so a new test
+# function added ahead of the first `_setup()` would reach the live data/memory.db and
+# nothing would say so. Ordering is not a safety mechanism. This sets a scratch default
+# at import — before the module imports below can reach a store — and `_setup()` still
+# overrides it per-test.
+_B11_SCRATCH = tempfile.mkdtemp(
+    prefix="memtiers_module_", dir="/home/ghost/tmp" if os.path.isdir("/home/ghost/tmp") else None
+)
+os.environ["MEMORY_DB_PATH"] = os.path.join(_B11_SCRATCH, "memory.db")
+atexit.register(shutil.rmtree, _B11_SCRATCH, True)
 
 import lib.memory_db as memory_db          # noqa: E402
 import memory_query                        # noqa: E402

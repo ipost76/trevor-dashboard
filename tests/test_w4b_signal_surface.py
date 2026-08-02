@@ -111,38 +111,29 @@ def test_state_derivation() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. THE CONVERSION JOIN — against the real replica
+# 2. EXCISED (B11) — it was a production monitor wearing a test's name.
 # ─────────────────────────────────────────────────────────────────────────────
-def test_conversion_join_is_exact() -> None:
-    print("\n[2] The conversion join — auto_trades.signal_id -> trade_insights.id")
-    import sqlite3
-    db = os.path.realpath("/home/trevor/trevor/trevor.db")
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    try:
-        # Every trade in the paper window must resolve to exactly one signal,
-        # and the tickers must agree. A join that silently mismatched would
-        # attribute a trade to the wrong signal — worse than showing none.
-        rows = conn.execute("""
-            SELECT a.id, a.ticker, t.id, t.ticker
-            FROM auto_trades a
-            LEFT JOIN trade_insights t ON CAST(a.signal_id AS INTEGER) = t.id
-            WHERE a.closed_at >= '2026-07-22 20:44:56'
-        """).fetchall()
-        check("paper-window trades joined", len(rows), 11)
-        check("every trade found its signal", all(r[2] is not None for r in rows), True)
-        check("tickers agree on all", all(r[1] == r[3] for r in rows), True)
-
-        # Cross-validation: two independent tables must agree on the signal
-        # count. This is what makes the funnel numbers trustworthy at all.
-        posted = conn.execute(
-            "SELECT COALESCE(SUM(signals_posted),0) FROM scan_cadence_timing_shadow "
-            "WHERE ts >= datetime('now','-24 hours')").fetchone()[0]
-        ti = conn.execute(
-            "SELECT COUNT(*) FROM trade_insights "
-            "WHERE created_at >= datetime('now','-24 hours')").fetchone()[0]
-        check("scan signals_posted == trade_insights rows (24h)", posted, ti)
-    finally:
-        conn.close()
+# ``test_conversion_join_is_exact`` opened the live 0444 replica through the
+# /home/trevor/trevor shim with a raw ``sqlite3.connect(mode=ro)`` and asserted over
+# whatever rows happened to be there. Three separate reasons it did not belong here:
+#
+#   1. IT COULD NOT DETECT A CODE REGRESSION AT ALL. It carried its OWN inline SQL
+#      rather than calling the code under test, so it only ever measured the DATA.
+#      Every other block in this file exercises real code — this one exercised none.
+#   2. It hardcoded EXACTLY 11 rows against a growing table, so it reddens with time
+#      and nothing broken. (Measured at B11's baseline it was ALREADY red: got 26,
+#      want 11 — so removing it hides no regression, it removes a standing false
+#      alarm that had been failing since the table grew past the hardcoded number.)
+#   3. It compared two live tables over a ROLLING 24h window — a data-drift check,
+#      which is monitoring, not testing.
+#
+# A production monitor belongs on a monitoring surface, where a red state pages
+# someone. In a test file it trains readers to ignore a failing suite, which is the
+# defect class this campaign keeps finding.
+#
+# ⚠️ Removing it also took the file's ONLY raw ``sqlite3.connect`` with it — a site
+# the ``get_connection`` guard is structurally blind to (it bypassed the function
+# entirely). Blocks [1], [3] and [4] are untouched and reach no store.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,7 +242,6 @@ def main() -> int:
     print("W4b signal-surface controls  (self-runner; pytest absent on WSL)")
     print("=" * 70)
     test_state_derivation()
-    test_conversion_join_is_exact()
     test_clock_conversion()
     test_w4a_invariants_hold()
     print("=" * 70)
