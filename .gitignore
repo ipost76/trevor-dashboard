@@ -1,5 +1,9 @@
 node_modules/
 .next/
+# B4-HUB-RESILIENCE: scripts/build_atomic.sh staging + rollback dirs. Same content
+# class as .next/ (~260MB each) — untracked and never staged.
+.next.build/
+.next.prev/
 data/
 *.log
 __pycache__/

@@ -22,10 +22,24 @@ Why this file exists — the silent-lifecycle-failure class this whole prompt ki
     the handler's OWN journal, and does NOT record the marker (so the next failure of the
     same unit retries). A silent alert handler is the failure this prompt exists to end.
 
-Webhook resolution reuses ``funnel_edge_watch.resolve_webhook()`` (prefers
-HUB_QA_WEBHOOK_URL / #qa-agent, falls back to HUB_DOWNLOADS_WEBHOOK_URL / #downloads).
-MEASURED 2026-07-24: HUB_QA_WEBHOOK_URL is ABSENT -> alerts land in #downloads until Ghost
-mints the #qa-agent webhook. The alert body always states the channel it used.
+DELIVERY IS THREE-TIERED (B4-HUB-RESILIENCE, 2026-08-02). In priority order:
+  1. HUB_QA_WEBHOOK_URL webhook -> #qa-agent   (preferred: lowest blast radius, no token)
+  2. bot-token REST            -> #qa-agent   (the live path today)
+  3. HUB_DOWNLOADS_WEBHOOK_URL -> #downloads  (LAST RESORT, never silently preferred)
+
+🚨 WHY TIER 2 EXISTS. Webhook resolution reuses ``funnel_edge_watch.resolve_webhook()``,
+which prefers HUB_QA_WEBHOOK_URL and falls back to HUB_DOWNLOADS_WEBHOOK_URL. Measured
+2026-07-24 and RE-MEASURED 2026-08-02: HUB_QA_WEBHOOK_URL is ABSENT from .env.local, so
+every SERVICE-DEATH page landed in #downloads -- the artifact-delivery channel. A daemon
+death notice arriving at 00:12 AM among report drops is structurally indistinguishable
+from a report drop, which is the same silent-lifecycle failure this handler exists to end.
+The obvious fix, "mint the #qa-agent webhook", IS NOT ACTIONABLE: the bot lacks Manage
+Webhooks on #qa-agent (403), so that step has been open and un-takeable since 2026-07-14.
+Tier 2 routes around it with the pattern the VM's hub_health_monitor.py has used
+successfully all along -- a bot-token REST POST to the channel. No webhook needed.
+🚨 .env.local IS NOT EDITED BY THIS FILE OR ANY PROMPT (CLAUDE.md: minting is Ghost-side).
+Tier 1 stays PRIMARY: the moment Ghost sets HUB_QA_WEBHOOK_URL, tier 2 is bypassed with
+no code change. The alert body always states the channel AND the mechanism it used.
 
 Honest blind spot: a total WSL->internet outage defeats any webhook. Stated, not hidden.
 
@@ -56,6 +70,11 @@ ALERT_INTERVAL_SEC = int(os.environ.get("WATCHER_ALERT_INTERVAL_SEC", "600"))
 USER_AGENT = "trevor-watcher-alert/1 (RF2-C1)"
 JOURNAL_LINES = 15
 _MAX_CONTENT = 1900  # Discord hard-caps a message at 2000 chars; leave headroom.
+
+# B4-HUB-RESILIENCE: the tier-2 bot-token path. Channel id matches the VM monitor's
+# HUB_MONITOR_QA_CHANNEL_ID (#qa-agent) -- the same channel, reached the same way.
+QA_CHANNEL_ID = os.environ.get("WATCHER_ALERT_QA_CHANNEL_ID", "1479969192139690029")
+BOT_TOKEN_VAR = "DISCORD_BOT_TOKEN"
 
 
 def _loud(msg: str) -> None:
@@ -115,10 +134,55 @@ def _unit_journal(unit: str) -> str:
     return out or "(journal unavailable)"
 
 
-def _channel_label(varname: str, qa_var: str) -> str:
+def _read_bot_token() -> str:
+    """DISCORD_BOT_TOKEN from the process env, else .env.local. '' when unavailable.
+
+    🚨 NEVER logged, never returned to a printing caller, never put in an alert body.
+    The unit carries EnvironmentFile=.env.local, so under systemd this normally hits
+    the env branch; the file read is the fallback for a hand-run invocation."""
+    val = os.environ.get(BOT_TOKEN_VAR, "").strip()
+    if val:
+        return val
+    try:
+        for line in (REPO / ".env.local").read_text().splitlines():
+            if line.startswith(BOT_TOKEN_VAR + "="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _post_bot_channel(channel_id: str, content: str) -> tuple[bool, object, str]:
+    """Tier 2 — POST one message to a channel with the bot token.
+
+    Returns (ok, http_code, detail). Never raises, never logs the token. `detail` is a
+    short Discord error snippet; Discord echoes the request body, not the auth header,
+    so it is safe to log."""
+    token = _read_bot_token()
+    if not token:
+        return False, None, f"{BOT_TOKEN_VAR} unavailable"
+    try:
+        import requests  # type: ignore
+        resp = requests.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            json={"content": content},
+            headers={"Authorization": f"Bot {token}", "User-Agent": USER_AGENT},
+            timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001 - a WSL->internet outage lands here; be LOUD
+        return False, None, f"{type(exc).__name__}: {exc}"
+    if resp.status_code in (200, 201, 204):
+        return True, resp.status_code, ""
+    return False, resp.status_code, (resp.text or "")[:200]
+
+
+def _channel_label(varname: str, qa_var: str, via_bot: bool = False) -> str:
+    if via_bot:
+        return "#qa-agent (bot-token REST — the #qa-agent webhook mint is perm-blocked)"
     if varname == qa_var:
         return "#qa-agent (HUB_QA_WEBHOOK_URL)"
-    return "#downloads (HUB_DOWNLOADS_WEBHOOK_URL — fallback; #qa-agent webhook not yet minted)"
+    return ("#downloads (HUB_DOWNLOADS_WEBHOOK_URL — LAST RESORT; both the #qa-agent "
+            "webhook and the bot-token path were unavailable)")
 
 
 def build_message(unit: str, stamp: str, status: str, journal: str, channel_label: str) -> str:
@@ -162,13 +226,32 @@ def main(argv: list[str]) -> int:
               f"Alert NOT sent — a human must see this line. Not recording a marker (will retry).")
         return 1
 
-    channel_label = _channel_label(varname, QA_ENV_VAR)
+    # ── delivery tier selection (B4-HUB-RESILIENCE) ─────────────────────────
+    # Tier 1 (the QA webhook) wins whenever it resolves. Tier 2 is tried only when the
+    # resolver FELL BACK to #downloads, i.e. exactly the case that used to misroute a
+    # service-death page into the artifact channel. Tier 3 is what tier 2 falls through
+    # to, so the alert can never be LOST by adding a tier -- only re-routed.
+    use_bot = varname != QA_ENV_VAR and bool(_read_bot_token())
+    channel_label = _channel_label(varname, QA_ENV_VAR, via_bot=use_bot)
     msg = build_message(unit, stamp, status, journal, channel_label)
 
     if dry:
         _loud(f"DRY_RUN: would POST to {channel_label} ({varname}); not posting, not marking.")
         print(msg)
         return 0
+
+    if use_bot:
+        ok, code, detail = _post_bot_channel(QA_CHANNEL_ID, msg)
+        if ok:
+            _loud(f"POSTED {unit}'s death alert to {channel_label} (HTTP {code}).")
+            _record_marker(unit, now)
+            return 0
+        # Do NOT return here -- fall through to the webhook so a token problem
+        # degrades to the old behaviour instead of silencing the alert entirely.
+        _loud(f"tier-2 bot-token post to #qa-agent FAILED (HTTP {code} {detail!r}) — "
+              f"falling back to the {varname} webhook so the alert is not lost.")
+        channel_label = _channel_label(varname, QA_ENV_VAR, via_bot=False)
+        msg = build_message(unit, stamp, status, journal, channel_label)
 
     try:
         import requests  # type: ignore

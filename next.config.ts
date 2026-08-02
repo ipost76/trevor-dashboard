@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // B4-HUB-RESILIENCE (2026-08-02) — lets scripts/build_atomic.sh build into a
+  // STAGING directory and swap it into place, instead of `next build` rewriting the
+  // live `.next` in situ. On 2026-08-02 an in-place build left `.next` without
+  // prerender-manifest.json; the Hub then crashed 5× on ENOENT at setupFsCheck and
+  // systemd gave up, taking Ghost's only cockpit down for 21m53s.
+  // 🚨 Unset => ".next", so a bare `npm run build` is byte-for-byte unchanged.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
