@@ -35,13 +35,20 @@ const cache = createSwrCache<unknown>({ defaultTtl: 5_000, concurrency: 2 });
 
 /**
  * GET /api/killswitch
- * Returns { enabled, lastToggle, lastAuthor, lastReason }.
+ * Returns { killswitch_state, enabled, lastToggle, lastAuthor, lastReason }.
  *
  * Auth via session cookie middleware (inherited from /api/* protection).
  *
- * Fail-safe: on Python helper or DB error, returns 500 with
- * { enabled: false, error: "..." } so the KillswitchPill stays hidden
- * (visual fail-safe — never falsely shows STANDBY when DB unreachable).
+ * 🚨 C3-FALSE-SUCCESS-SWEEP (2026-08-03): this catch used to return
+ * `{ enabled: false }` — i.e. on a helper crash, a spawn timeout, or unparseable
+ * stdout, the route ASSERTED that the emergency stop was disengaged. That is a
+ * reading nobody took, and the card rendered it as "Off · New trades allowed".
+ * It now returns `killswitch_state: "unknown"` with `enabled: null`.
+ *
+ * The HTTP 500 is DELIBERATELY UNCHANGED — a genuine helper failure must stay a
+ * failure to every machine consumer and to verify_deploy.sh. Only the body stops
+ * claiming a state. (Same discipline as B12's gateway fix: change the message,
+ * never the status contract.)
  */
 export async function GET() {
   try {
@@ -52,7 +59,7 @@ export async function GET() {
     return NextResponse.json(value);
   } catch (e) {
     return NextResponse.json(
-      { enabled: false, error: String(e) },
+      { killswitch_state: "unknown", enabled: null, error: String(e) },
       { status: 500 },
     );
   }

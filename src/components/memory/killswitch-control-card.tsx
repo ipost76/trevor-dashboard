@@ -10,7 +10,10 @@ import {
 import { ShieldOff, ShieldCheck, AlertTriangle, Clock, Info } from "lucide-react";
 
 interface KillswitchState {
-  enabled: boolean;
+  /** 🚨 null is the UNKNOWN value, never false. See killswitch_state. */
+  enabled: boolean | null;
+  /** C3: the three-state discriminator. Absent on a pre-fix cached payload. */
+  killswitch_state?: "engaged" | "disengaged" | "unknown";
   lastToggle?: string;
   lastAuthor?: string;
   lastReason?: string;
@@ -59,7 +62,17 @@ export function KillswitchControlCard() {
   const fetchState = React.useCallback(async () => {
     try {
       const res = await fetch(ENDPOINT, { cache: "no-store" });
-      if (res.ok) setState((await res.json()) as KillswitchState);
+      if (res.ok) {
+        setState((await res.json()) as KillswitchState);
+      } else {
+        // 🚨 C3: a non-2xx used to leave `state` at null, which the render
+        // collapsed to "Off · New trades allowed". An unreadable killswitch is
+        // NAMED, never rendered as the disengaged state.
+        setState({ killswitch_state: "unknown", enabled: null, error: `HTTP ${res.status}` });
+      }
+    } catch {
+      // Network failure / no response at all — same rule: say UNKNOWN.
+      setState({ killswitch_state: "unknown", enabled: null, error: "unreachable" });
     } finally {
       setLoading(false);
     }
@@ -117,15 +130,25 @@ export function KillswitchControlCard() {
     return <Skeleton className="h-32 w-full" />;
   }
 
-  const enabled = !!state?.enabled;
+  // 🚨 C3-FALSE-SUCCESS-SWEEP: THREE states, not two. This was
+  // `const enabled = !!state?.enabled`, which coerced BOTH "no data yet" and
+  // "the read failed" into false and rendered them as "Off · New trades
+  // allowed" — a confident all-clear about the emergency stop, sourced from no
+  // reading at all. A producer-side fix alone could not have closed it: this
+  // line would have flattened `enabled: null` right back to false.
+  const unknown =
+    state == null || state.killswitch_state === "unknown" || state.enabled == null;
+  const enabled = state?.enabled === true;
 
   return (
-    <Card padding="md" className={enabled ? "card-warn" : "card-base"}>
+    <Card padding="md" className={enabled || unknown ? "card-warn" : "card-base"}>
       {/* Identity row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           {enabled ? (
             <ShieldOff size={20} className="text-accent-red" aria-hidden />
+          ) : unknown ? (
+            <AlertTriangle size={20} className="text-accent-gold" aria-hidden />
           ) : (
             <ShieldCheck size={20} className="text-accent-mint" aria-hidden />
           )}
@@ -136,24 +159,35 @@ export function KillswitchControlCard() {
             <div
               className={
                 "font-sans text-h3 font-semibold " +
-                (enabled ? "text-accent-red" : "text-fg-primary")
+                (enabled ? "text-accent-red" : unknown ? "text-accent-gold" : "text-fg-primary")
               }
             >
-              {enabled ? "ENGAGED" : "Off"}
+              {enabled ? "ENGAGED" : unknown ? "UNKNOWN" : "Off"}
             </div>
           </div>
         </div>
         {/* C2: this pill's text was the raw flag name EMERGENCY_KILLSWITCH,
             which restated the heading beside it in identifier form and told a
-            reader nothing extra. It now says what the state MEANS. */}
+            reader nothing extra. It now says what the state MEANS.
+            C3: and when it cannot be read, it says THAT — never "allowed". */}
         <Pill
           tone={enabled ? "red" : "neutral"}
+          intent={unknown ? "warn" : undefined}
           size="sm"
           pulse={enabled}
         >
-          {enabled ? "New trades blocked" : "New trades allowed"}
+          {enabled ? "New trades blocked" : unknown ? "State unreadable" : "New trades allowed"}
         </Pill>
       </div>
+      {unknown && (
+        // The reason is deliberately NOT interpolated here: the helper's `error`
+        // carries a raw exception string, and a Python reader emits STRUCTURE
+        // while the renderer decides the English. The console keeps the detail.
+        <div className="mt-2 font-sans text-micro text-accent-gold">
+          Could not read the killswitch state. This is NOT an all-clear — the emergency stop
+          may be engaged or disengaged. Check the bot directly before acting.
+        </div>
+      )}
 
       {/* Audit metadata */}
       {state && (state.lastToggle || state.lastAuthor) && (
