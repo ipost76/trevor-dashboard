@@ -1,0 +1,34 @@
+# /etc/systemd/system/trevor-tests.timer — B7 (AUTHORED IN-REPO ONLY — PROPOSED, NOT INSTALLED)
+#
+# 🚨 NOT installed, NOT enabled as authored at B7 — verify rather than believe:
+#        systemctl list-timers 'trevor-tests*'
+#
+# The scheduler on this box is systemd TIMERS, not cron. An empty `crontab -l` here is CORRECT
+# and is not a gap — earlier prompts read it as "invocation path UNKNOWN", which was a correct
+# reading of the wrong scheduler. Look in `systemctl list-timers`.
+#
+# Cadence rationale: daily, well clear of the 06:00 trevor-cost-refresh.timer so a suite run and
+# the cost refresh never contend, and Persistent=true so a run missed while the WSL distro was
+# down fires on the next boot instead of being silently skipped. A harness that skips quietly is
+# the failure mode this whole gap exists to close.
+#
+# INSTALL (only after the red baseline is triaged — see the .service header):
+#   sudo cp deploy/systemd/wsl/trevor-tests.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now trevor-tests.timer
+#   systemctl list-timers 'trevor-tests*'          # prove it actually scheduled
+# ROLLBACK:
+#   sudo systemctl disable --now trevor-tests.timer
+#   sudo rm /etc/systemd/system/trevor-tests.{service,timer} && sudo systemctl daemon-reload
+
+[Unit]
+Description=TREVOR — daily Python test suite under DB containment (B7)
+Documentation=file:///home/ghost/projects/trevor-dashboard/scripts/run_tests.sh
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=trevor-tests.service
+
+[Install]
+WantedBy=timers.target

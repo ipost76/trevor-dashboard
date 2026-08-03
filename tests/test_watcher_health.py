@@ -23,6 +23,19 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 🚨 CONTAINMENT BELT (B7) — MODULE LEVEL, BEFORE the production imports below.
+# This file injects a scratch store everywhere it can (``_watcher()``), but
+# ``run_cycle(...)`` at the flag-off proof is called with NO ``watcher_conn=`` —
+# if that inertness ever regressed it would fall through to a zero-arg
+# ``get_connection()`` and open the LIVE <repo>/data/watcher.db. B11's
+# ``_under_test()`` guard covers that today, but it keys on argv[0]'s NAME and is
+# disarmed by any runner not called ``test_*``. This redirect does not care what
+# the entry point is called, so the two layers fail in different directions.
+# Module level on purpose: a test added ABOVE a harness would otherwise run first.
+import _containment  # noqa: E402
+
+_containment.activate()
+
 import watcher_health as wh  # noqa: E402
 import watcher_surface as ws  # noqa: E402
 from lib.watcher_db import get_connection  # noqa: E402

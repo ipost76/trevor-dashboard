@@ -30,6 +30,16 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 🚨 CONTAINMENT BELT (B7) — MODULE LEVEL, BEFORE the production imports below.
+# Every store handle here is a temp file today, but nothing STRUCTURALLY stops a
+# future check from reaching a zero-arg ``get_connection()`` and opening the LIVE
+# <repo>/data/watcher.db. B11's ``_under_test()`` guard covers that only while the
+# entry point is named ``test_*``; this redirect holds regardless of argv[0].
+# Module level on purpose: a test added ABOVE a harness would otherwise run first.
+import _containment  # noqa: E402
+
+_containment.activate()
+
 import watcher_surface as ws  # noqa: E402
 from lib.watcher_db import get_connection  # noqa: E402
 

@@ -20,6 +20,16 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 🚨 CONTAINMENT BELT (B7) — MODULE LEVEL, BEFORE the production imports below.
+# This file drives ``watcher_review`` against throwaway dbs, but the review-brain
+# reads BOTH stores and a zero-arg ``get_connection()`` on either would open a LIVE
+# <repo>/data/*.db. B11's ``_under_test()`` guard covers that only while the entry
+# point is named ``test_*``; this redirect holds regardless of argv[0].
+# Module level on purpose: a test added ABOVE a harness would otherwise run first.
+import _containment  # noqa: E402
+
+_containment.activate()
+
 import json  # noqa: E402
 import watcher_budget  # noqa: E402
 import watcher_review as wr  # noqa: E402

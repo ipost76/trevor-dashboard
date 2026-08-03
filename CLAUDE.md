@@ -17,8 +17,8 @@
 
 ---
 
-> **Last corrected: 2026-07-31 (F1-SURFACE-CLOSEOUT).** Last full rebuild: 2026-05-16. CC's current-state reference for the **WSL Hub** — read top-to-bottom in Phase 0 of every Hub prompt.
-> **Length: 769 lines (measured B11 2026-08-02; was 747 at B12 2026-08-01, 742 at B1 2026-08-01, 737 at F1-SURFACE-CLOSEOUT — ⚠️ the file measured 736 BEFORE this prompt's one-line addition while this line still read 734 — F1's number was already two stale, so it is re-measured here rather than incremented. Was 694 after B1 2026-07-30, 690 after B7, ~680 after RP-D2's cut, 2,477 before it).** ⚠️ **The previous line here read "Hard ceiling: under 300 lines" while the file stood at 2,477 — 8× breached and unmet for ten weeks.** 🚨 **This number is the MEASURED length, not an aspiration** — an earlier draft of this very line said "~500" before the cut was measured at 679, and shipping that would have minted a fresh false constraint in the act of correcting one. If you grow this file, update this number. A constraint nobody has honoured in ten weeks is not a constraint, it is a stale record; it is corrected rather than satisfied by hiding load-bearing content. The narrative changelog now lives in `docs/HUB_WAVE_CHANGELOG.md`; the 92 durable preferences stayed **here**, in `## Preferences`, because a pointer risks their going unread — the exact failure class this campaign exists to close.
+> **Last corrected: 2026-08-03 (B7-TEST-HARNESS).** Last full rebuild: 2026-05-16. CC's current-state reference for the **WSL Hub** — read top-to-bottom in Phase 0 of every Hub prompt.
+> **Length: 804 lines (measured B7-TEST-HARNESS 2026-08-03; was 769 at B11 2026-08-02, 747 at B12 2026-08-01, 742 at B1 2026-08-01, 737 at F1-SURFACE-CLOSEOUT — ⚠️ the file measured 736 BEFORE this prompt's one-line addition while this line still read 734 — F1's number was already two stale, so it is re-measured here rather than incremented. Was 694 after B1 2026-07-30, 690 after B7, ~680 after RP-D2's cut, 2,477 before it).** ⚠️ **The previous line here read "Hard ceiling: under 300 lines" while the file stood at 2,477 — 8× breached and unmet for ten weeks.** 🚨 **This number is the MEASURED length, not an aspiration** — an earlier draft of this very line said "~500" before the cut was measured at 679, and shipping that would have minted a fresh false constraint in the act of correcting one. If you grow this file, update this number. A constraint nobody has honoured in ten weeks is not a constraint, it is a stale record; it is corrected rather than satisfied by hiding load-bearing content. The narrative changelog now lives in `docs/HUB_WAVE_CHANGELOG.md`; the 92 durable preferences stayed **here**, in `## Preferences`, because a pointer risks their going unread — the exact failure class this campaign exists to close.
 > Hub-specific only. Bot-side engineering rules, the feature registry, and recurring bugs live in `/home/trevor/trevor/BEHAVIOR_RULES.md` + `/home/trevor/trevor/CLAUDE.md` **(VM)** — read those; this file does not restate them.
 > Prior session history is archived to `docs/SESSION_HISTORY.md`; the Hub wave changelog to `docs/HUB_WAVE_CHANGELOG.md` (historical, not active documentation).
 
@@ -433,6 +433,41 @@ Whole files: `replica-age.tsx` · `shadow-overview.tsx` · `sentinels-card.tsx` 
 ⚠️ **A GREEN `pytest tests/` RUN WOULD NOT PROVE THESE ARE CLOSED.** `os.environ` is process-global: under a whole-directory run, `test_trainer_bandit.py`'s module-level `TRAINER_DB_PATH` executes at collection and **accidentally protects its alphabetical successors**. The escape disappears without being fixed and returns the moment a file runs alone or ordering shifts. 🚨 **Do not install pytest here; if it is ever installed, these must be verified file-by-file first.**
 
 **Test-side posture (also B11):** `test_cascade_calibration.py`, `test_trainer_validation.py` and the three `test_memory_*.py` files set their scratch `*_DB_PATH` at **MODULE level**, not inside a harness object. The memory tests previously set it in `_Env.__enter__` / `main()` / `_setup()`, so **a new test function added above the harness would have escaped silently — ordering is not a safety mechanism.**
+
+---
+
+## 🚨 The test harness — one command, and the runner that would have broken the guard (B7, 2026-08-03)
+
+**`bash scripts/run_tests.sh`** runs all **29** `tests/test_*.py` under containment. Optional args run a subset (`bash scripts/run_tests.sh test_trainer_bandit.py`). Exit 0 = all passed. **This closes "nothing runs them" (D-W-11)** — before B7 the honest coverage was 29 files a human invoked by hand, one at a time.
+
+🚨 **THE RUNNER SPAWNS ONE `python3 tests/test_X.py` SUBPROCESS PER FILE, AND THAT IS THE WHOLE DESIGN.** B11's guard decides "am I under test?" from **`basename(sys.argv[0]).startswith("test_")`**. So a runner that imports the tests into one parent process makes argv[0] the **runner's** name and the guard goes quiet **for all four stores at once**. **Measured at B7 with a probe named `run_all_probe.py`: `_under_test()` returned `False` ×4 and every live `<repo>/data/*.db` path became resolvable again.** **The obvious runner would have silently re-opened every escape the previous two commits had just closed.** Spawning per file keeps argv[0] as the test file, so the guard stays **ARMED rather than bypassed by its own harness** — and it also kills the cross-file `os.environ` contamination where one file's module-level `*_DB_PATH` accidentally protects whichever files import after it.
+
+**The containment contract — two layers that fail in DIFFERENT directions. Neither is sufficient alone:**
+
+| | Layer 1 — B11 `_under_test()` | Layer 2 — `tests/_containment.py` (B7) |
+|---|---|---|
+| Lives in | `get_connection()`, 4× in `lib/*_db.py` | one file, `tests/_containment.py` |
+| Keys on | the entry point's **NAME** | an explicit `*_DB_PATH` **redirect** |
+| Blind to | 🚨 a runner not named `test_*` | a raw `sqlite3.connect(<literal>)` |
+| Needs the test to cooperate | no | yes (or the runner exports it) |
+
+`_containment.activate()` points all four `*_DB_PATH` at a per-run scratch dir under `/home/ghost/tmp`, then **asks each store module for its own resolved path** and **raises `ContainmentError` if any still lands under `<repo>/data/`**. 🚨 **It fails CLOSED — no fallback branch, no warn-and-continue, no env var that re-permits the live store.** `run_tests.sh` exports the same four vars and **refuses to run a single test** if `verify()` fails. Call `activate()` at **MODULE level**, before importing anything that touches a store — a test added above a harness would otherwise run first, and ordering is not a safety mechanism.
+
+**A2's two escapes were ALREADY CLOSED before B7 and not by it** — `test_watcher_health.py` at **`42c3efc` (2026-07-30**, store injected) and `test_cascade_calibration.py` at **`4435da0` (B11, 2026-08-02**, module-level scratch). Corroborated by mtime: `watcher.db` was last written **2026-07-30T22:35:25Z, the same instant as its own evidence row** — the last pre-fix run. **Escapes live at HEAD: 0**, over a frozen 8-pattern census. ⚠️ **B7 added the missing `WATCHER_DB_PATH` belt** to `test_watcher_health/surface/review` — `watcher.db` was the one store standing on a single layer while the other three were double-layered.
+
+🚨 **THE BASELINE IS 24/29 PASS, 5 FAIL — AND IT IS A FLOOR, NOT A TARGET.** First real measurement at HEAD `6641bec`; all five failures are **PRE-EXISTING and were RECORDED, NOT FIXED** (a red test is a finding). Proven pre-existing for the one file B7 edited by running HEAD's own content from an isolated copy: identical `KeyError` at the identical line. Per Law 1 there is **no canonical baseline — re-measure at your own HEAD.**
+
+| File | Failure |
+|---|---|
+| `test_trainer_teach.py` | 🚨 **live-write escape, see below** — asserted `wrote is False`, got `wrote: True` |
+| `test_memory_query.py` | `trainer_reasoning.py` sha256 tripwire — file changed since the digest was pinned |
+| `test_trainer_reasoning.py` | narration template no longer emits `NOT_READY`/`cvar_floor`/`min_n` verbatim |
+| `test_trainer_level_detector.py` | 39/40 — the `:3941`-absent real path did not degrade visibly |
+| `test_watcher_surface.py` | `KeyError: 'fired'` — `check_critical_units` return shape drifted |
+
+🚨 **A SIXTH ESCAPE EXISTS AND CONTAINMENT DOES NOT COVER IT: `tests/test_trainer_teach.py` WRITES THE LIVE VM ChromaDB.** `_dispatch_teaching` reaches `/home/trevor/trevor/vectordb` over the `ssh vm` pipe and the doc **`r9teach-liveprobe-DISCARD` is PRESENT in the live `learned-outcomes` collection** (verified read-only; count 1793). **The four-store shim is SQLite-only and is structurally blind to it** — a different store, a different box, a different transport. **The deeper defect is the test's own finding: `BOTBRAIN_TEACH_ENABLED` is OFF live and the VM-side program wrote anyway** — a flag that does not gate, which is the false-success class operating on the persistence layer. ⚠️ B7 did **not** delete the doc (out of scope, and it is a live VM store); removal is one line and is Ghost's call. **Any future containment work must start here, not with the SQLite stores.**
+
+**Scheduling is PROPOSED, NOT INSTALLED** — `deploy/systemd/wsl/trevor-tests.{service,timer}` (daily 04:30, `Persistent=true`, `OnFailure=trevor-alert@%n.service`), authored to the trainer-unit precedent. 🚨 **Deliberately not installed: enabling it today would fail on its first fire** (the baseline is red) **and alert every run — which is how a real alert channel gets muted.** Install only after the five are triaged. ⚠️ Verify status rather than believing the header — the sibling `trevor-trainer.service` carried a "NOT INSTALLED" comment while installed (RP-D2). 🚨 **This is a timer, NOT a git hook and NOT CI** — the pre-commit guard chain stays deliberately uninstalled for the reasons recorded above.
 
 ---
 

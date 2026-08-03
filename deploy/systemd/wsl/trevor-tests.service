@@ -1,0 +1,45 @@
+# /etc/systemd/system/trevor-tests.service — B7 (AUTHORED IN-REPO ONLY — PROPOSED, NOT INSTALLED)
+#
+# 🚨 STATUS IS A MEASUREMENT, NOT A COMMENT. As authored at B7 this unit is NOT installed and
+#    NOT enabled. Do not trust this line — check it, because the sibling trevor-trainer.service
+#    carried a "NOT INSTALLED" header while being installed (found by RP-D2, 2026-07-29):
+#        systemctl list-unit-files 'trevor-tests.*'
+#        diff deploy/systemd/wsl/trevor-tests.service /etc/systemd/system/trevor-tests.service
+#
+# WHAT IT WOULD DO: run the whole Python suite under containment via scripts/run_tests.sh and
+# let the existing trevor-alert@ spine report a red run. Today NOTHING runs the 29 test files —
+# no hook, no CI, no timer (gap D-W-11). B7 closed the "one command" half; this is the
+# "something invokes it" half, authored so the decision to schedule is a one-line install
+# rather than a design exercise.
+#
+# 🚨 WHY IT IS NOT INSTALLED HERE: an auto-running harness is a BEHAVIOUR CHANGE on a box that
+#    has never had one, and B7's baseline is 24/29 with 5 PRE-EXISTING failures. Enabling this
+#    today would fail on its first fire and alert every run — noise from a unit behaving
+#    correctly, which is how a real alert channel gets muted. Install it only after the red
+#    baseline is triaged (fixed, or explicitly accepted and the runner taught to expect them).
+#
+# ⚠️ It deliberately does NOT run under the pre-commit guard chain, which is NOT INSTALLED on
+#    this box on purpose (see CLAUDE.md — the chain false-positives on the Hub's own docstring
+#    style). A test timer and a commit guard are different mechanisms; do not conflate them.
+
+[Unit]
+Description=TREVOR — run the Python test suite under DB containment (B7)
+Documentation=file:///home/ghost/projects/trevor-dashboard/scripts/run_tests.sh
+After=network-online.target
+OnFailure=trevor-alert@%n.service
+
+[Service]
+Type=oneshot
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+# ssh/gcloud resolve credentials from HOME; three test files reach the VM pipe read-only.
+Environment=HOME=/home/ghost
+EnvironmentFile=-/home/ghost/projects/trevor-dashboard/.env.local
+ExecStart=/usr/bin/bash /home/ghost/projects/trevor-dashboard/scripts/run_tests.sh
+# The suite takes ~2 min today; the cap is a wedge guard, not a target.
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
