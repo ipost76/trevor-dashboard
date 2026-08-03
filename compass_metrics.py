@@ -1087,6 +1087,34 @@ def seed_compass_weights_level0(
 
     Not called on import — an explicit one-shot. Returns the row that is now in
     the DB for level 0 (existing or freshly seeded).
+
+    🚨 THIS IS A MANUAL / TEST-EXERCISED TOOL, NOT DEAD CODE (measured B5, 2026-08-02).
+    It was carried as a "caller-less live-store writer"; that is REFUTED. It has exactly
+    ONE caller — ``tests/test_cascade_calibration.py`` ``_seed_scratch_store()`` (invoked at
+    that module's top level), which seeds its SCRATCH store through the production seeder so
+    the row is written exactly the way production writes it. Nothing else reaches it: no cron,
+    no systemd unit, no dynamic dispatch, no CLI entry, and this module's own ``__main__``
+    smoke does NOT call it. **Deleting it breaks that test.**
+
+    WHAT IT WRITES: one row in ``compass_weights`` — ``(level_id=0, w_consistency,
+    w_magnitude, dd_ceiling, cvar_floor, learned=0, updated_at)``. Values are the module's
+    ``SEED_*`` constants unless overridden by the keyword args, after ``_enforce_fixed_order``
+    clamps ``w_consistency >= w_magnitude``. ``learned=0`` marks the row as un-learned.
+
+    PRECONDITIONS before you run this by hand:
+      * It resolves the store through ``lib.trainer_db.get_connection()`` when ``conn`` is
+        None, so WITHOUT a ``TRAINER_DB_PATH`` redirect a zero-arg call targets the LIVE
+        ``data/trainer.db``. Pass ``conn``, or set ``TRAINER_DB_PATH``, unless writing live
+        is genuinely what you want. (B11's ``_under_test()`` guard already refuses a live
+        resolution from a test/``-c``/stdin entry point — that is the accidental-invocation
+        path, and it is covered.)
+      * INSERT OR IGNORE means this is a no-op once level 0 exists; it can never overwrite a
+        learned row. To CHANGE an existing row you must write it deliberately, not via here.
+
+    The live ``data/trainer.db`` level-0 row (seed-exact, ``learned=0``,
+    ``updated_at=2026-07-21T22:15:25Z``) was written by THIS function during the R9-B1
+    authoring session, four minutes before commit ``6a0a42f`` — back when the cascade test
+    still resolved to the live store. That defect is closed (B11); the row is legitimate.
     """
     w_consistency, w_magnitude, _ = _enforce_fixed_order(w_consistency, w_magnitude)
     own_conn = False

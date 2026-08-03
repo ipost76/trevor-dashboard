@@ -20,6 +20,7 @@ read is an INJECTED fake (never a real ssh). The one live-shim smoke is gated be
 ``TRAINER_PAUSE_LIVE=1`` and SKIPS otherwise. pytest-compatible too.
 """
 import os
+import random
 import sys
 import tempfile
 
@@ -179,6 +180,7 @@ def test_loop_resumes_cleanly_after_pause_clears():
     os.environ["TRAINER_LOOP_ENABLED"] = "true"
     os.environ["TRAINER_BANDIT_ENABLED"] = "true"
     os.environ["SHADOW_LOOP_EXECUTOR_ENABLED"] = "true"
+    _prev_db = os.environ.get("TRAINER_DB_PATH")
     try:
         ex = _FakeExecutor({
             "shadow.route_proposal": lambda a: {"ok": True,
@@ -189,11 +191,48 @@ def test_loop_resumes_cleanly_after_pause_clears():
         bodies = []
         # run, run, PAUSE, PAUSE, run — over 5 iterations.
         pp = _ScriptedPausePoll(script=[False, False, True, True, False], ttl=0.0)
+        # 🚨 THIS TEST WAS FLAKY AT ~38% (5 fails / 13 runs, measured B5 2026-08-02).
+        # THREE causes composed; fixing any one alone still left it flaky, so BOTH lines
+        # below are load-bearing — do not "simplify" either away:
+        #   1. run_trainer_loop defaults to an UNSEEDED random.Random() (_new_rng), so the
+        #      arm sampled per iteration varied run to run.
+        #   2. rejection_log is READ BACK within the run: the first sighting of an arm logs
+        #      a rejection (validate_fn returns NOT_READY below), and self_pushback ->
+        #      is_known_dead_end then legitimately BLOCKS a repeat of that same arm_hash.
+        #      Two of the three RUNNING iterations colliding => only 2 of 3 submits.
+        #   3. 🚨 THE STORE IS SHARED ACROSS THE WHOLE TEST PROCESS. TRAINER_DB_PATH is set
+        #      once at module level (and is in fact overwritten by test_trainer_loop's own
+        #      module-level set, which we import). test_flag_off_is_byte_identical sorts
+        #      BEFORE this test in ALL, runs 2 UNSEEDED iterations, and both its rejection
+        #      rows AND its bandit_posteriors updates land in the same store. MEASURED: this
+        #      test seeded-but-not-isolated passed 10/10 alone and still FAILED 1/10 when run
+        #      after that sibling. Isolation is what makes the seed sufficient.
+        # 🚨 ISOLATION MUST BE VIA TRAINER_DB_PATH, *NOT* run_trainer_loop's db_path= seam.
+        # db_path= only reaches self_pushback/log_rejection. run_search_step and
+        # update_posterior take NO db_path and always resolve TRAINER_DB_PATH, so with db_path
+        # alone the bandit_posteriors rows stay shared — and because Thompson sampling draws
+        # from the rng once per posterior row, a differing row count DESYNCS the seeded rng
+        # and the sampled arms change anyway. MEASURED: db_path-only isolation still failed
+        # 1/5, with iterations 1-2 stable and iteration 3's arm varying run to run.
+        # resolve_db_path() reads the env AT CALL TIME, so scoping the var here is sufficient
+        # and is restored in the finally below.
+        # 🚨 THE PRODUCTION DEDUP IS CORRECT — the over-strict assertion was `submits == 3`,
+        # which silently assumed 3 DISTINCT arms. We make the test deterministic instead of
+        # weakening the assertion, so the pause/resume behaviour under test stays as strict.
+        # ⚠️ A FIXED SEED IS ONLY STABLE WHILE propose_arm's rng CONSUMPTION IS UNCHANGED.
+        # If you alter the arm schema, the sampling order, or how many draws propose_arm
+        # makes, this seed may start colliding again and the failure will look like a NEW
+        # flake. It is not — re-pick a seed that yields 3 distinct arms and update this note.
+        rng = random.Random(1729)
+        # Own store: no sibling's rejection rows or posterior rows can reach this loop.
+        os.environ["TRAINER_DB_PATH"] = os.path.join(
+            tempfile.mkdtemp(prefix="trainer_pause_resume_"), "trainer.db")
         r = tl.run_trainer_loop(
             max_iterations=5, client=client, heartbeat=_noop_heartbeat(),
             backtest_fn=lambda arm, lvl: _survivor_scored(),
             validate_fn=lambda **kw: {"enabled": True, "ok": True, "leakage_reject": False,
                                       "verdict": {"verdict": "NOT_READY", "failing": ["min_n"]}},
+            rng=rng,
             sleep_fn=lambda s: None, on_iteration=lambda t: bodies.append(t), pause_poll=pp)
         assert r["iterations"] == 5 and r["paused_ticks"] == 2, r
         assert len(bodies) == 3, bodies                       # iters 1,2,5 ran; 3,4 paused
@@ -202,6 +241,12 @@ def test_loop_resumes_cleanly_after_pause_clears():
     finally:
         for f in ("TRAINER_LOOP_ENABLED", "TRAINER_BANDIT_ENABLED", "SHADOW_LOOP_EXECUTOR_ENABLED"):
             os.environ.pop(f, None)
+        # Restore the module-level scratch store for the tests that follow — this test
+        # borrows the env var, it must not keep it.
+        if _prev_db is None:
+            os.environ.pop("TRAINER_DB_PATH", None)
+        else:
+            os.environ["TRAINER_DB_PATH"] = _prev_db
     print("OK resume: 0→1→0 — work runs, stops during pause, resumes after (3 bodies, 3 submits)")
 
 
