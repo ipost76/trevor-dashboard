@@ -26,6 +26,11 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 0
 
 PATTERN_SET_VERSION="1.0"
+# B2-HUB-READER-HONESTY (2026-08-04): a SECOND, SEPARATE frozen set for a
+# DIFFERENT defect class — see the COERCION section at the bottom. Versioned on
+# its own axis so the v1.0 residue numbers above stay comparable to C3's; the
+# two are never summed.
+COERCION_SET_VERSION="1.0"
 SHOW_FILES=0; CODE_ONLY=0
 for a in "$@"; do
   case "$a" in --files) SHOW_FILES=1 ;; --code-only) CODE_ONLY=1 ;; esac
@@ -134,6 +139,42 @@ echo "gateway/*.js — THIRD LANGUAGE LAYER, reported separately, NEVER folded i
 count "P1 String(e)"            "$TS_P1" gw_corpus
 count "P2 e.message"            "$TS_P2" gw_corpus
 count "P3 \${e}"                "$TS_P3" gw_corpus
+
+echo
+echo "══ COERCION CENSUS — pattern set v${COERCION_SET_VERSION} (B2, 2026-08-04) ══"
+# 🚨 A DIFFERENT DEFECT CLASS FROM EVERYTHING ABOVE, AND NEVER SUMMED WITH IT.
+# Residue = a raw exception REACHING a surface. Coercion = an absent reading or a
+# failed read being RESOLVED TO A HEALTHY VALUE, so nothing reaches any surface
+# at all and the screen shows a confident all-clear nobody measured. The second
+# is worse: residue looks broken, coercion looks fine.
+#
+# Same corpus + same scan_occ/scan_files machinery as v1.0 above — deliberately
+# reused rather than re-rolled, because four incomparable residue counts already
+# exist in this project for exactly the reason that nobody froze a corpus.
+#
+# ⚠️ THIS IS A RAW SUPERSET AND IT IS SUPPOSED TO BE. Most `?? 0` / `|| ""` hits
+# are legitimate formatting defaults on values that are not readings. The number
+# to act on is the per-CHAIN count (producer → route → renderer for one fact),
+# not this total. An over-count you DECLARE is honest; the failure mode this
+# census guards against is an under-count nobody states.
+CO_TS1='!!\s*(state|data|payload|resp|json)\b'                      # nullable → boolean
+CO_TS2='if\s*\(\s*!\w+(\.\w+|\?\.\w+)*\s*\)\s*return null'          # renderer omission
+CO_TS3='(\|\||\?\?)\s*(false|true|0|0\.0|50|"ok"|.ok.|"healthy")\b' # healthy literal default
+CO_TS4='status\s*:\s*("ok"|.ok.|"healthy")'                         # hardcoded healthy status
+CO_PY1='\.get\(\s*[^,)]+,\s*(False|True|"false"|.false.|"true"|.true.|"ok"|.ok.|0|0\.0|50\.0|50)\s*\)'
+CO_PY2='"status"\s*:\s*("ok"|.ok.|"healthy")'
+
+echo "TypeScript / TSX"
+count "C1 !!state / !!data"           "$CO_TS1" ts_corpus
+count "C2 if(!x) return null"         "$CO_TS2" ts_corpus
+count "C3 ||/?? healthy-literal"      "$CO_TS3" ts_corpus
+count "C4 status:'ok' hardcoded"      "$CO_TS4" ts_corpus
+echo "Python"
+count "C1 .get(k, <healthy>)"         "$CO_PY1" py_corpus
+count "C2 'status':'ok' hardcoded"    "$CO_PY2" py_corpus
+echo "gateway/*.js — reported separately, NEVER folded in"
+count "C3 ||/?? healthy-literal"      "$CO_TS3" gw_corpus
+count "C4 status:'ok' hardcoded"      "$CO_TS4" gw_corpus
 
 echo
 echo "🚨 The four historical numbers (~12/~10 · 62/57+51/24 · 80/72+60/28 · 85/85)"

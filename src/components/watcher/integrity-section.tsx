@@ -42,11 +42,17 @@ interface WatcherStateRow {
   value: string | null;
   updated_at: string;
 }
+interface UnreadableTable {
+  table: string;
+  reason: string;
+}
 interface Resp {
+  /** 🚨 "ok" | "degraded" | "unknown". Only "ok" means every table was READ. */
   status: string;
   findings: IntegrityFinding[];
   reconciliation: ReconciliationRow[];
   state: WatcherStateRow[];
+  unreadable_tables?: UnreadableTable[];
   updated_seconds: number | null;
   error?: string;
 }
@@ -67,9 +73,34 @@ export function IntegritySection() {
       try {
         const res = await fetch("/api/watcher/integrity", { cache: "no-store" });
         if (cancelled) return;
-        if (res.ok) setData(await res.json());
+        if (res.ok) {
+          setData(await res.json());
+        } else {
+          // 🚨 B2: a non-2xx used to leave `data` at null/last-good. Null falls
+          // into the unavailable branch by luck; a LAST-GOOD payload does not —
+          // it keeps painting a stale clean bill of health after the store has
+          // gone unreadable. An unreadable store is NAMED, never inherited.
+          setData({
+            status: "unknown",
+            findings: [],
+            reconciliation: [],
+            state: [],
+            updated_seconds: null,
+            error: `HTTP ${res.status}`,
+          });
+        }
       } catch {
-        // swallow — keep last-good.
+        // Same rule on a network failure: say UNKNOWN, never keep last-good.
+        if (!cancelled) {
+          setData({
+            status: "unknown",
+            findings: [],
+            reconciliation: [],
+            state: [],
+            updated_seconds: null,
+            error: "unreachable",
+          });
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -88,20 +119,34 @@ export function IntegritySection() {
     );
   }
 
-  if (!data || data.error) {
+  // 🚨 B2 — THIS BRANCH USED TO READ `!data || data.error` AND NOTHING ELSE.
+  // It never consulted `status`, so a producer-side "unknown" would have been
+  // INVISIBLE here: the fix would have landed at the helper and changed nothing
+  // on screen. That is failure mode 1 in a second shape, and it is why this had
+  // to land at both ends.
+  const unknown =
+    !data || data.status === "unknown" || (!!data.error && data.status !== "degraded");
+  // DEGRADED: the store opened, but a table that EXISTS could not be read — so
+  // the lists below are INCOMPLETE. We still render what did load (a dangerous
+  // reconciliation row must not be hidden by a partial failure) and say plainly
+  // that it is partial.
+  const degraded = !unknown && data!.status === "degraded";
+
+  if (unknown) {
     return (
       <div className="p-4 md:p-6 lg:px-8">
         <EmptyState
-          title="Integrity store unavailable"
-          body="Couldn't read the integrity records right now."
+          title="Integrity store unreadable"
+          body="The integrity records could not be read. This is NOT an all-clear — an undeclared trading change may or may not have been recorded. Check the watcher store directly before acting."
         />
       </div>
     );
   }
 
-  const findings = data.findings ?? [];
-  const reconciliation = data.reconciliation ?? [];
-  const state = data.state ?? [];
+  const findings = data!.findings ?? [];
+  const reconciliation = data!.reconciliation ?? [];
+  const state = data!.state ?? [];
+  const unreadableTables = data!.unreadable_tables ?? [];
   const allEmpty = findings.length === 0 && reconciliation.length === 0 && state.length === 0;
 
   return (
@@ -109,16 +154,44 @@ export function IntegritySection() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-micro text-fg-muted">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-accent-cyan-soft" />
-          {fmtUpdated(data.updated_seconds)}
+          {fmtUpdated(data!.updated_seconds)}
         </span>
         <span className="text-fg-faint">·</span>
         <span>level/ID integrity + declared-vs-detected reconciliation</span>
       </div>
 
+      {/* 🚨 PARTIAL READ. Rendered ABOVE the lists, because everything below it
+          is incomplete and an empty list here does not mean "nothing found".
+          The reason codes are the producer's STRUCTURE; the English is chosen
+          here, never interpolated from a sqlite message. */}
+      {degraded && (
+        <Card padding="md" className="card-warn">
+          <div className="font-sans text-label font-semibold text-accent-gold">
+            Partial read — this list is incomplete
+          </div>
+          <div className="mt-1 font-sans text-micro text-fg-muted">
+            {unreadableTables.length} of the integrity store&rsquo;s tables exist but could not
+            be read
+            {unreadableTables.length > 0 && (
+              <>
+                {" ("}
+                {unreadableTables.map((t) => t.table).join(", ")}
+                {")"}
+              </>
+            )}
+            . Anything recorded in them is missing from this page. This is NOT an all-clear.
+          </div>
+        </Card>
+      )}
+
       {allEmpty ? (
         <EmptyState
-          title="No integrity findings yet"
-          body="Nothing has needed checking yet."
+          title={degraded ? "Nothing readable to show" : "No integrity findings yet"}
+          body={
+            degraded
+              ? "Every table that exists failed to read, so this page can say nothing about integrity either way."
+              : "Nothing has needed checking yet."
+          }
         />
       ) : (
         <>

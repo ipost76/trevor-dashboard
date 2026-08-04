@@ -23,6 +23,35 @@ guard never sweeps it in.
 PRE-CUTOVER EMPTY IS THE DISPLAY: `no such table` / 0 rows -> empty shape + exit
 0, NEVER a traceback. The route wraps this in safeJsonParse + a fallback so a
 Python error can never become an HTTP 500.
+
+🚨 THREE STATES, NOT ONE (B2-HUB-READER-HONESTY, 2026-08-04) — `status` is the
+discriminator:
+    "ok"        every table was READ (or was legitimately ABSENT pre-cutover)
+    "degraded"  the store opened but at least one table could not be READ
+    "unknown"   the store could not be opened at all, or the reader crashed
+
+This file used to emit `"status": "ok"` on EVERY path, including the two that
+took no reading at all. `_EMPTY` hardcoded it, so a DB-connect failure and a
+reader crash both reported a clean bill of health for the module that watches
+for undeclared trading changes. `status` KEEPS ITS NAME AND STAYS POPULATED —
+only its unknown value moves from "ok" to "unknown"/"degraded". (B3-HUB measured
+that renaming a field out from under a live branch is itself a false-green
+generator; C3 held `enabled` populated at `184bb6a` for the same reason.)
+
+🚨 AND THE THIRD SHAPE IS THE ONE THAT REACHED THE SCREEN. The three table reads
+below used to be guarded by a bare `except sqlite3.OperationalError: pass`, which
+cannot tell "this table does not exist yet" (the EXPECTED pre-cutover state) from
+"this table exists and I could not read it" (schema drift, a locked DB, disk I/O).
+MEASURED 2026-08-04 by dropping one column from `integrity_findings`: a REAL
+unresolved `ok=0` finding vanished into `findings: []`, `status` said `ok`, and
+**no `error` key was set at all** — so the renderer's `data.error` branch never
+fired and the screen painted the healthy empty state. The other two shapes are
+caught today ONLY because they populate `error`; this one populated nothing.
+An absent table is still silently fine. Anything else is now NAMED.
+
+The rule this file is measured against, quoted verbatim from
+`query_trainer_pause.py` (WSL, repo root):
+    "The unknown default. Nothing below may set these to a not-paused reading."
 """
 from __future__ import annotations
 
@@ -39,14 +68,37 @@ DB = os.path.join(_HERE, "data", "watcher_integrity.db")
 # R10-B2's reconciliation severity ranking. Dangerous-first.
 _KIND_RANK = {"undeclared_trading_change": 0, "declared_not_detected": 1}
 
+# 🚨 The unknown default. Nothing below may set `status` to "ok" unless every
+# table was actually READ (or was legitimately absent). This constant is used on
+# the two paths that take NO reading at all — a DB-connect failure and a reader
+# crash — so "ok" here was a clean bill of health nobody measured.
 _EMPTY: dict[str, Any] = {
-    "status": "ok",
+    "status": "unknown",
     "findings": [],
     "reconciliation": [],
     "state": [],
+    "unreadable_tables": [],
     "updated_seconds": None,
     "updated_at": None,
 }
+
+
+def _table_read_outcome(exc: sqlite3.OperationalError) -> Optional[str]:
+    """Absent-vs-unreadable. Returns None when the table simply does not exist
+    (the EXPECTED pre-cutover state), else a short stable reason code.
+
+    🚨 STRUCTURE, NOT ENGLISH — the renderer decides what to show. The raw
+    sqlite message is deliberately NOT returned: it is a raw exception string,
+    and this reader must not mint display text out of one.
+    """
+    msg = str(exc).lower()
+    if msg.startswith("no such table"):
+        return None  # pre-cutover empty is the display, not a fault
+    if msg.startswith("no such column"):
+        return "schema_drift"
+    if "locked" in msg or "busy" in msg:
+        return "locked"
+    return "unreadable"
 
 
 def _parse_ts(raw: Optional[str]) -> Optional[datetime]:
@@ -121,6 +173,8 @@ def main() -> int:
         return 0
 
     ts_pool: list[Optional[str]] = []
+    # Tables that EXIST but could not be read. An absent table never lands here.
+    unreadable: list[dict[str, str]] = []
 
     # ── integrity_findings ──────────────────────────────────────────────────
     findings: list[dict[str, Any]] = []
@@ -150,8 +204,10 @@ def main() -> int:
                 "ts": r["ts"],
             })
             ts_pool.append(r["ts"])
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        reason = _table_read_outcome(exc)
+        if reason is not None:
+            unreadable.append({"table": "integrity_findings", "reason": reason})
 
     # ── reconciliation_log (dangerous-first, then newest) ───────────────────
     reconciliation: list[dict[str, Any]] = []
@@ -191,8 +247,10 @@ def main() -> int:
         for p in parsed:
             p.pop("_ts", None)
         reconciliation = parsed
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        reason = _table_read_outcome(exc)
+        if reason is not None:
+            unreadable.append({"table": "reconciliation_log", "reason": reason})
 
     # ── watcher_state ───────────────────────────────────────────────────────
     state: list[dict[str, Any]] = []
@@ -207,21 +265,35 @@ def main() -> int:
                 "updated_at": r["updated_at"],
             })
             ts_pool.append(r["updated_at"])
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        reason = _table_read_outcome(exc)
+        if reason is not None:
+            unreadable.append({"table": "watcher_state", "reason": reason})
 
     conn.close()
 
     updated_seconds, updated_at = _freshness(ts_pool)
 
-    print(json.dumps({
-        "status": "ok",
+    # 🚨 "ok" is EARNED, not assumed: it means every table was read, or was
+    # legitimately absent. If any table exists and could not be read, the arrays
+    # below are INCOMPLETE and saying "ok" about them is the false green this
+    # prompt exists to close.
+    out: dict[str, Any] = {
+        "status": "degraded" if unreadable else "ok",
         "findings": findings,
         "reconciliation": reconciliation,
         "state": state,
+        "unreadable_tables": unreadable,
         "updated_seconds": updated_seconds,
         "updated_at": updated_at,
-    }, default=str))
+    }
+    if unreadable:
+        # `error` STAYS POPULATED and carries a STABLE CODE, never a raw
+        # exception. Its consumer branches on it, and B3-HUB measured that
+        # leaving it empty here is what turns an incomplete read into an
+        # empty-but-healthy false green.
+        out["error"] = "integrity_store_degraded"
+    print(json.dumps(out, default=str))
     return 0
 
 

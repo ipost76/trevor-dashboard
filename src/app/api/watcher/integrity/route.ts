@@ -43,23 +43,37 @@ interface WatcherStateRow {
   value: string | null;
   updated_at: string;
 }
+interface UnreadableTable {
+  table: string;
+  reason: string;
+}
 interface WatcherIntegrityResponse {
+  /** 🚨 "ok" | "degraded" | "unknown". "ok" means every table was READ. */
   status: string;
   findings: IntegrityFinding[];
   reconciliation: ReconciliationRow[];
   state: WatcherStateRow[];
+  /** Tables that EXIST but could not be read — the arrays above are then incomplete. */
+  unreadable_tables?: UnreadableTable[];
   updated_seconds: number | null;
   updated_at: string | null;
   error?: string;
 }
 
+// 🚨 B2 — this FALLBACK used to carry `status: "ok"` with no `error`. It is
+// substituted when the helper's stdout does not parse, i.e. when we hold NO
+// reading at all, so it asserted a clean integrity store on the strength of
+// unparseable output. `status` keeps its name and stays populated; only the
+// unknown value moved off "ok".
 const FALLBACK: WatcherIntegrityResponse = {
-  status: "ok",
+  status: "unknown",
   findings: [],
   reconciliation: [],
   state: [],
+  unreadable_tables: [],
   updated_seconds: null,
   updated_at: null,
+  error: "reader_unparseable",
 };
 
 export async function GET() {
@@ -76,6 +90,9 @@ export async function GET() {
     // arrays — an empty-but-healthy FALSE GREEN on an integrity surface.
     // Only the VALUE changes: a stable code instead of the raw exception, so
     // the next consumer of this field inherits a code, not a stack trace.
+    // B2: `status` joins `error` here — it now says "unknown" (inherited from
+    // FALLBACK) instead of "ok", so a consumer reading EITHER field gets the
+    // same honest answer. Neither is renamed; neither is removed.
     console.error("[watcher/integrity] reader failed:", err);
     return NextResponse.json(
       { ...FALLBACK, error: "reader_failed", error_code: "reader_failed" },
