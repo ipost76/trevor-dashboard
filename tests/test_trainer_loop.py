@@ -319,7 +319,7 @@ def test_full_iteration_wires_b1_to_b5_in_order():
 
     traces = []
     result = tl.run_trainer_loop(
-        max_iterations=1, client=client, heartbeat=hb, backtest_fn=backtest_fn,
+        level=0, max_iterations=1, client=client, heartbeat=hb, backtest_fn=backtest_fn,
         validate_fn=validate_fn, sleep_fn=lambda s: None,
         on_iteration=lambda t: traces.append(t))
 
@@ -355,7 +355,7 @@ def test_daemon_inert_and_no_autostart_when_flag_off():
     os.environ.pop("TRAINER_LOOP_ENABLED", None)
     ex = _FakeExecutor({"shadow.route_proposal": lambda a: (_ for _ in ()).throw(
         AssertionError("must not submit when the loop flag is off"))})
-    r = tl.run_trainer_loop(max_iterations=5, client=_client_with(ex),
+    r = tl.run_trainer_loop(level=0, max_iterations=5, client=_client_with(ex),
                             heartbeat=tl.TrainerHeartbeat(emit_fn=lambda p, a: {"ok": True}),
                             sleep_fn=lambda s: None)
     assert r == {"enabled": False, "iterations": 0,
@@ -379,7 +379,7 @@ def test_bad_iteration_never_kills_daemon():
     ex = _FakeExecutor({"shadow.route_proposal": lambda a: {"ok": True,
         "result": {"queue": "config", "result": {}}},
         "shadow.grade": lambda a: {"ok": True, "result": {"gate_passed": 0}}})
-    r = tl.run_trainer_loop(max_iterations=3, client=_client_with(ex), heartbeat=hb,
+    r = tl.run_trainer_loop(level=0, max_iterations=3, client=_client_with(ex), heartbeat=hb,
                             backtest_fn=lambda arm, lvl: _survivor_scored(),
                             validate_fn=boom_validate, sleep_fn=lambda s: None)
     assert r["enabled"] and r["iterations"] == 3, r          # survived all 3 despite the raise

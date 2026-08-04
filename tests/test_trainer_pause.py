@@ -162,7 +162,7 @@ def test_loop_stops_when_paused_no_r8_no_body():
         bodies = []
         pp = _ScriptedPausePoll(script=[True], ttl=0.0)  # paused every tick
         r = tl.run_trainer_loop(
-            max_iterations=3, client=client, heartbeat=_noop_heartbeat(),
+            level=0, max_iterations=3, client=client, heartbeat=_noop_heartbeat(),
             sleep_fn=lambda s: None, on_iteration=lambda t: bodies.append(t),
             pause_poll=pp)
         assert r["enabled"] and r["iterations"] == 3, r
@@ -228,7 +228,7 @@ def test_loop_resumes_cleanly_after_pause_clears():
         os.environ["TRAINER_DB_PATH"] = os.path.join(
             tempfile.mkdtemp(prefix="trainer_pause_resume_"), "trainer.db")
         r = tl.run_trainer_loop(
-            max_iterations=5, client=client, heartbeat=_noop_heartbeat(),
+            level=0, max_iterations=5, client=client, heartbeat=_noop_heartbeat(),
             backtest_fn=lambda arm, lvl: _survivor_scored(),
             validate_fn=lambda **kw: {"enabled": True, "ok": True, "leakage_reject": False,
                                       "verdict": {"verdict": "NOT_READY", "failing": ["min_n"]}},
@@ -281,7 +281,7 @@ def test_flag_off_is_byte_identical():
         slept = []
         # NO pause_poll injected + flag OFF → the loop must never construct one.
         r = tl.run_trainer_loop(
-            max_iterations=2, client=_client_with(ex), heartbeat=_noop_heartbeat(),
+            level=0, max_iterations=2, client=_client_with(ex), heartbeat=_noop_heartbeat(),
             backtest_fn=lambda arm, lvl: _survivor_scored(),
             validate_fn=lambda **kw: {"enabled": True, "ok": True, "leakage_reject": False,
                                       "verdict": {"verdict": "NOT_READY", "failing": ["min_n"]}},

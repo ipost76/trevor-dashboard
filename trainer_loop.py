@@ -800,7 +800,7 @@ def _run_one_iteration(
 
 
 def run_trainer_loop(
-    *, schema: Optional[Dict[str, Any]] = None, level: int = 0,
+    *, schema: Optional[Dict[str, Any]] = None, level: int,
     max_iterations: Optional[int] = None,
     client: Optional[R8HandoffClient] = None,
     heartbeat: Optional[TrainerHeartbeat] = None,
@@ -823,7 +823,20 @@ def run_trainer_loop(
     A single bad iteration NEVER kills the daemon: the iteration is wrapped, an error
     heartbeat is emitted, and the loop continues. ``max_iterations`` bounds the run for
     tests/one-shots (None = forever). ``backtest_fn``/``validate_fn``/``client``/
-    ``heartbeat``/``sleep_fn`` are injectable seams (defaults are the real wirings)."""
+    ``heartbeat``/``sleep_fn`` are injectable seams (defaults are the real wirings).
+
+    🚨 ``level`` is a REQUIRED keyword — it deliberately has NO default. It used to
+    default to ``0``, which is the corruption ``main()`` already refuses at ``:1249``:
+    every row an iteration writes is tagged ``level_id=<level>`` (``bandit_posteriors``,
+    ``rejection_log``) and ``mint_shadow_id`` bakes it into the shadow-id NAMESPACE, so an
+    omitted level silently tagged a whole corpus at level 0. ``level_id`` is in the PRIMARY
+    KEY and there are no ``DELETE`` statements, so under the append-only discipline that is
+    UNRECOVERABLE. Omitting it now raises ``TypeError`` at the call site — loud and
+    immediate, per §D.0 (*surfaces its own failure, never swallows it*). 🚨 Do NOT give it
+    a default again, and do NOT resolve one here: ``main()`` owns level resolution via
+    ``_resolve_live_level`` and REFUSES below L1; a resolver here would let an omitted
+    level SOMETIMES succeed, which is the same silent-wrong-answer defect in disguise.
+    Matches ``_run_one_iteration``, which already takes ``level: int`` with no default."""
     if not loop_enabled():
         return {"enabled": False, "reason": f"{LOOP_FLAG} off (inert; not auto-started)",
                 "iterations": 0}
