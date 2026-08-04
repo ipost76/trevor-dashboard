@@ -34,8 +34,10 @@ IOC). It does NOT close any open position, cancel any HL order, or
 restart any service. Shadow eval (B4) runs regardless of this setting.
 """
 import json
+import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 
 DB_PATH = "/home/trevor/trevor/trevor.db"
 
@@ -47,6 +49,45 @@ sys.path.insert(0, "/home/trevor/trevor")
 def _emit(payload: dict, code: int = 0) -> None:
     print(json.dumps(payload))
     sys.exit(code)
+
+
+def _read_provenance() -> dict:
+    """Honest provenance of the store this decision rests on. NEVER asserts a
+    freshness it did not measure — every field is None when it could not be
+    established, and None is the unknown value, not a default.
+
+    ⚠️ These fields DESCRIBE the read. They do not judge it: an earlier draft
+    also returned `read_is_authoritative_store` from `os.access(W_OK)` and fed
+    it to `verified`, which is a PROXY for the thing (writability standing in
+    for "is this the store the bot reads?"). Driving it exposed the proxy at
+    once — a writable scratch copy reported `verified: true` for the exact
+    stale-match case this fix exists to close. Recorded, not quietly deleted."""
+    try:
+        target = os.path.realpath(DB_PATH)
+        st = os.stat(target)
+        return {
+            "read_path": target,
+            "read_age_seconds": max(0, int(datetime.now(timezone.utc).timestamp() - st.st_mtime)),
+        }
+    except Exception:
+        return {"read_path": None, "read_age_seconds": None}
+
+
+def _confirm_written(conn: sqlite3.Connection, key: str, expected: str):
+    """True / False / **None** — did the value we just committed read back?
+
+    The ONLY thing entitled to set `verified: True`, and it earns it by
+    re-reading after the commit. None means the re-read failed: unknown, not
+    failure."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM auto_config WHERE key=?", (key,)
+        ).fetchone()
+        if row is None or row["value"] is None:
+            return False
+        return str(row["value"]).strip().lower() == expected
+    except Exception:
+        return None
 
 
 def _conn_rw() -> sqlite3.Connection:
@@ -83,6 +124,10 @@ def main() -> None:
     requested_str = "true" if requested else "false"
     author = (sys.argv[2] or "").strip() or "unknown"
 
+    # B1: measured once, up front, so every exit path below can say where its
+    # reading came from instead of implying it came from the live store.
+    prov = _read_provenance()
+
     try:
         with _conn_rw() as conn:
             row = conn.execute(
@@ -95,6 +140,12 @@ def main() -> None:
                         "ok": False,
                         "gate_locked": True,
                         "error": "HUB_LIVE_PARTIALS_TOGGLE_ENABLED is false",
+                        # B1: the gate refused before LIVE_PARTIALS_ENABLED was ever
+                        # read, so its state is genuinely unknown here.
+                        "prev_state": "unknown",
+                        "state_source": "none",
+                        "verified": None,
+                        **prov,
                     },
                     code=3,
                 )
@@ -102,8 +153,14 @@ def main() -> None:
             cur = conn.execute(
                 "SELECT value FROM auto_config WHERE key='LIVE_PARTIALS_ENABLED'"
             ).fetchone()
+            # B1: `prev_known` records whether a row was ACTUALLY read. It is
+            # additive and feeds only the report — `prev_str`, `prev` and the
+            # `prev == requested` comparison below are byte-identical to HEAD,
+            # so the money path is untouched.
+            prev_known = cur is not None and cur["value"] is not None
             prev_str = (cur["value"] or "false").strip().lower() if cur else "false"
             prev = prev_str == "true"
+            prev_state = prev_str if prev_known else "unknown"
 
             if prev == requested:
                 _emit(
@@ -112,6 +169,15 @@ def main() -> None:
                         "no_change": True,
                         "prev_value": prev_str,
                         "new_value": requested_str,
+                        # 🚨 B1: agreeing with a copy is not verifying the bot.
+                        # `verified` is FALSE here unconditionally — this path
+                        # performed NO write and confirmed NOTHING; it inferred
+                        # the state from one read of whatever store DB_PATH
+                        # resolved to.
+                        "prev_state": prev_state,
+                        "state_source": "read",
+                        "verified": False,
+                        **prov,
                     },
                     code=0,
                 )
@@ -135,6 +201,9 @@ def main() -> None:
             )
             audit_id = audit_cur.lastrowid
             conn.commit()
+            # B1: the one place entitled to claim verification. Purely
+            # additive — a read after the commit cannot change what was written.
+            write_verified = _confirm_written(conn, "LIVE_PARTIALS_ENABLED", requested_str)
 
         # B1b: change_log cross-index row. Fail-open.
         try:
@@ -149,6 +218,11 @@ def main() -> None:
                 row_id=audit_id,
                 session_id=f"hub:{author}",
                 notes=action,
+                # 🚨 B1 (N-12): load-bearing. audit_logger.DB_PATH is hardcoded,
+                # so without this the audit row lands in the live trevor.db no
+                # matter which database the flip above went to — a silently
+                # WRONG audit trail. Accepted since 2026-08-01; never adopted.
+                db_path=DB_PATH,
             )
         except Exception:
             pass
@@ -162,6 +236,10 @@ def main() -> None:
                 "new_value": requested_str,
                 "audit_id": audit_id,
                 "note": "Bot picks up via cfg_bool('LIVE_PARTIALS_ENABLED') at next monitor cycle",
+                "prev_state": prev_state,
+                "state_source": "write",
+                "verified": write_verified,
+                **prov,
             },
             code=0,
         )

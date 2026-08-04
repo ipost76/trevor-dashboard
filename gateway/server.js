@@ -252,15 +252,37 @@ async function handleWrite(req, res) {
     return sendJson(res, 400, { ok: false, error: "validation", detail: verr, op });
   }
 
-  // Re-stamp the envelope with a server-trusted idempotency key if absent.
+  // Stamp the envelope with a server-trusted idempotency key.
+  //
+  // 🚨 B1-MONEY-PATH-HONESTY (2026-08-04) — THE KEY IS MINTED HERE, ALWAYS.
+  // This line used to honour a CLIENT-SUPPLIED `idempotency_key` and forward
+  // it verbatim. The VM's gw_exec.process() looks that key up at step 1 —
+  // BEFORE the flag gate at step 2 — so a caller who presented a key already
+  // stored for a DIFFERENT op got HTTP 200 {ok:true} carrying that other op's
+  // stored result, for an op whose gate was LOCKED. EXERCISED 2026-08-04
+  // against a byte-identical copy of gw_exec: a flag-locked `trainer.pause`
+  // presenting a key stored by `killswitch.set` returned
+  //   200 {"ok":true,"op":"trainer.pause","idempotent_replay":true,
+  //        "result":{...killswitch.set's result...}}
+  // while the same request with an unseen key correctly returned 423.
+  //
+  // Two structural changes, both here because the VM half is out of scope:
+  //   1. `body.idempotency_key` is no longer read at all — a caller cannot
+  //      choose a key, so it cannot choose which stored result to replay.
+  //      Nothing legitimate regresses: gateway-client.ts already minted a
+  //      fresh randomUUID() per call and never forwarded a client key, so no
+  //      working caller relied on the passthrough.
+  //   2. The op is BAKED INTO the key. gw_exec stores an `op` column and
+  //      never compares it on lookup, so a cross-op collision is invisible to
+  //      it; prefixing makes a key minted for one op unable to name another's
+  //      row even if passthrough is ever reintroduced.
   const envelope = {
     op,
     args,
     actor: typeof body.actor === "string" && body.actor ? body.actor : "hub:ui",
     source_type: typeof body.source_type === "string" && body.source_type ? body.source_type : "UI",
     reason: typeof body.reason === "string" ? body.reason : "",
-    idempotency_key:
-      typeof body.idempotency_key === "string" && body.idempotency_key ? body.idempotency_key : crypto.randomUUID(),
+    idempotency_key: `${op}:${crypto.randomUUID()}`,
   };
 
   if (!vmConfigured()) {

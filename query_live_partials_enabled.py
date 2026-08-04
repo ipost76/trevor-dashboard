@@ -32,16 +32,28 @@ def _conn_ro() -> sqlite3.Connection:
     return conn
 
 
-def _bool_from_config(conn: sqlite3.Connection, key: str, default: bool = False) -> bool:
+def _tri_from_config(conn: sqlite3.Connection, key: str):
+    """True / False / **None**, and None is the unknown value — never False.
+
+    🚨 B1-MONEY-PATH-HONESTY (2026-08-04): replaces `_bool_from_config(conn,
+    key, default)`, which resolved an absent row to a caller-supplied default
+    and returned it as if it were a reading. Only a row we ACTUALLY READ may
+    move this off None. LIVE_PARTIALS_ENABLED is money-path, which is exactly
+    why its reader must be able to say it does not know."""
     row = conn.execute(
         "SELECT value FROM auto_config WHERE key=?", (key,),
     ).fetchone()
-    if not row:
-        return default
-    return (row["value"] or "").strip().lower() == "true"
+    if not row or row["value"] is None:
+        return None
+    return str(row["value"]).strip().lower() == "true"
 
 
-def _audit_rows(conn: sqlite3.Connection) -> list[dict]:
+def _state_of(v) -> str:
+    """The discriminator beside every tri-state field."""
+    return "unknown" if v is None else ("on" if v else "off")
+
+
+def _audit_rows(conn: sqlite3.Connection):  # -> (rows, state) since B1
     """Read last 5 partial-toggle audit rows from autotrader_state_audit.
     Filtered on action LIKE 'live_partials_%' so only B4 events surface
     in this card. Table is created lazily by set_autotrader_enabled.py
@@ -53,24 +65,41 @@ def _audit_rows(conn: sqlite3.Connection) -> list[dict]:
             "WHERE action LIKE 'live_partials_%' "
             "ORDER BY id DESC LIMIT 5"
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows], "ok"
     except sqlite3.OperationalError:
-        return []
+        return [], "table_absent"
 
 
 def main() -> None:
+    # 🚨 B1: THE UNKNOWN DEFAULT. Nothing below may set these to a confident
+    # reading unless it has actually READ a row saying so. An unreadable
+    # database used to be reported as `enabled:false, killswitch_enabled:false`
+    # — a confident all-clear about a money-path control and the emergency
+    # stop, sourced from no reading at all. Fail-soft is preserved; only the
+    # value it fails soft TO has changed. Every field is kept present and
+    # populated, and `error` in particular stays exactly where it was.
     payload: dict = {
-        "enabled": False,           # auto_trader/config.py default
-        "toggle_enabled": False,    # gate defaults locked
-        "killswitch_enabled": False,
+        "enabled": None,
+        "toggle_enabled": None,
+        "killswitch_enabled": None,
+        "enabled_state": "unknown",
+        "toggle_state": "unknown",
+        "killswitch_state": "unknown",
+        "audit_state": "unknown",
+        "read_state": "unknown",
         "audit": [],
+        "error": None,
     }
     try:
         with _conn_ro() as conn:
-            payload["enabled"] = _bool_from_config(conn, "LIVE_PARTIALS_ENABLED")
-            payload["toggle_enabled"] = _bool_from_config(conn, "HUB_LIVE_PARTIALS_TOGGLE_ENABLED")
-            payload["killswitch_enabled"] = _bool_from_config(conn, "EMERGENCY_KILLSWITCH")
-            payload["audit"] = _audit_rows(conn)
+            payload["enabled"] = _tri_from_config(conn, "LIVE_PARTIALS_ENABLED")
+            payload["toggle_enabled"] = _tri_from_config(conn, "HUB_LIVE_PARTIALS_TOGGLE_ENABLED")
+            payload["killswitch_enabled"] = _tri_from_config(conn, "EMERGENCY_KILLSWITCH")
+            payload["audit"], payload["audit_state"] = _audit_rows(conn)
+            payload["enabled_state"] = _state_of(payload["enabled"])
+            payload["toggle_state"] = _state_of(payload["toggle_enabled"])
+            payload["killswitch_state"] = _state_of(payload["killswitch_enabled"])
+            payload["read_state"] = "ok"
     except Exception as e:
         payload["error"] = str(e)
     print(json.dumps(payload, default=str))

@@ -28,6 +28,12 @@ interface SetResponse {
   prev_enabled?: boolean;
   note?: string;
   error?: string;
+  // B1-MONEY-PATH-HONESTY: added by gatewayResponse(). `applied` is the third
+  // state — true = the op ran on this call, null = UNKNOWN (an idempotent
+  // replay served a stored result, or the 200 carried nothing to judge).
+  applied?: boolean | null;
+  idempotent_replay?: boolean;
+  replay_of_op?: string | null;
 }
 
 const POLL_MS = 30_000;
@@ -57,7 +63,12 @@ export function KillswitchControlCard() {
   const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
-  const [result, setResult] = React.useState<{ tone: "ok" | "err"; message: string } | null>(null);
+  // B1: THREE tones, not two — "unknown" is expressible, and it is the tone a
+  // write takes when nothing establishes that it landed.
+  const [result, setResult] = React.useState<{
+    tone: "ok" | "err" | "unknown";
+    message: string;
+  } | null>(null);
 
   const fetchState = React.useCallback(async () => {
     try {
@@ -101,7 +112,25 @@ export function KillswitchControlCard() {
         }),
       });
       const payload = (await res.json()) as SetResponse;
-      if (res.ok && payload.ok) {
+      // 🚨 B1-MONEY-PATH-HONESTY: THREE states, not two. This was
+      // `if (res.ok && payload.ok)`, which turned every 200 into one of two
+      // confident sentences. An idempotent replay is a 200 with `ok:true`
+      // carrying a STORED result — nothing executed on this call — so that
+      // branch rendered "Killswitch ENGAGED. Bot pickup ≤5s." for a write
+      // that never ran. `applied === null` is checked FIRST and FAILS TOWARD
+      // UNKNOWN: for the emergency stop, "I don't know if that landed" is the
+      // only honest thing to say, and it is strictly safer than either a
+      // green all-clear or a red "failed" the caller would simply retry past.
+      // Same shape as the read side of this card at `const unknown = …`.
+      if (res.ok && payload.applied === null) {
+        setResult({
+          tone: "unknown",
+          message:
+            "UNKNOWN — the gateway returned a previously stored result and did not run " +
+            "this request. The killswitch may or may not be " +
+            `${target === "on" ? "ENGAGED" : "released"}. Check the state below before retrying.`,
+        });
+      } else if (res.ok && payload.ok) {
         if (payload.no_change) {
           setResult({
             tone: "ok",
@@ -258,9 +287,14 @@ export function KillswitchControlCard() {
         <div
           className={
             "mt-3 flex items-start gap-2 rounded-md border p-3 font-sans text-caption " +
+            // B1: gold for UNKNOWN — the same neutral-warning colour this card
+            // already uses for an unreadable killswitch state. Never mint, and
+            // never red: an unknown write is not a failed write.
             (result.tone === "ok"
               ? "border-accent-mint/40 bg-accent-mint/10 text-accent-mint-strong"
-              : "border-accent-red/40 bg-accent-red/10 text-accent-red")
+              : result.tone === "unknown"
+                ? "border-accent-gold/40 bg-accent-gold/10 text-accent-gold"
+                : "border-accent-red/40 bg-accent-red/10 text-accent-red")
           }
         >
           <span className="break-words">{result.message}</span>

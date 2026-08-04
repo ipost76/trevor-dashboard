@@ -27,10 +27,38 @@ Exit codes:
 NOTE: Rule 1 + Rule 31 still binding — flipping OFF does NOT close any open
 position, cancel any HL order, or restart any service. Only blocks NEW AT
 entries. Manual signal cards in #scalp-signals continue to fire.
+
+🚨 B1-MONEY-PATH-HONESTY (2026-08-04) — THREE STATES, NOT TWO.
+`prev_state` is the discriminator and `unknown` is expressible:
+
+    "true"     an AUTO_TRADER_ENABLED row was READ and says on
+    "false"    an AUTO_TRADER_ENABLED row was READ and says off
+    "unknown"  the row is absent, or its value is NULL — NOTHING WAS READ
+
+`verified` mirrors it as True / False / **None**, and None is the unknown
+value — never False.
+
+🚨 WHY. Step 2's `prev == requested` short-circuit returned exit 0 with
+`{"ok": true, "no_change": true}` whenever the read happened to agree with the
+request — and that reading comes from whatever store DB_PATH resolves to. On
+the WSL Hub that is a litestream replica whose lag is a measured sawtooth
+(1m18s → 20m38s), so agreement with the copy is not agreement with the bot.
+DRIVEN 2026-08-04: a copy saying `false` while the live value was `true`
+produced output BYTE-IDENTICAL to a correct no-op. Worse, an ABSENT row was
+emitted as `prev_value: "false"` — total absence rendered as positive evidence
+that the AutoTrader is off, which is the same defect `query_trainer_pause.py`
+was built to end.
+
+🚨 `prev_value` / `prev` / the `prev == requested` comparison are DELIBERATELY
+UNCHANGED — byte-identical, including the documented `else "false"` mirror of
+auto_trader/config.py's default. The money path does not move; only the
+honesty of the REPORT does. The new keys are additive and nothing was renamed.
 """
 import json
+import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 
 DB_PATH = "/home/trevor/trevor/trevor.db"
 
@@ -42,6 +70,48 @@ sys.path.insert(0, "/home/trevor/trevor")
 def _emit(payload: dict, code: int = 0) -> None:
     print(json.dumps(payload))
     sys.exit(code)
+
+
+def _read_provenance() -> dict:
+    """Honest provenance of the store this decision rests on. NEVER asserts a
+    freshness it did not measure — every field is None when it could not be
+    established, and None is the unknown value, not a default.
+
+    ⚠️ These fields DESCRIBE the read. They do not judge it: an earlier draft
+    of this helper also returned `read_is_authoritative_store` from
+    `os.access(W_OK)` and fed it to `verified`, which is a PROXY for the thing
+    (writability standing in for "is this the store the bot reads?"). Driving
+    it exposed the proxy immediately — a writable scratch copy reported
+    `verified: true` for the exact stale-match case this fix exists to close.
+    Recorded rather than quietly deleted: substituting a proxy for the thing is
+    one of the eight causes this prompt catalogued, and it was reintroduced
+    here while fixing the others."""
+    try:
+        target = os.path.realpath(DB_PATH)
+        st = os.stat(target)
+        return {
+            "read_path": target,
+            "read_age_seconds": max(0, int(datetime.now(timezone.utc).timestamp() - st.st_mtime)),
+        }
+    except Exception:
+        return {"read_path": None, "read_age_seconds": None}
+
+
+def _confirm_written(conn: sqlite3.Connection, key: str, expected: str):
+    """True / False / **None** — did the value we just committed read back?
+
+    This is the ONLY thing in this file entitled to set `verified: True`, and
+    it earns it by re-reading after the commit. None means the re-read itself
+    failed, which is unknown, not failure."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM auto_config WHERE key=?", (key,)
+        ).fetchone()
+        if row is None or row["value"] is None:
+            return False
+        return str(row["value"]).strip().lower() == expected
+    except Exception:
+        return None
 
 
 def _conn_rw() -> sqlite3.Connection:
@@ -77,6 +147,10 @@ def main() -> None:
     requested_str = "true" if requested else "false"
     author = (sys.argv[2] or "").strip() or "unknown"
 
+    # B1: measured once, up front, so every exit path below can say where its
+    # reading came from instead of implying it came from the live store.
+    prov = _read_provenance()
+
     try:
         with _conn_rw() as conn:
             # 1. Flag gate
@@ -90,6 +164,12 @@ def main() -> None:
                         "ok": False,
                         "gate_locked": True,
                         "error": "HUB_AUTOTRADER_TOGGLE_ENABLED is false",
+                        # B1: the gate refused before AUTO_TRADER_ENABLED was
+                        # ever read, so its state is genuinely unknown here.
+                        "prev_state": "unknown",
+                        "state_source": "none",
+                        "verified": None,
+                        **prov,
                     },
                     code=3,
                 )
@@ -99,8 +179,14 @@ def main() -> None:
             cur = conn.execute(
                 "SELECT value FROM auto_config WHERE key='AUTO_TRADER_ENABLED'"
             ).fetchone()
+            # B1: `prev_known` records whether a row was ACTUALLY read. It is
+            # additive and feeds only the report — `prev_str`, `prev` and the
+            # `prev == requested` comparison below are byte-identical to HEAD,
+            # so the money path is untouched.
+            prev_known = cur is not None and cur["value"] is not None
             prev_str = (cur["value"] or "false").strip().lower() if cur else "false"
             prev = prev_str == "true"
+            prev_state = prev_str if prev_known else "unknown"
 
             if prev == requested:
                 _emit(
@@ -109,6 +195,16 @@ def main() -> None:
                         "no_change": True,
                         "prev_value": prev_str,
                         "new_value": requested_str,
+                        # 🚨 B1: agreeing with a copy is not verifying the bot.
+                        # `verified` is FALSE here unconditionally — this path
+                        # performed NO write and confirmed NOTHING; it inferred
+                        # the state from one read of whatever store DB_PATH
+                        # resolved to. `prev_state` says whether a row was read
+                        # at all; `read_age_seconds` says how old that read is.
+                        "prev_state": prev_state,
+                        "state_source": "read",
+                        "verified": False,
+                        **prov,
                     },
                     code=0,
                 )
@@ -133,9 +229,19 @@ def main() -> None:
             )
             audit_id = audit_cur.lastrowid
             conn.commit()
+            # B1: the one place entitled to claim verification — re-read the
+            # committed value. Purely additive: a read after the commit cannot
+            # change what was written.
+            write_verified = _confirm_written(conn, "AUTO_TRADER_ENABLED", requested_str)
 
         # B1b: change_log cross-index row. Fail-open. Outside the txn so
         # the audit-side write can't roll back the config flip.
+        # 🚨 B1 (N-12): db_path=DB_PATH is LOAD-BEARING, not tidy-up.
+        # audit_logger.DB_PATH is a HARDCODED absolute path, so without this
+        # keyword the audit row lands in the live trevor.db no matter which
+        # database the flip above actually went to — a silently WRONG audit
+        # trail, which is worse than a missing one. `audit_log` has accepted
+        # `db_path` since 2026-08-01; this call site simply never adopted it.
         try:
             from audit_logger import audit_log
             audit_log(
@@ -148,6 +254,7 @@ def main() -> None:
                 row_id=audit_id,
                 session_id=f"hub:{author}",
                 notes=action,
+                db_path=DB_PATH,
             )
         except Exception:
             pass
@@ -161,6 +268,10 @@ def main() -> None:
                 "new_value": requested_str,
                 "audit_id": audit_id,
                 "note": "Bot picks up via cfg_bool('AUTO_TRADER_ENABLED') at next signal",
+                "prev_state": prev_state,
+                "state_source": "write",
+                "verified": write_verified,
+                **prov,
             },
             code=0,
         )

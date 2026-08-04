@@ -30,10 +30,22 @@ export async function GET() {
   } catch (e) {
     return NextResponse.json(
       {
-        promoted: false,
-        confirm_cycles: 0,
-        toggle_enabled: false,
-        shadow_enabled: false,
+        // 🚨 B1-MONEY-PATH-HONESTY: this asserted `promoted:false,
+        // confirm_cycles:0, toggle_enabled:false, shadow_enabled:false` — a
+        // fully-specified gate readout, including a NUMBER, minted by the
+        // route from no reading at all, and it would have flattened the
+        // helper's new nulls straight back. `confirm_cycles: 0` is the
+        // fabricated-gauge defect CLAUDE.md already records for the breakers.
+        // Every field kept present and populated; only the value changed.
+        promoted: null,
+        confirm_cycles: null,
+        toggle_enabled: null,
+        shadow_enabled: null,
+        promoted_state: "unknown",
+        toggle_state: "unknown",
+        shadow_state: "unknown",
+        audit_state: "unknown",
+        read_state: "unknown",
         audit: [],
         error: String(e),
       },

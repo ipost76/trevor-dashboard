@@ -118,11 +118,44 @@ export async function callGateway(
 export function gatewayResponse(result: GatewayResult): NextResponse {
   const { status, body } = result;
   if (status === 200) {
-    const payload =
-      body && typeof body === "object" && "result" in body
-        ? (body as { result?: unknown }).result
-        : body;
-    return NextResponse.json((payload ?? { ok: true }) as Record<string, unknown>, { status: 200 });
+    // 🚨 B1-MONEY-PATH-HONESTY (2026-08-04) — THIS IS WHERE A PRODUCER-ONLY
+    // FIX FOR N-11 WOULD HAVE DIED.
+    //
+    // The VM gateway DOES tell the truth about a replay: gw_exec returns
+    // `{ok:true, op, idempotent_replay:true, result:{...}}` when it served a
+    // stored result instead of executing anything. This branch unwrapped
+    // `body.result` and threw the rest of the envelope away — measured
+    // 2026-08-04: `idempotent_replay` had ZERO occurrences anywhere in this
+    // repo. The one discriminator that already existed never reached a
+    // renderer, so every one of the 18 gateway-backed routes reported a
+    // replay as a fresh, applied write.
+    //
+    // A replay is NOT a failure and must not be reported as one — it is the
+    // third state: nothing was executed on this call, so whether the intent
+    // is now in effect is UNKNOWN from here. `applied` carries that:
+    //   true  — the op ran on this call
+    //   null  — UNKNOWN (a replay, or a 200 with no payload to judge)
+    // `ok` and every field of the inner result are kept present and
+    // populated; nothing is renamed or removed.
+    const envelope = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    const inner = "result" in envelope ? envelope.result : body;
+    const replayed = envelope.idempotent_replay === true;
+
+    const payload: Record<string, unknown> =
+      inner && typeof inner === "object" && !Array.isArray(inner)
+        ? { ...(inner as Record<string, unknown>) }
+        : inner == null
+          ? // was `?? { ok: true }` — a 200 carrying no payload was minted
+            // into a confident success by this line alone. It is unknown.
+            { ok: null }
+          : { result: inner };
+
+    payload.idempotent_replay = replayed;
+    payload.applied = replayed || inner == null ? null : true;
+    if (replayed) {
+      payload.replay_of_op = typeof envelope.op === "string" ? envelope.op : null;
+    }
+    return NextResponse.json(payload, { status: 200 });
   }
   // Non-200 ⇒ a failure, by definition. `error` becomes a plain-English sentence
   // that says what happened and what to do; a code we do not recognise — or a

@@ -25,11 +25,22 @@ export async function GET() {
     const stdout = await runPython("query_autotrader_enabled.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
+    // 🚨 B1-MONEY-PATH-HONESTY: a producer-only fix dies here. This fallback
+    // used to assert `enabled: true, killswitch_enabled: false` — a confident
+    // "AutoTrader ON, emergency stop DISENGAGED" minted by the route itself,
+    // from no reading at all, whenever the helper threw. It would have
+    // flattened the helper's new `null` straight back to a green all-clear.
+    // Every field is kept present and populated; only the value changed.
     return NextResponse.json(
       {
-        enabled: true,
-        toggle_enabled: false,
-        killswitch_enabled: false,
+        enabled: null,
+        toggle_enabled: null,
+        killswitch_enabled: null,
+        enabled_state: "unknown",
+        toggle_state: "unknown",
+        killswitch_state: "unknown",
+        audit_state: "unknown",
+        read_state: "unknown",
         audit: [],
         error: String(e),
       },

@@ -27,11 +27,21 @@ export async function GET() {
     const stdout = await runPython("query_live_partials_enabled.py", []);
     return NextResponse.json(JSON.parse(stdout));
   } catch (e) {
+    // 🚨 B1-MONEY-PATH-HONESTY: this fallback asserted `enabled: false,
+    // killswitch_enabled: false` — a confident all-clear about a money-path
+    // control and the emergency stop, minted by the route from no reading at
+    // all, and it would have flattened the helper's new `null` right back to
+    // it. Every field kept present and populated; only the value changed.
     return NextResponse.json(
       {
-        enabled: false,
-        toggle_enabled: false,
-        killswitch_enabled: false,
+        enabled: null,
+        toggle_enabled: null,
+        killswitch_enabled: null,
+        enabled_state: "unknown",
+        toggle_state: "unknown",
+        killswitch_state: "unknown",
+        audit_state: "unknown",
+        read_state: "unknown",
         audit: [],
         error: String(e),
       },
