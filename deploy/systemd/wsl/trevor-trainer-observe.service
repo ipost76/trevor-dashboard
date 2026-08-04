@@ -1,0 +1,70 @@
+# /etc/systemd/system/trevor-trainer-observe.service — T2-TRAINER-COLD-START
+#
+# 🚨 THE PAPER-WINDOW TRAINER (§D.9 step 3). This is a SECOND UNIT, deliberately — it is NOT
+#    a drop-in over trevor-trainer.service, and it must never become one.
+#
+# WHY A SEPARATE UNIT AND NOT AN ExecStart OVERRIDE:
+#    [T1] built observe mode as a SECOND DOOR with its own entrypoint (observe_main), its own
+#    flag (TRAINER_OBSERVE_ONLY_ENABLED) and its own policy — precisely so that arming
+#    observation cannot arm proposing. A drop-in overriding ExecStart= on trevor-trainer.service
+#    would collapse those two doors back into one AT THE SYSTEMD LAYER: one unit name, one
+#    enable, one thing to get wrong. That is the same mistake as reusing TRAINER_LOOP_ENABLED
+#    for observing, moved one level down the stack. Two modes, two flags, two units.
+#
+# 🚨 trevor-trainer.service IS LEFT INSTALLED, DISABLED AND BYTE-UNTOUCHED. Its ExecStart has
+#    no --observe, so it runs main() — which resolves the live level and REFUSES below L1 with
+#    rc=1. That refusal is [RF1-B2] WORKING, and it stays armed as the propose-path door for
+#    R13. Enabling THAT unit today would rc=1 -> Restart=on-failure 5x/300s -> `failed` ->
+#    OnFailure -> a Discord page, every time. Do not enable it before L1 mints.
+#
+# WHAT THIS UNIT IS ALLOWED TO DO (measured T2, not asserted):
+#    Two cross-box writes, both to the VM's loop_heartbeat via the ssh pipe — pre_register()
+#    once, emit() per iteration. Locally: one bandit_posteriors row per sampled arm, tagged
+#    level_id=0, Beta(1,1), n_obs=0. It proposes nothing, promotes nothing, teaches nothing,
+#    grades nothing, validates nothing, sweeps nothing and mints nothing: the propose/promote
+#    steps are branch-skipped AND the loop is handed an ObserveOnlyClient that RAISES on every
+#    handoff, so a missed branch fails LOUDLY instead of crossing.
+#
+# 🚨 SHADOW_LOOP_EXECUTOR_ENABLED IS DELIBERATELY NOT SET. Observe mode holds no endpoint, no
+#    token and no socket, so that flag arms nothing here — it only ever arms the propose path's
+#    cross-box hop to :3941. ⚠️ :3941 IS LISTENING RIGHT NOW; the only thing preventing a
+#    cross-box write is the ABSENT SHADOW_EXECUTOR_TOKEN, not a closed port. Leave both alone.
+#
+# ⚠️ NOTHING IS WATCHING THIS UNIT'S HEARTBEAT. trevor-monitor-center is masked+inactive on the
+#    VM, so R9's 08_service_health freshness monitor — the thing that turns a stale
+#    loop_heartbeat row into an alert — is DEAD. The row proves liveness only to someone who
+#    LOOKS. OnFailure= below covers a crash; it cannot cover a wedge, and it cannot fire for a
+#    unit that never started (gap F2 — run scripts/watcher_arm_check.py by hand after enabling).
+[Unit]
+Description=TREVOR Trainer — OBSERVE-ONLY paper window (§D.9 step 3; no propose, no promote, no mint)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+# WSL-local death alert on a SUSTAINED crash (Restart budget exhausted -> `failed`).
+# A single crash-and-recover never reaches `failed` -> fires nothing.
+OnFailure=trevor-alert@%n.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+# 🚨 EnvironmentFile is how TRAINER_OBSERVE_ONLY_ENABLED + TRAINER_BANDIT_ENABLED reach the
+#    process. Omitting it = a daemon that starts, reads the flag as absent, prints
+#    {"enabled": false} and exits 0 — inert, and indistinguishable from healthy.
+EnvironmentFile=/home/ghost/projects/trevor-dashboard/.env.local
+# DEFENSIVE ONLY for ssh (it resolves ~/.ssh from the process UID via getpwuid, NOT $HOME —
+# User=ghost is what actually makes the pipe authenticate). Kept because other tools do read
+# $HOME. Do not "correct" this into a claim that ssh needs it.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 🚨 --observe selects observe_main(). WITHOUT IT this runs main(), the PROPOSE path, which
+#    refuses at level 0. The flag in the argv is the whole difference between the two units.
+ExecStart=/usr/bin/python3 trainer_loop.py --observe
+Restart=on-failure
+RestartSec=3
+# NO WatchdogSec — a bare one would SIGABRT a healthy loop that is legitimately sleeping
+# between iterations. Same reasoning as trevor-watcher.service.
+
+[Install]
+WantedBy=multi-user.target
