@@ -98,6 +98,12 @@ MEMORY_QUERY_FLAG = "MEMORY_QUERY_ENABLED"          # RF2-B2/W9: have_we_tested 
 # the level only at main() start). One flag makes the detect-but-don't-sweep state UNREACHABLE.
 LEVEL_DETECTOR_FLAG = "TRAINER_LEVEL_DETECTOR_ENABLED"  # RF2-B3/W5: detector + SL6 sweep (default OFF)
 TEACH_FLAG = "TRAINER_TEACH_ENABLED"               # RF2-B3/W3: WSL-side teach arm (default OFF)
+# T1: the OBSERVE-ONLY (paper-window) master gate — DELIBERATELY ITS OWN FLAG, never LOOP_FLAG.
+# §D.9 step 3 opens a window where the trainer OBSERVES + SIMULATES but does NOT propose or
+# promote. If observing reused LOOP_FLAG, one flip would arm BOTH observing and the propose
+# path — defeating the DO-NOT-ENABLE-PENDING-L1 control rather than satisfying it. Two flags
+# keep the propose gate OFF while the observe window runs. Default OFF; off → inert.
+OBSERVE_FLAG = "TRAINER_OBSERVE_ONLY_ENABLED"      # T1: the paper-window observe gate (default OFF)
 # RP-C2: names the optional compass pre-score simulator as "module:attr" (default ABSENT).
 # 🚨 THIS IS THE SOCKET, NOT THE SIMULATOR — see `_resolve_backtest_fn`.
 BACKTEST_PROVIDER_ENV = "TRAINER_BACKTEST_PROVIDER"
@@ -144,6 +150,13 @@ def level_detector_enabled() -> bool:
     byte-identical to R9-B6 (the U5 gap remains, dormant). Read ONCE at loop entry (a deploy-
     time arm). ONE flag = detector + sweep together (detect-but-don't-sweep is unreachable)."""
     return _truthy(LEVEL_DETECTOR_FLAG)
+
+
+def observe_only_enabled() -> bool:
+    """T1 paper-window observe gate (default OFF). Off → ``observe_main`` is inert and the
+    observe path never runs. 🚨 SEPARATE from ``LOOP_FLAG`` on purpose: this arms OBSERVING
+    without arming PROPOSING, so the below-L1 propose gate stays enforced during paper."""
+    return _truthy(OBSERVE_FLAG)
 
 
 def teach_enabled() -> bool:
@@ -484,6 +497,62 @@ class R8HandoffClient:
         return out
 
 
+class ObserveOnlyViolation(RuntimeError):
+    """T1: the observe path attempted a handoff that observing must never perform."""
+
+
+class ObserveOnlyClient:
+    """A structural stand-in for ``R8HandoffClient`` used ONLY in observe-only mode.
+
+    🚨 THIS IS THE SECOND LAYER, AND IT EXISTS BECAUSE THE FIRST ONE CAN BE EDITED.
+    ``_run_one_iteration`` skips the propose/promote steps under ``observe_only``; that is
+    the primary control, and it is a set of branches in a SHARED function body. A future
+    edit that adds a sink, or reorders a branch, would silently start crossing to the VM —
+    the exact silent-crossing class this campaign exists to close. So observe mode does not
+    merely decline to call the handoff client: it is handed a client that CANNOT perform
+    one. Every handoff method RAISES ``ObserveOnlyViolation`` and prints a loud stderr line
+    at raise time, so a missed branch fails LOUDLY instead of writing to the VM.
+
+    ⚠️ The raise is caught by ``run_trainer_loop``'s per-iteration ``except Exception`` (one
+    bad iteration must never kill the daemon) and folded into an error heartbeat — hence the
+    stderr print HERE, at the raise, which no caller can swallow.
+
+    It deliberately mirrors the real client's method NAMES and nothing else: it holds no
+    endpoint, no token, no socket, and no ``trevor_db`` — there is no transport to misuse."""
+
+    def __init__(self) -> None:
+        self.violations: List[str] = []
+
+    def _refuse(self, op: str) -> None:
+        self.violations.append(op)
+        print(
+            f"[trainer_loop] 🚨🚨 OBSERVE-ONLY VIOLATION — {op!r} was called on the observe "
+            f"path. Observing must NEVER propose, promote or route a write (§D.9 step 3: "
+            f"'NO leveling · NO promotions'). NOTHING crossed to the VM; the iteration is "
+            f"being failed deliberately.",
+            file=sys.stderr,
+        )
+        raise ObserveOnlyViolation(
+            f"{op} is forbidden in observe-only mode (§D.9 step 3)")
+
+    # The five handoff surfaces — every one a propose/promote/write op.
+    def submit_proposal(self, *a: Any, **k: Any) -> Dict[str, Any]:
+        self._refuse("submit_proposal")
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def read_verdict(self, *a: Any, **k: Any) -> Optional[bool]:
+        self._refuse("read_verdict")
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def surface_candidate(self, *a: Any, **k: Any) -> Dict[str, Any]:
+        self._refuse("surface_candidate")
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def sweep_stale_on_flip(self, *a: Any, **k: Any) -> Dict[str, Any]:
+        self._refuse("sweep_stale_on_flip")
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
 def sort_candidates_for_display(candidates: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Sort surfaced candidates by EVIDENCE for the Hub's one-glance display ONLY.
 
@@ -643,12 +712,23 @@ def _run_one_iteration(
     *, schema: Dict[str, Any], level: int, client: R8HandoffClient,
     rng: Any, backtest_fn: Optional[Callable[[Dict[str, Any], int], Dict[str, Any]]],
     validate_fn: Callable[..., Dict[str, Any]], db_path: Optional[str],
-    epoch: Optional[str],
+    epoch: Optional[str], observe_only: bool = False,
 ) -> Dict[str, Any]:
     """One full search step: sample → compass pre-score → self-pushback → submit →
     verdict → validate → narrate+log → update posteriors → surface. Returns a diagnostics
-    dict. Raising is the caller's concern (it emits an error heartbeat + continues)."""
+    dict. Raising is the caller's concern (it emits an error heartbeat + continues).
+
+    🚨 ``observe_only`` (T1, default False → byte-identical to R9-B6) is §D.9 step 3's paper
+    window: steps 4/5/6/9/10 — submit, grade, validate, surface, teach — are SKIPPED, because
+    every one of them either proposes, promotes, or routes a cross-box write. What remains is
+    exactly what §D.9 asks for: sample, SIMULATE on the compass, push back against its own
+    history, narrate, and fold what it learned into its own local stores. Each skip is
+    RECORDED IN THE TRACE with its reason rather than silently not happening — a mode that
+    quietly does less is indistinguishable from one that is broken."""
     trace: Dict[str, Any] = {"level": int(level)}
+    if observe_only:
+        trace["mode"] = "observe_only"
+        trace["skipped_in_observe"] = []
 
     # 1) sample arm (B2) — inert {enabled:False} when TRAINER_BANDIT_ENABLED is off.
     step = trainer_bandit.run_search_step(schema, level=int(level), rng=rng)
@@ -683,6 +763,7 @@ def _run_one_iteration(
             trainer_bandit.update_posterior(ahash, int(level),
                                             trainer_bandit.compass_reward(compass_verdict),
                                             axes_json=axes_json)
+            trace["reward_folded"] = True  # T1: the honest discriminator — see run_trainer_loop
             trace["outcome"] = "compass_rejected"
             return trace
     else:
@@ -711,28 +792,49 @@ def _run_one_iteration(
         trace["outcome"] = f"pushback_block: {pushback.get('reason')}"
         return trace
 
-    # 4) submit to the loop (Phase 1) — config→self-create shadow / capability→Hub row.
-    #    Flag-OFF-safe: a no-op when the gate is off / executor down (queued locally).
-    proposal = arm_to_proposal(arm)
     shadow_id = mint_shadow_id(ahash, int(level))
-    submission = client.submit_proposal(
-        proposal, family_of(arm), axes_json, pushback.get("reason"), shadow_id=shadow_id)
-    trace["submit"] = {"submitted": submission.get("submitted"),
-                       "queue": submission.get("queue"), "reason": submission.get("reason")}
 
-    # 5) read verdict (Phase 1) — gate_passed only, VM-only, never replica. (In production
-    #    the grade is "later"; the assembly attempts it — None = not gradeable yet / off.)
-    gate_passed = client.read_verdict(shadow_id, epoch)
-    trace["gate_passed"] = gate_passed
+    if observe_only:
+        # 🚨 T1 / §D.9 step 3 — the propose+grade+validate block is SKIPPED WHOLESALE.
+        # Every one of these three crosses to the VM and every one of them is a step in
+        # PROPOSING: submit routes a proposal (a write), grade reads a verdict on a shadow
+        # that was never submitted, and validate additionally SPENDS the alpha budget
+        # VM-side through trainer_budget_adapter.throttle_test. Observing spends nothing
+        # and asks for nothing. The shadow id is minted locally (a pure string) and kept in
+        # the trace so the observation is attributable, but it is handed to no one.
+        submission = None
+        gate_passed = None
+        validation: Dict[str, Any] = {}
+        trace["shadow_id_not_submitted"] = shadow_id
+        trace["skipped_in_observe"].extend([
+            "submit_proposal (routes a proposal — a cross-box WRITE)",
+            "read_verdict (grades a shadow that was never submitted)",
+            "validate_candidate (VM R3 gate + SPENDS the alpha budget)",
+        ])
+        trace["gate_passed"] = None
+        trace["validation"] = {"enabled": False, "reason": "observe_only"}
+    else:
+        # 4) submit to the loop (Phase 1) — config→self-create shadow / capability→Hub row.
+        #    Flag-OFF-safe: a no-op when the gate is off / executor down (queued locally).
+        proposal = arm_to_proposal(arm)
+        submission = client.submit_proposal(
+            proposal, family_of(arm), axes_json, pushback.get("reason"), shadow_id=shadow_id)
+        trace["submit"] = {"submitted": submission.get("submitted"),
+                           "queue": submission.get("queue"), "reason": submission.get("reason")}
 
-    # 6) validate (B3) — the VM-side R3 gate (both leakage layers → net-of-cost →
-    #    promotion_verdict → FDR discovery throttle). Config arm = feature-free (tunes
-    #    existing knobs) → feature_names=[]; the real divergent cohort is the self-created
-    #    shadow. Inert {enabled:False} when TRAINER_VALIDATION_ENABLED is off.
-    validation = validate_fn(feature_names=[], shadow_key=shadow_id, level_id=int(level),
-                             db_path=db_path)
-    trace["validation"] = {"enabled": validation.get("enabled"), "ok": validation.get("ok"),
-                          "leakage_reject": validation.get("leakage_reject")}
+        # 5) read verdict (Phase 1) — gate_passed only, VM-only, never replica. (In production
+        #    the grade is "later"; the assembly attempts it — None = not gradeable yet / off.)
+        gate_passed = client.read_verdict(shadow_id, epoch)
+        trace["gate_passed"] = gate_passed
+
+        # 6) validate (B3) — the VM-side R3 gate (both leakage layers → net-of-cost →
+        #    promotion_verdict → FDR discovery throttle). Config arm = feature-free (tunes
+        #    existing knobs) → feature_names=[]; the real divergent cohort is the self-created
+        #    shadow. Inert {enabled:False} when TRAINER_VALIDATION_ENABLED is off.
+        validation = validate_fn(feature_names=[], shadow_key=shadow_id, level_id=int(level),
+                                 db_path=db_path)
+        trace["validation"] = {"enabled": validation.get("enabled"), "ok": validation.get("ok"),
+                              "leakage_reject": validation.get("leakage_reject")}
 
     # 7) narrate + log (B4) — one-line rationale (budget-gated Haiku or template); log a
     #    rejection so a dead-end is never reconsidered. narrate NEVER flips the verdict.
@@ -749,12 +851,22 @@ def _run_one_iteration(
     reward = _reward_from(compass_verdict, gate_passed, validation)
     if reward is not None:
         post = trainer_bandit.update_posterior(ahash, int(level), reward, axes_json=axes_json)
+        trace["reward_folded"] = True  # T1: the honest discriminator — see run_trainer_loop
         trace["posterior"] = {"reward": round(reward, 4), "alpha": round(post[0], 4),
                              "beta": round(post[1], 4), "n_obs": post[2]}
 
     # 9) surface promotions (Phase 1) — SURFACE, never rank/promote (§D.12.8). Only a
     #    gate-passed shadow. Flag-OFF-safe.
-    if gate_passed is True:
+    # 🚨 T1: in observe mode this is unreachable anyway (gate_passed is pinned None because
+    # nothing was submitted or graded), but the guard is EXPLICIT rather than incidental.
+    # §D.9 step 3 says "NO promotions" — that must be a stated property of the mode, not a
+    # side-effect of an upstream variable that a later edit could set.
+    if observe_only:
+        trace["skipped_in_observe"].append(
+            "surface_candidate (writes promotion_candidates — §D.9: NO promotions)")
+        trace["skipped_in_observe"].append(
+            "trainer_teach (writes the VM ChromaDB)")
+    elif gate_passed is True:
         surfaced = client.surface_candidate(shadow_id, config_diff=axes_json,
                                             stats=(validation or {}).get("verdict"),
                                             reasoning=rationale)
@@ -780,8 +892,8 @@ def _run_one_iteration(
     #     BOTBRAIN_TEACH_ENABLED (fail-closed). recommend_execution_guidance NEVER raises
     #     (malformed → skip+log; transport error → surfaced, never faked as success); the
     #     try/except is belt-and-suspenders so a teach hiccup can never kill the iteration.
-    if (teach_enabled() and gate_passed is True and isinstance(validation, dict)
-            and validation.get("ok") is True):
+    if (not observe_only and teach_enabled() and gate_passed is True
+            and isinstance(validation, dict) and validation.get("ok") is True):
         try:
             import trainer_teach
             trainer_teach.recommend_execution_guidance({
@@ -812,6 +924,8 @@ def run_trainer_loop(
     on_iteration: Optional[Callable[[Dict[str, Any]], None]] = None,
     pause_poll: Optional[Any] = None,
     level_detector: Optional[Any] = None,
+    observe_only: bool = False,
+    level_reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
 ) -> Dict[str, Any]:
     """The continuous always-on trainer search (decision 4), tying B1–B5 together.
 
@@ -836,12 +950,33 @@ def run_trainer_loop(
     a default again, and do NOT resolve one here: ``main()`` owns level resolution via
     ``_resolve_live_level`` and REFUSES below L1; a resolver here would let an omitted
     level SOMETIMES succeed, which is the same silent-wrong-answer defect in disguise.
-    Matches ``_run_one_iteration``, which already takes ``level: int`` with no default."""
-    if not loop_enabled():
+    Matches ``_run_one_iteration``, which already takes ``level: int`` with no default.
+
+    🚨 ``observe_only`` (T1) is §D.9 step 3. It changes THREE things and nothing else:
+    (1) the master gate becomes ``OBSERVE_FLAG`` instead of ``LOOP_FLAG`` — so observing can
+    be armed while the propose path stays OFF; (2) the handoff client is REPLACED by an
+    ``ObserveOnlyClient`` that raises on every handoff, so a missed branch fails loudly
+    instead of crossing; (3) the level detector is not constructed — its only ACTION is the
+    SL6 sweep, which is a cross-box write — and is replaced by a read-only per-iteration
+    level re-read that STOPS the loop if the level moves. ``level_reader`` is that reader's
+    injectable seam (mirrors ``main``'s ``reader``); production passes nothing.
+    ⚠️ With ``observe_only=False`` — every existing caller — the gate expression below is
+    exactly ``if not loop_enabled()`` and the body is byte-identical to R9-B6."""
+    if observe_only:
+        if not observe_only_enabled():
+            return {"enabled": False, "mode": "observe_only",
+                    "reason": f"{OBSERVE_FLAG} off (inert; not auto-started)",
+                    "iterations": 0}
+    elif not loop_enabled():
         return {"enabled": False, "reason": f"{LOOP_FLAG} off (inert; not auto-started)",
                 "iterations": 0}
 
     schema = schema or trainer_bandit.default_axis_schema()
+    # 🚨 T1: observing is handed a client that CANNOT hand anything off. This is the
+    # structural half of "provably cannot propose or promote" — the branch skips are the
+    # primary control, this is what makes a missed skip loud instead of silent.
+    if observe_only:
+        client = ObserveOnlyClient()  # type: ignore[assignment]
     client = client or R8HandoffClient()
     heartbeat = heartbeat or TrainerHeartbeat()
     validate_fn = validate_fn or _default_validate_fn
@@ -861,15 +996,61 @@ def run_trainer_loop(
     # tests). None → the loop never re-reads the level, tags every row at the loop-START level,
     # and is byte-identical to R9-B6 (the U5 gap stays dormant). The detector reuses the
     # existing read-only ssh shim (_read_vm_level); it READS the level, NEVER mints one.
-    if level_detector is None and level_detector_enabled():
+    # 🚨 T1: observing NEVER constructs a level detector. The detector's only ACTION on a
+    # flip is client.sweep_stale_on_flip — a cross-box WRITE — so in observe mode it would
+    # be a mechanism whose whole purpose is forbidden. The level-move hazard it covers is
+    # real and is covered instead by the read-only guard below.
+    if not observe_only and level_detector is None and level_detector_enabled():
         level_detector = LevelDetector(int(level))
+    elif observe_only:
+        level_detector = None
+
+    # 🚨 T1 / §D.9 + §D.1 — DECLARE THE DEGRADED CASE BEFORE DOING ANYTHING.
+    # §D.9 step 3 asks for two things: "runs SIMULATIONS to learn + OBSERVES". The simulator
+    # is `backtest_fn`, and with no provider it is None — so there is NO compass pre-score
+    # and therefore NO reward to fold.
+    #
+    # 🚨 MEASURED, AND IT IS SHARPER THAN "IT WRITES NOTHING" (T1 proof run):
+    # sampling ITSELF writes a `bandit_posteriors` row — `trainer_bandit.run_search_step`
+    # does INSERT OR IGNORE + UPDATE last_sampled_at before any reward exists. So a
+    # provider-less observe iteration leaves behind a row that LOOKS like learning and
+    # contains none: `alpha=1.0, beta=1.0, n_obs=0` — the untouched uniform prior, stamped
+    # with a sampling time. A row COUNT is therefore NOT evidence of discovery, and anyone
+    # reading `SELECT COUNT(*) FROM bandit_posteriors` as progress will be wrong.
+    # The honest discriminator is `rewards_folded` (below) / `n_obs`, never COUNT(*).
+    #
+    # That is the false-success class one level deeper than a silent no-op: not an absence
+    # of evidence, but evidence-shaped residue. So the mode says so, loudly, at start-up AND
+    # in its heartbeat AND in its result — it does not refuse (§D.1's "first live action is
+    # UNDERSTANDING" does not require a simulator), but it never lets "it sampled" be
+    # mistaken for "it learned".
+    simulating = observe_only and backtest_fn is not None
+    if observe_only and backtest_fn is None:
+        print(
+            f"[trainer_loop] 🚨 OBSERVE MODE HAS NO SIMULATOR — {BACKTEST_PROVIDER_ENV} is "
+            f"unset, so backtest_fn is None: there is NO compass pre-score, NO reward and NO "
+            f"posterior fold. This loop will OBSERVE but it will NOT LEARN. ⚠️ It will still "
+            f"write a bandit_posteriors ROW per sampled arm (sampling writes it) carrying an "
+            f"UNTOUCHED Beta(1,1) prior and n_obs=0 — do NOT read a row count as discovery. "
+            f"The heartbeat below proves liveness ONLY.",
+            file=sys.stderr,
+        )
 
     heartbeat.pre_register()  # create the loop_heartbeat row once (idempotent)
+    # 🚨 T1: carry the degraded state into the VM-side liveness surface itself, so the
+    # 08_service_health row reads DEGRADED rather than healthy while nothing is being learned.
+    if observe_only and not simulating:
+        heartbeat.emit(error=RuntimeError("no_simulator: observing without a backtest_fn"))
 
     iterations = 0
     paused_ticks = 0
     current_level = int(level)  # the live tag-level; the detector adopts N+1 on a flip.
     sl6_sweep_unreachable_count = 0
+    observe_stopped_reason: Optional[str] = None
+    # 🚨 T1: the ONE number that separates observing from learning. A bandit_posteriors row
+    # is written by SAMPLING; only a fold moves alpha/beta and raises n_obs. Report the fold
+    # count, never a row count — see the degraded-case note above.
+    rewards_folded = 0
     while max_iterations is None or iterations < max_iterations:
         iterations += 1
 
@@ -923,12 +1104,45 @@ def run_trainer_loop(
                           f"re-attempting next iteration. #qa-agent alert PENDING (VM-only).",
                           file=sys.stderr)
 
+        # ── 🚨 T1: the read-only level-move guard (observe mode only).
+        # [B0] closed the level-omission hole at the SIGNATURE. This closes the same hole at
+        # RUNTIME: observe mode starts at a level it resolved once (legitimately 0 during
+        # paper) and tags every row it writes with it. If L1 mints WHILE this loop is running,
+        # every subsequent row would be a level-0 row written into a level-1 world — B0's
+        # unrecoverable corruption, arriving by the clock rather than by a missing argument.
+        # So the level is re-read (READ-ONLY, the same level_query shim) each iteration and a
+        # change STOPS the loop loudly. It never sweeps, never mints, and never writes.
+        # An UNKNOWN read is NOT a stop: a transport blip must not halt a trainer that has
+        # nothing at stake — it is surfaced and the loop continues at the level it holds.
+        if observe_only:
+            obs_lvl, obs_why = _resolve_observe_level(level_reader)
+            if obs_lvl is None:
+                print(f"[trainer_loop] observe: level re-read UNKNOWN ({obs_why}) — "
+                      f"continuing at level {current_level}; nothing is at stake.",
+                      file=sys.stderr)
+            elif int(obs_lvl) != int(current_level):
+                observe_stopped_reason = (
+                    f"level_moved {current_level}->{obs_lvl}")
+                print(
+                    f"[trainer_loop] 🚨🚨 OBSERVE MODE STOPPING — the live level moved "
+                    f"{current_level} -> {obs_lvl} while observing. Every row written from "
+                    f"here would be tagged level_id={current_level} in a level-{obs_lvl} "
+                    f"world, which is unrecoverable (level_id is in the PRIMARY KEY and "
+                    f"there are no DELETEs). The paper window is over — hand off to the "
+                    f"proposing path. Stopping cleanly; nothing was swept and nothing crossed.",
+                    file=sys.stderr,
+                )
+                heartbeat.emit(error=RuntimeError(observe_stopped_reason))
+                break
+
         err: Optional[BaseException] = None
         try:
             trace = _run_one_iteration(
                 schema=schema, level=current_level, client=client, rng=rng,
                 backtest_fn=backtest_fn, validate_fn=validate_fn, db_path=db_path,
-                epoch=epoch)
+                epoch=epoch, observe_only=observe_only)
+            if trace.get("reward_folded"):
+                rewards_folded += 1
             if on_iteration is not None:
                 try:
                     on_iteration(trace)
@@ -968,6 +1182,27 @@ def run_trainer_loop(
                 pass
 
     result = {"enabled": True, "iterations": iterations, "loop_name": heartbeat.loop_name}
+    if observe_only:  # T1 — additive only in observe mode (propose-path return byte-identical)
+        result["mode"] = "observe_only"
+        # 🚨 The honest headline: `simulating` is FALSE without a provider, and the caller
+        # must not have to infer that from an absent key. Paired with `proposed`/`promoted`
+        # pinned False, this is the mode stating what it did AND what it did not do.
+        result["simulating"] = simulating
+        result["proposed"] = False
+        result["promoted"] = False
+        result["observe_violations"] = list(getattr(client, "violations", []))
+        # 🚨 The honest discriminator. `rewards_folded == 0` with `iterations > 0` means it
+        # SAMPLED but LEARNED NOTHING — and it will still have left bandit_posteriors rows
+        # behind (untouched Beta(1,1), n_obs=0). Never read a row count as discovery.
+        result["rewards_folded"] = rewards_folded
+        if not simulating:
+            result["degraded"] = (
+                f"no simulator ({BACKTEST_PROVIDER_ENV} unset) — observed but did NOT learn: "
+                f"no compass, no reward, no posterior fold ({rewards_folded} folds in "
+                f"{iterations} iterations). ⚠️ bandit_posteriors rows ARE still written by "
+                f"SAMPLING (untouched Beta(1,1), n_obs=0) — a row count is not discovery")
+        if observe_stopped_reason:
+            result["stopped_reason"] = observe_stopped_reason
     if pause_poll is not None:  # additive diagnostics only when armed → flag-OFF return is byte-identical
         result["paused_ticks"] = paused_ticks
         result["pause_unknown_count"] = getattr(pause_poll, "unknown_count", 0)
@@ -1110,6 +1345,38 @@ def _resolve_live_level(
     if lvl < 1:
         return None, (f"level<1 (current_level={lvl}; empty/unminted chain — "
                       f"the trainer never runs at level 0)")
+    return lvl, "ok"
+
+
+def _resolve_observe_level(
+    reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
+) -> Tuple[Optional[int], str]:
+    """T1: resolve the level for an OBSERVE-ONLY start → ``(level>=0, "ok")`` or ``(None, reason)``.
+
+    🚨 THIS IS THE WHOLE DEADLOCK, AND IT IS ONE DISTINCTION.
+    ``_resolve_live_level`` returns ``None`` for TWO different states — a hard-UNKNOWN (the
+    VM could not be read) and a KNOWN, legitimate ``0`` (the chain is simply not minted yet).
+    Collapsing them is correct for the PROPOSING path, where both mean "do not tag a corpus."
+    It is what makes §D.9 step 3 unbuildable: the paper window IS the known-0 state, and the
+    resolver has no way to say so.
+
+    This reader splits them. A hard-UNKNOWN still REFUSES — observing at a level we cannot
+    read would tag rows with a guess, which is B0's corruption by another road. A KNOWN level
+    (including ``0``) is ACCEPTED and returned as-is, so every row the observe window writes
+    carries the level that was actually live when it was written.
+
+    🚨 It does NOT mint, and it cannot: the underlying shim is ``level_query.py current``,
+    read-only, the same one ``_resolve_live_level`` uses. Observing changes no money path
+    (§D.3), so it needs no level of its own — it borrows the one that already exists.
+
+    ⚠️ This function is NEVER called by ``main()``. ``main()``'s below-L1 refusal is untouched
+    and still governs the propose path in full."""
+    read = reader or _read_vm_level
+    lvl, detail = read()
+    if lvl is None:
+        return None, f"unresolved ({detail})"
+    if lvl < 0:  # defensive: a negative level is not a state the chain can legitimately hold
+        return None, f"level<0 (current_level={lvl}; not a valid level)"
     return lvl, "ok"
 
 
@@ -1283,6 +1550,99 @@ def main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
     return 0
 
 
+def _install_observe_signal_handlers(state: Dict[str, Any]) -> None:
+    """T1 / §D.0 — a killed observe daemon must SAY it was killed.
+
+    Without this, SIGTERM (`systemctl stop`, an OOM reaper, a T2 operator) terminates the
+    process mid-iteration and the ONLY trace is a `loop_heartbeat` row that simply stops
+    advancing — indistinguishable, for up to the 2h stale threshold, from a daemon that is
+    merely slow. §D.0: every autonomous component surfaces its own failure, never swallows
+    it. So the handler prints a loud, dated, terminal line naming the signal and the
+    iteration it died in, then re-raises the default disposition so the exit status stays
+    honest (we do NOT swallow the signal and keep running)."""
+    import signal
+
+    def _handler(signum: int, _frame: Any) -> None:
+        name = signal.Signals(signum).name
+        print(
+            f"[trainer_loop] 🚨🚨 OBSERVE DAEMON TERMINATED BY {name} at "
+            f"{utc_now()} — during iteration {state.get('iteration', '?')} at level "
+            f"{state.get('level', '?')}. This is a DEATH, not a pause: no further "
+            f"observation happens and the loop_heartbeat row will now go stale. Reported "
+            f"here because a dead daemon that stops discovery invisibly is the failure "
+            f"this mode exists to make impossible (§D.0).",
+            file=sys.stderr, flush=True,
+        )
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError) as exc:  # not the main thread / unsupported
+            print(f"[trainer_loop] could not install {sig!r} handler: {exc!r}",
+                  file=sys.stderr)
+
+
+def observe_main(reader: Optional[Callable[[], Tuple[Optional[int], str]]] = None,
+                 backtest_fn: Optional[Callable[[Dict[str, Any], int], Dict[str, Any]]] = None,
+                 max_iterations: Optional[int] = None) -> int:
+    """🚨 T1 — THE OBSERVE-ONLY (PAPER WINDOW) ENTRYPOINT. §D.9 step 3.
+
+    The designed middle state: the trainer runs, observes, simulates and learns, and
+    **proposes nothing, promotes nothing, and mints nothing**. It exists because §D.9 step 3
+    ("NO leveling · NO promotions") and ``main()``'s below-L1 refusal are individually
+    correct and jointly a deadlock — the refusal has no mode, so the only way to run the
+    loop was to mint a level the design forbids minting.
+
+    🚨 THIS IS NOT ``main()`` AND IT DOES NOT WEAKEN IT. ``main()`` is byte-untouched: it
+    still resolves the live level and still REFUSES below L1 with rc=1 on the proposing
+    path. This is a SECOND door with a DIFFERENT policy and its OWN flag
+    (``TRAINER_OBSERVE_ONLY_ENABLED``), so arming observation cannot arm proposing.
+
+    🚨 IT MINTS NOTHING. ``MAX(level)`` is read, never written (``level_query.py current``
+    is read-only). §D.3: a level versions the MONEY PATH, and observing changes no money
+    path — so it borrows the level that already exists, which today is legitimately ``0``.
+    A hard-UNKNOWN level still REFUSES with rc=1: observing at a level we cannot read would
+    tag rows with a guess.
+
+    Returns 0 on a clean run/inert flag, 1 on a refusal."""
+    if not observe_only_enabled():
+        print(json.dumps({"enabled": False, "mode": "observe_only",
+                          "reason": f"{OBSERVE_FLAG} off — the observe daemon does not start"}))
+        return 0
+    level, why = _resolve_observe_level(reader)
+    if level is None:
+        print(
+            f"[trainer_loop] REFUSING TO OBSERVE — {OBSERVE_FLAG} on but the live level did "
+            f"not resolve: {why}. Observing needs no MINT, but it does need a KNOWN level to "
+            f"tag its rows with; a guessed level is [B0]'s corruption by another road.",
+            file=sys.stderr,
+        )
+        print(json.dumps({"enabled": True, "mode": "observe_only", "started": False,
+                          "reason": "level_unresolved", "detail": why}))
+        return 1
+    state: Dict[str, Any] = {"level": level, "iteration": 0}
+    _install_observe_signal_handlers(state)
+    print(
+        f"[trainer_loop] OBSERVE-ONLY MODE STARTING at level {level} — §D.9 step 3. This "
+        f"loop will sample, simulate, push back and learn locally. It will NOT propose, "
+        f"promote, teach, grade, validate, sweep or mint. {OBSERVE_FLAG} is on; {LOOP_FLAG} "
+        f"governs the proposing path and is NOT read here.",
+        file=sys.stderr,
+    )
+    result = run_trainer_loop(
+        level=level, observe_only=True, level_reader=reader,
+        max_iterations=max_iterations,
+        backtest_fn=backtest_fn or _resolve_backtest_fn(),
+        on_iteration=lambda t: state.__setitem__("iteration", state.get("iteration", 0) + 1))
+    print(json.dumps(result))
+    return 0
+
+
 if __name__ == "__main__":
     # Guarded: NEVER runs the loop on import, and does NOTHING unless the flag is on.
-    raise SystemExit(main())
+    # 🚨 T1: `--observe` selects the paper-window entrypoint. Absent → main(), unchanged.
+    # Two entrypoints, two flags, two policies — chosen explicitly at the command line so a
+    # unit's ExecStart states which one it is running.
+    raise SystemExit(observe_main() if "--observe" in sys.argv[1:] else main())
