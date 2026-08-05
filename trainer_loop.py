@@ -625,6 +625,37 @@ except Exception as exc:
     print(json.dumps({"ok": False, "error": str(exc)}))
 '''
 
+# [B1] The degraded-state column write. SEPARATE from the emit on purpose: the emit above
+# reuses R8's canonical UPDATE-only ``_emit_loop_heartbeat``, which knows nothing about this
+# column, and editing a VM file from a Hub prompt is forbidden. So this is a second,
+# trainer-owned UPDATE of ONE additive column and it touches nothing else.
+# 🚨 IT WRITES NULL AS READILY AS IT WRITES A REASON. That is the whole point: ``last_error``
+# is a single mutable slot that NOTHING in the codebase ever clears (measured VM-wide), so a
+# degraded string parked there latches FOREVER after a real recovery — a one-way flag is its
+# own false-success. This column is set AND cleared by the same call every iteration.
+_HEARTBEAT_DEGRADED = r'''
+import base64, json, sys
+args = json.loads(base64.b64decode(sys.argv[2]).decode()) if len(sys.argv) > 2 else {}
+name = args.get("loop_name")
+reason = args.get("degraded_reason")  # None => clear the column
+try:
+    from auto_trader.observability import _connect
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "UPDATE loop_heartbeat SET degraded_reason = ? WHERE loop_name = ?",
+            (reason, name),
+        )
+        conn.commit()
+        updated = cur.rowcount
+    finally:
+        conn.close()
+    print(json.dumps({"ok": True, "loop_name": name, "degraded_reason": reason,
+                      "updated": updated}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "error": str(exc)}))
+'''
+
 
 class TrainerHeartbeat:
     """The trainer daemon's heartbeat on the VM's ``loop_heartbeat`` (via the ssh pipe).
@@ -673,6 +704,21 @@ class TrainerHeartbeat:
         args = json.dumps({"loop_name": self.loop_name, "error": err_str})
         try:
             res = self._emit_fn(_HEARTBEAT_EMIT, args)
+        except Exception:
+            return False
+        return bool(isinstance(res, dict) and res.get("ok"))
+
+    def set_degraded(self, reason: Optional[str]) -> bool:
+        """[B1] Set (or CLEAR, on ``None``) ``loop_heartbeat.degraded_reason``.
+
+        🚨 SYMMETRIC BY CONSTRUCTION — this is the same call in both directions, so the
+        surface physically cannot become a one-way latch. Passing ``None`` writes SQL NULL,
+        which is how a recovery clears a stale degraded state that ``last_error`` would keep
+        forever. Returns True on success. Never raises (mirrors ``emit``'s contract): a
+        heartbeat write failure must never take down the daemon it is reporting on."""
+        args = json.dumps({"loop_name": self.loop_name, "degraded_reason": reason})
+        try:
+            res = self._emit_fn(_HEARTBEAT_DEGRADED, args)
         except Exception:
             return False
         return bool(isinstance(res, dict) and res.get("ok"))
@@ -911,6 +957,65 @@ def _run_one_iteration(
     return trace
 
 
+# ── [B1] the degraded-state surface (§D.0: surfaces its own failure, never swallows it) ──
+# 🚨 THE DEFECT THIS CLOSES: the no_simulator declaration fired ONCE, PRE-LOOP, and then
+# went silent forever. Measured on the live VM row before this fix: last_error_at
+# 2026-08-04T14:00:16Z (10s after ExecMainStartTimestamp) sitting beside last_iteration_at
+# 2026-08-05T13:02:14Z and iteration_count 30 — 23 hours of "rough start, then clean
+# iterations" for a loop that never recovered and never could. A RISING ITERATION COUNT
+# PROVES LIVENESS ONLY, NEVER LEARNING.
+DEGRADED_NO_SIMULATOR = "no_simulator"
+DEGRADED_SIMULATOR_UNKNOWN = "simulator_unknown"
+
+_DEGRADED_MESSAGES = {
+    DEGRADED_NO_SIMULATOR: (
+        f"no_simulator: observing without a backtest_fn ({BACKTEST_PROVIDER_ENV} unset) — "
+        f"NO compass pre-score, NO reward, NO posterior fold. Observing, NOT learning"),
+    DEGRADED_SIMULATOR_UNKNOWN: (
+        f"simulator_unknown: {BACKTEST_PROVIDER_ENV} names a provider but this loop was "
+        f"handed backtest_fn=None — cannot tell operator INTENT from broken WIRING"),
+}
+
+
+def _resolve_sim_state(observe_only: bool,
+                       backtest_fn: Optional[Callable[..., Any]],
+                       ) -> Tuple[Optional[bool], Optional[str]]:
+    """Resolve simulation state as THREE values, never a default to False.
+
+    Returns ``(simulating, degraded_reason)``:
+      * ``(True, None)``  — a simulator is in hand; the loop can actually learn.
+      * ``(False, "no_simulator")`` — definitively no simulator, and nobody asked for one.
+      * ``(None, "simulator_unknown")`` — 🚨 THE THIRD STATE. ``BACKTEST_PROVIDER_ENV`` names
+        a provider, yet this loop was handed ``backtest_fn=None``. ``_resolve_backtest_fn``
+        RAISES on a set-but-unresolvable spec, so ``main``/``observe_main`` can never
+        produce this shape — but ``run_trainer_loop`` is a public function with an
+        injectable ``backtest_fn`` seam, so any other caller can. We genuinely cannot tell
+        whether the operator's intent was simulation and the wiring failed, or whether the
+        env is stale. Calling that ``False`` would be a guess and calling it ``True`` would
+        be a false green, so it is neither.
+
+    ⚠️ ``observe_only=False`` returns ``(False, None)`` — the propose path keeps its
+    pre-[B1] value and gets NO degraded surface, so its behaviour is byte-identical."""
+    if not observe_only:
+        return False, None
+    if backtest_fn is not None:
+        return True, None
+    if os.environ.get(BACKTEST_PROVIDER_ENV, "").strip():
+        return None, DEGRADED_SIMULATOR_UNKNOWN
+    return False, DEGRADED_NO_SIMULATOR
+
+
+def _degraded_error(reason: Optional[str]) -> Optional[BaseException]:
+    """The per-iteration ``error=`` payload for a degraded reason (``None`` when healthy).
+
+    🚨 This is what makes ``error_count`` keep INCREMENTING while the fault holds, instead
+    of freezing at the start-up count and reading as "recovered". Every provider-less
+    iteration genuinely IS an iteration that failed to learn, so counting it is honest."""
+    if not reason:
+        return None
+    return RuntimeError(_DEGRADED_MESSAGES.get(reason, reason))
+
+
 def run_trainer_loop(
     *, schema: Optional[Dict[str, Any]] = None, level: int,
     max_iterations: Optional[int] = None,
@@ -1024,8 +1129,9 @@ def run_trainer_loop(
     # in its heartbeat AND in its result — it does not refuse (§D.1's "first live action is
     # UNDERSTANDING" does not require a simulator), but it never lets "it sampled" be
     # mistaken for "it learned".
-    simulating = observe_only and backtest_fn is not None
-    if observe_only and backtest_fn is None:
+    # [B1] THREE states, not two — see ``_resolve_sim_state``. ``simulating`` may be None.
+    simulating, degraded_reason = _resolve_sim_state(observe_only, backtest_fn)
+    if degraded_reason == DEGRADED_NO_SIMULATOR:
         print(
             f"[trainer_loop] 🚨 OBSERVE MODE HAS NO SIMULATOR — {BACKTEST_PROVIDER_ENV} is "
             f"unset, so backtest_fn is None: there is NO compass pre-score, NO reward and NO "
@@ -1035,12 +1141,27 @@ def run_trainer_loop(
             f"The heartbeat below proves liveness ONLY.",
             file=sys.stderr,
         )
+    elif degraded_reason == DEGRADED_SIMULATOR_UNKNOWN:
+        print(
+            f"[trainer_loop] 🚨 OBSERVE MODE CANNOT DETERMINE WHETHER IT IS SIMULATING — "
+            f"{BACKTEST_PROVIDER_ENV} names a provider, but this loop was handed "
+            f"backtest_fn=None. Operator INTENT and broken WIRING are indistinguishable from "
+            f"here, so the state is reported UNKNOWN rather than guessed in either direction. "
+            f"Treat this loop as NOT LEARNING until the discrepancy is resolved.",
+            file=sys.stderr,
+        )
 
     heartbeat.pre_register()  # create the loop_heartbeat row once (idempotent)
-    # 🚨 T1: carry the degraded state into the VM-side liveness surface itself, so the
+    # 🚨 T1 + [B1]: carry the degraded state into the VM-side liveness surface itself, so the
     # 08_service_health row reads DEGRADED rather than healthy while nothing is being learned.
-    if observe_only and not simulating:
-        heartbeat.emit(error=RuntimeError("no_simulator: observing without a backtest_fn"))
+    # 🚨 THE UNCONDITIONAL set_degraded IS LOAD-BEARING, INCLUDING WHEN HEALTHY. A start-up
+    # that only ever WRITES a reason can never clear one left behind by a previous degraded
+    # run, and a stale reason on a now-healthy loop is the same false report wearing the
+    # opposite sign. Clearing is a first-class start-up action, not an afterthought.
+    if observe_only:
+        heartbeat.set_degraded(degraded_reason)
+    if degraded_reason:
+        heartbeat.emit(error=_degraded_error(degraded_reason))
 
     iterations = 0
     paused_ticks = 0
@@ -1069,7 +1190,9 @@ def run_trainer_loop(
         # phantom-halt a trainer that never trades.
         if pause_poll is not None and pause_poll.is_paused():
             paused_ticks += 1
-            heartbeat.emit()  # alive-but-paused
+            # [B1] alive-but-paused — and STILL degraded if it was. A paused tick that
+            # reports clean would reopen the same silence through a side door.
+            heartbeat.emit(error=_degraded_error(degraded_reason))
             if max_iterations is not None and iterations >= max_iterations:
                 break
             _sliced_sleep(sleep_fn, sleep_seconds, pause_poll, wake_when_paused=False)
@@ -1151,7 +1274,17 @@ def run_trainer_loop(
         except Exception as exc:  # one bad iteration must never kill the daemon
             err = exc
         # emit the heartbeat every iteration (success or error) — the silent-death surface.
-        heartbeat.emit(error=err)
+        # 🚨 [B1] THE DEGRADED STATE RIDES EVERY ITERATION, NOT JUST THE FIRST. A live
+        # exception WINS the single `last_error` slot — it is the newer, more urgent signal —
+        # and the degraded state is carried losslessly beside it in `degraded_reason`. That
+        # split is precisely why one surface could never do both jobs: `last_error` is one
+        # mutable slot shared with every transient fault, so a degraded string parked there
+        # is both overwritable and (nothing ever clears it) permanent. Folding the degraded
+        # error in HERE rather than adding a second emit keeps `iteration_count` semantics
+        # byte-identical — one emit per iteration, exactly as before.
+        heartbeat.emit(error=err or _degraded_error(degraded_reason))
+        if observe_only:
+            heartbeat.set_degraded(degraded_reason)
         # W4 (RF2-B2): after the decision, sweep the per-DECISION rejection_log (+ standing_
         # hypotheses, W10-fixed) into trainer_memory via the flag-gated wrapper
         # (refresh_reasoning_log keeps the MEMORY_REASONING_ENABLED gate — NOT a bare
@@ -1195,12 +1328,21 @@ def run_trainer_loop(
         # SAMPLED but LEARNED NOTHING — and it will still have left bandit_posteriors rows
         # behind (untouched Beta(1,1), n_obs=0). Never read a row count as discovery.
         result["rewards_folded"] = rewards_folded
-        if not simulating:
+        # [B1] the machine-readable reason, mirroring `loop_heartbeat.degraded_reason`.
+        # None when healthy — so a caller can branch without parsing prose.
+        result["degraded_reason"] = degraded_reason
+        if degraded_reason == DEGRADED_NO_SIMULATOR:
             result["degraded"] = (
                 f"no simulator ({BACKTEST_PROVIDER_ENV} unset) — observed but did NOT learn: "
                 f"no compass, no reward, no posterior fold ({rewards_folded} folds in "
                 f"{iterations} iterations). ⚠️ bandit_posteriors rows ARE still written by "
                 f"SAMPLING (untouched Beta(1,1), n_obs=0) — a row count is not discovery")
+        elif degraded_reason == DEGRADED_SIMULATOR_UNKNOWN:
+            result["degraded"] = (
+                f"simulator UNKNOWN ({BACKTEST_PROVIDER_ENV} names a provider but "
+                f"backtest_fn is None) — cannot tell operator intent from broken wiring, so "
+                f"the state is neither True nor False ({rewards_folded} folds in "
+                f"{iterations} iterations). Treat as NOT LEARNING until resolved")
         if observe_stopped_reason:
             result["stopped_reason"] = observe_stopped_reason
     if pause_poll is not None:  # additive diagnostics only when armed → flag-OFF return is byte-identical
