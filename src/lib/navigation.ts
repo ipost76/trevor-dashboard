@@ -31,9 +31,10 @@ import {
   BookOpen,
   Database,
   Activity,
+  Sigma,
 } from "lucide-react";
 
-export type ZoneId = "auto" | "intel" | "docs" | "memory" | "health";
+export type ZoneId = "auto" | "intel" | "docs" | "memory" | "health" | "math";
 
 export type ZoneAccent = "cyan" | "green" | "violet" | "magenta" | "amber";
 
@@ -157,6 +158,20 @@ export const ZONES: ReadonlyArray<Zone> = [
       { key: "cost", label: "Cost" },
     ],
     defaultSubTab: "health",
+  },
+  {
+    // B1 (2026-08-05, RM-MATH): MATH — a standalone read-only learning surface
+    // explaining the real formulas behind TREVOR. APPENDED LAST deliberately so
+    // no existing zone changes position in the bottom nav. Single-view zone
+    // (no subTabs) — `<ZoneSubTabs />` auto-hides, exactly like /docs.
+    // Accent "violet" (→ plum) was the one ZoneAccent no zone used, so
+    // accentTextClass/accentGlowClass need no new case.
+    id: "math",
+    href: "/math",
+    label: "Math",
+    shortLabel: "Math",
+    icon: Sigma,
+    accent: "violet",
   },
 ] as const;
 
