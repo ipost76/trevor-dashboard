@@ -6,6 +6,7 @@ import { TrainerReasoningSection } from "./trainer-reasoning-section";
 import { PromotionCandidatesList } from "./promotion-candidates-list";
 import { CapabilityQueueSection } from "./capability-queue-section";
 import { TrainerPauseControl } from "./trainer-pause-control";
+import { LoopHeartbeatCard } from "@/components/memory/loop-heartbeat-card";
 import { ZoneEyebrow } from "@/components/zone-eyebrow";
 
 /**
@@ -25,8 +26,9 @@ export function TrainerZoneView({ subtab }: { subtab: string }) {
   if (subtab === "shadows" || subtab === "shadow") {
     return (
       <div className="animate-fade-in">
-        <div className="px-4 pt-4 md:px-6 lg:px-8">
+        <div className="space-y-1 px-4 pt-4 md:px-6 lg:px-8">
           <MemoryLivenessLine />
+          <LoopHeartbeatCard compact loop="trainer_search_loop" />
         </div>
         <ShadowOverview />
       </div>
@@ -37,6 +39,12 @@ export function TrainerZoneView({ subtab }: { subtab: string }) {
     <div className="space-y-4 p-4 md:space-y-6 md:p-6 lg:px-8 animate-fade-in">
       <ZoneEyebrow zone="trainer" />
       <MemoryLivenessLine />
+      {/* [B6] RM-WATCH: "is it remembering?" (above) next to "is it running, and is it
+          telling the truth about that?" (here). The line reads the LIVE VM loop_heartbeat
+          row — including `degraded_reason`, which `[B1]` made honest and which no Hub
+          surface rendered until now. A rising iteration count proves LIVENESS, never
+          LEARNING, so the count never appears here without its freshness and its state. */}
+      <LoopHeartbeatCard compact loop="trainer_search_loop" />
       {/* R12-B3: the trainer pause control — renders NOTHING until
           HUB_PAUSE_CONTROL_ENABLED is on (default OFF), so this is inert today. */}
       <TrainerPauseControl />

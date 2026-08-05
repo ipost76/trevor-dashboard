@@ -9,6 +9,7 @@ import { DataFreshnessCard } from "./data-freshness-card";
 import { ReconcileHealthCard } from "./reconcile-health-card";
 import { ShadowLabCard } from "./shadow-lab-card";
 import { HeartbeatView } from "./heartbeat-view";
+import { LoopHeartbeatCard } from "./loop-heartbeat-card";
 
 // HB-04 (2026-05-12): MEMORY → System Health rewritten as a composite of
 // three independent cards:
@@ -79,6 +80,13 @@ export function HealthSection() {
           (NOT in the collapsed Data Integrity group): the at-a-glance tile Ghost
           watches each gated FREEZE fix against. */}
       <WedgeRateTile />
+      {/* [B6] RM-WATCH: background-loop heartbeat — TOP-LEVEL + visible, deliberately NOT
+          in the collapsed Data Integrity group. This is the surface `[B1]` left open: the
+          trainer's degraded state became honest in the database and nothing rendered it.
+          It reads the LIVE VM store over the ssh pipe (never the ~19–30 min replica) and
+          renders six states, only ONE of which is green. A card nobody expands cannot
+          close a visibility gap, which is why it is not folded into the group below. */}
+      <LoopHeartbeatCard />
       {/* B8: lower-card region — Data Integrity group (collapsed by default) */}
       <CollapsibleSection
         title="Data Integrity"
