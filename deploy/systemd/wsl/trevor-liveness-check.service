@@ -1,0 +1,50 @@
+[Unit]
+# B3 / RM-WATCH — EXTERNAL liveness checks for the R10 watcher and the R9 trainer.
+#
+# 🚨 WHAT THIS CLOSES. Both components that watch TREVOR for the paper window were watched
+#    only BY THEMSELVES:
+#      T-5  scripts/watcher_arm_check.py (W15) is the ONLY cover for a watcher NON-START —
+#           OnFailure= fires only on a *started* unit that failed, never on one that never
+#           armed — and it had ZERO invokers (no timer, no cron, no unit; measured B3).
+#      T-6  the trainer's loop_heartbeat staleness was checked only by
+#           watcher_surface.py::check_loop_freshness(), INSIDE the watcher. The two VM-side
+#           checkers that could have caught it (trevor-observatory, trevor-monitor-center)
+#           are both masked -> /dev/null since 2026-07-19.
+#    This unit is outside both. If the watcher dies, this still runs.
+#
+# 🚨 IT READS THE VM's LIVE trevor.db OVER THE ssh PIPE, NEVER THE LOCAL REPLICA. Measured B3
+#    at the same instant: replica watcher_loop age = 2036s vs VM live = 35s. The replica runs
+#    up to ~30 min behind, PAST the 1800s watcher threshold — a replica-reading checker pages
+#    on a healthy system and then gets muted, which is worse than no checker. READ-ONLY
+#    (sqlite mode=ro): a monitor, never a writer. It cannot touch the trainer, the watcher or
+#    trading.
+#
+# 🚨 DO NOT "SIMPLIFY" THIS INTO trevor-watcher.service OR THE TRAINER UNIT. A liveness check
+#    that shares a process with the thing it checks is the exact defect being closed here.
+Description=TREVOR external liveness check — watcher arm-state + trainer heartbeat (one-shot)
+Wants=network-online.target
+After=network-online.target tailscaled.service
+# A dead monitor must not be a silent one. The script exits 0 for ANY verdict (the verdict
+# travels by Discord, edge-triggered); it exits non-zero only when the CHECKER ITSELF is
+# broken — an undeliverable alert or an unwritable dedup state. That is what this hooks.
+OnFailure=trevor-alert@%n.service
+
+[Service]
+Type=oneshot
+User=ghost
+WorkingDirectory=/home/ghost/projects/trevor-dashboard
+# The alert path resolves HUB_QA_WEBHOOK_URL -> HUB_DOWNLOADS_WEBHOOK_URL from .env.local via
+# funnel_edge_watch.resolve_webhook() — ONE shared alert path with watcher_arm_check.py and
+# watcher_alert.py. HUB_QA is not minted yet, so alerts land in #downloads today and upgrade
+# to #qa-agent with NO code change the moment the key exists.
+Environment=HOME=/home/ghost
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 /home/ghost/projects/trevor-dashboard/scripts/external_liveness_check.py
+# Two ssh round-trips worst case (the arm check makes its own). Bounded well under this.
+TimeoutStartSec=4min
+Nice=10
+# Do NOT set RemainAfterExit=yes — the timer must be able to re-trigger this unit.
+
+[Install]
+# Not enabled directly; the timer drives it. (Present for manual `systemctl start` too.)
+WantedBy=multi-user.target

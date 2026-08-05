@@ -1,0 +1,27 @@
+[Unit]
+# B3 / RM-WATCH — 15-min driver for trevor-liveness-check.service.
+#
+# Cadence reasoning: the trainer emits hourly (loop_heartbeat.cadence_seconds=3600, matching
+# TRAINER_LOOP_SLEEP_SECONDS=3600) and its staleness threshold is 2x that = 7200s. A 15-min
+# poll therefore detects a stopped trainer within 7200+900s worst case, and a never-armed or
+# dead watcher (1800s threshold) within 1800+900s. Polling faster would not detect anything
+# sooner — the thresholds, not the poll rate, set the floor.
+Description=15-min external liveness check for the TREVOR watcher + trainer
+
+[Timer]
+Unit=trevor-liveness-check.service
+# Covers the first-boot case, where Persistent= has no stamp to catch up from.
+OnBootSec=3min
+# 🚨 OnCalendar (wall-clock) rather than OnUnitInactiveSec (monotonic) is DELIBERATE:
+#    Persistent=true only works with a calendar trigger. This WSL distro is reaped ~30s after
+#    its last attached client exits, so it is down often and unpredictably; Persistent=true
+#    makes a missed window fire immediately on resume instead of silently skipping — which is
+#    exactly the window in which the trainer or watcher would have died unnoticed.
+OnCalendar=*:0/15
+Persistent=true
+# Do not stampede with trevor-tailsync/funnel-watch on the same minute boundary.
+RandomizedDelaySec=45
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
