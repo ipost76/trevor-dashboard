@@ -48,13 +48,42 @@
 
 import { createRequire } from "node:module";
 import { statSync } from "node:fs";
-import type { MathLiveValue } from "@/components/math/values";
+// 🚨 THE CONTRACT LIVES IN values.ts; THIS FILE IMPLEMENTS IT.
+// These types used to be redeclared here, in parallel with B1's module — two
+// definitions of one shape, which is exactly the fork the /math contract exists
+// to prevent. C1 made values.ts canonical and this file a consumer of it.
+import type {
+  MathLiveValue,
+  ReplicaMeta,
+  ConfigValue,
+  ConstantValue,
+  AggregateValue,
+  SleeveStatus,
+  GateStatus,
+  BreakerStatus,
+  MathStatus,
+  UnavailableEntry,
+  MathValuesResponse,
+} from "@/components/math/values";
 import {
   MATH_CONSTANTS,
   UNMIRRORED_CONSTANTS,
   MIRRORED_AT,
   MIRRORED_FROM,
 } from "./math-constants";
+
+export type {
+  ReplicaMeta,
+  ConfigValue,
+  ConstantValue,
+  AggregateValue,
+  SleeveStatus,
+  GateStatus,
+  BreakerStatus,
+  MathStatus,
+  UnavailableEntry,
+  MathValuesResponse,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal local typings for node:sqlite. Local BY DESIGN: B1 owns the shared
@@ -90,110 +119,15 @@ export const REPLICA_PATH =
 const STALE_AFTER_SECONDS = 3600;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Response contract. Mirrors §"Response shape" from the [B2] prompt verbatim, so
-// B1 and D1–D6 can build against it before B1's shared types module lands.
+// Response contract: imported from @/components/math/values, re-exported above.
+//
+// 🚨 ONE DEFINITION, DELIBERATELY. B1 and B2 landed in parallel and each
+// declared its own response shape. B2's was the superset and is now the single
+// canonical declaration, living in values.ts where D1–D6 already import from.
+// This file no longer redeclares it — a second definition that drifts is the
+// exact failure the /math contract exists to prevent. The re-exports above keep
+// every existing `import { … } from "@/lib/math-values"` working unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
-export interface ReplicaMeta {
-  path: string;
-  lagSeconds: number | null;
-  asOfUtc: string;
-  stale: boolean;
-}
-export interface ConfigValue {
-  value: string;
-  updatedAt: string;
-  available: boolean;
-  reason?: string;
-}
-export interface ConstantValue {
-  mirrored: string;
-  live?: string;
-  drift: boolean;
-  source: string;
-  mirroredFrom: string;
-  mirroredAt: string;
-}
-export interface AggregateValue {
-  value: number;
-  window: string;
-  n: number;
-  note?: string;
-}
-export interface SleeveStatus {
-  inert: boolean;
-  level: null;
-  levelSource: "unavailable";
-  proofs: { name: string; value: string }[];
-}
-export interface GateStatus {
-  name: string;
-  limit: string;
-  binds: boolean;
-  note?: string;
-}
-export interface BreakerStatus {
-  name: string;
-  armed: boolean;
-  limit?: string;
-  /** Additive beyond the base contract — see the note at buildStatus(). */
-  tripped?: boolean;
-}
-export interface MathStatus {
-  paperGated: boolean;
-  sleeveStatus: SleeveStatus;
-  portfolioChain: { flag: string; value: string }[];
-  gates: GateStatus[];
-  armedBreakers: BreakerStatus[];
-  /** Additive beyond the base contract — see the note at buildStatus(). */
-  entriesAllowed?: boolean;
-  /** Additive: when the stored breaker evaluation was written (UTC). */
-  breakerStateAsOfUtc?: string;
-}
-export interface UnavailableEntry {
-  id: string;
-  label: string;
-  reason: string;
-}
-/**
- * The endpoint payload.
- *
- * 🚨 THIS SERVES TWO CONTRACTS AT ONCE, DELIBERATELY. The [B2] prompt specified
- * the `replica`/`config`/`constants`/`aggregates`/`status`/`unavailable`/`errors`
- * shape, on the stated assumption that B1 was writing its shared types module
- * against the same contract. B1 landed mid-build (commit 1ea9841) having declared
- * a DIFFERENT and much flatter shape in src/components/math/values.ts:
- * `{ ok, generatedAt, values, error, warnings }`. Neither is a subset of the other.
- *
- * Serving only the prompt's shape would leave B1's page unable to read this
- * endpoint at all — B1 already points MATH_VALUES_ENDPOINT at this exact route.
- * Serving only B1's would discard the provenance, drift and window/`n` structure
- * that is the entire point of this slice. So the response carries BOTH: the
- * detailed shape below, plus B1's four fields projected from the same underlying
- * reads. No number is computed twice and no number differs between the views.
- *
- * 🚨 `error` is REQUIRED and always present — null on success, a string on
- * failure — because B1's consumers guard with `if (!data || data.error)`, which
- * goes FALSE GREEN on a partially-failed payload that simply omits the key.
- */
-export interface MathValuesResponse {
-  ok: boolean;
-  replica: ReplicaMeta;
-  config: Record<string, ConfigValue>;
-  constants: Record<string, ConstantValue>;
-  aggregates: Record<string, AggregateValue>;
-  status: MathStatus;
-  unavailable: UnavailableEntry[];
-  errors: string[];
-  // ── B1's contract (src/components/math/values.ts) ─────────────────────────
-  /** ISO-8601, when the values were read. */
-  generatedAt: string;
-  /** Flat, display-ready projection of everything above, keyed by value key. */
-  values: Record<string, MathLiveValue>;
-  /** null on success, a string on failure. NEVER omitted. */
-  error: string | null;
-  /** Non-fatal problems — same content as `errors`. */
-  warnings?: string[];
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The config keys the page's formulas need, grouped by the family they explain.
@@ -429,6 +363,13 @@ function buildConstants(
       mirroredFrom: MIRRORED_FROM,
       mirroredAt: MIRRORED_AT,
     };
+    // 🚨 THE TAGS MUST CROSS THE API BOUNDARY. This projection is field-by-field,
+    // so anything not copied here is silently dropped — and a dropped `dead` tag
+    // would let signal_guard.REGIME_THRESHOLDS render as a live gate when
+    // discord_bot overwrites every key of it before the gate is even consulted.
+    // Copied only when set, so entries without them stay byte-identical.
+    if (c.dead) entry.dead = true;
+    if (c.staleComment) entry.staleComment = c.staleComment;
     if (c.liveKey) {
       const live = config[c.liveKey];
       if (live?.available) {
@@ -911,6 +852,13 @@ function buildB1Values(
   for (const [name, k] of Object.entries(constants)) {
     const key = `const.${name}`;
     const drifted = k.drift && k.live !== undefined;
+    // 🚨 The tags must reach the FLAT view too. This projection is what B1's page
+    // consumes; a dead constant arriving here unmarked is the same false green as
+    // dropping the tag at the API boundary, one layer further in. Prefixed so
+    // they lead the sentence rather than trailing off the end of it.
+    const prefix =
+      (k.dead ? "⚫ DEAD — this constant decides NOTHING on the live path. " : "") +
+      (k.staleComment ? `⚠️ STALE COMMENT IN SOURCE: ${k.staleComment} ` : "");
     out[key] = {
       key,
       label: humanize(name),
@@ -920,11 +868,13 @@ function buildB1Values(
       raw: k.live ?? k.mirrored,
       source: k.live !== undefined ? "auto_config" : "code",
       origin: k.source,
-      note: drifted
-        ? `⚠️ DRIFT: mirror says ${k.mirrored}, live row says ${k.live}. Mirrored from ${k.mirroredFrom} on ${k.mirroredAt}.`
-        : k.live !== undefined
-          ? `Live row wins; mirror agrees (${k.mirrored}). Mirrored from ${k.mirroredFrom} on ${k.mirroredAt}.`
-          : `Mirrored constant — NOT a live read. From ${k.mirroredFrom} on ${k.mirroredAt}.`,
+      note:
+        prefix +
+        (drifted
+          ? `⚠️ DRIFT: mirror says ${k.mirrored}, live row says ${k.live}. Mirrored from ${k.mirroredFrom} on ${k.mirroredAt}.`
+          : k.live !== undefined
+            ? `Live row wins; mirror agrees (${k.mirrored}). Mirrored from ${k.mirroredFrom} on ${k.mirroredAt}.`
+            : `Mirrored constant — NOT a live read. From ${k.mirroredFrom} on ${k.mirroredAt}.`),
       stale: k.live === undefined,
     };
   }

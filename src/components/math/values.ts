@@ -1,14 +1,27 @@
 /**
- * TREVOR // MATH PAGE — SHARED CONTRACT  [B1, 2026-08-05]
+ * TREVOR // MATH PAGE — THE CANONICAL SHARED CONTRACT
+ * [B1, 2026-08-05 · contract unified by C1-MATH-RESEED, 2026-08-05]
  *
  * The single source of truth for the /math learning surface. Six later prompts
- * (D1–D6) fill in 88 formula entries across 17 sections, and B2 builds the live
- * -values API. They all import their types from HERE so the surface stays one
- * shape instead of six.
+ * (D1–D6) fill in 88 formula entries across 17 sections, and B2's
+ * `/api/math/values` supplies the live values. They all import their types from
+ * HERE so the surface stays one shape instead of six.
  *
- * 🚨 DO NOT redeclare `FormulaStatus`, `FormulaEntryProps` or the API response
- * shape in a section file. A second definition that drifts is exactly the
- * failure this module exists to prevent.
+ * 🚨 THIS FILE IS THE CONTRACT; `src/lib/math-values.ts` IS ITS IMPLEMENTATION.
+ * D1–D6 build against the types below. `math-values.ts` now IMPORTS them from
+ * here rather than redeclaring them, so there is exactly one definition of the
+ * response shape in the repo.
+ *
+ * 🚨 WHY THIS FILE CHANGED. B1 and B2 landed in parallel and declared two
+ * different response shapes: B1's flat `{ok, generatedAt, values, error,
+ * warnings}` and B2's detailed `{replica, config, constants, aggregates, status,
+ * unavailable, errors, …}`. B2's is the SUPERSET and is now CANONICAL — it
+ * carries the badge resolution, the unavailable register, and the per-aggregate
+ * `window`/`n` that the page's honesty depends on. B1's four fields survive
+ * verbatim inside it (B2 projects them from the same underlying reads, so no
+ * number is computed twice and no number differs between the two views).
+ * Nothing consumed the old narrow shape, so it was replaced rather than wrapped
+ * in a compatibility layer nobody needed.
  *
  * Nothing in this file reads the DB, calls an API, or writes anything. /math is
  * a read-only learning surface — no gateway calls, no mutations, no controls.
@@ -174,8 +187,143 @@ export interface MathLiveValue {
   stale?: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The detailed response sections. These are what make the page honest: where a
+// number came from, how old it is, and what its denominator was.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Which replica was read, and how stale it was when it was read. */
+export interface ReplicaMeta {
+  path: string;
+  /** Seconds since tailsync last landed a copy. `null` if unmeasurable. */
+  lagSeconds: number | null;
+  asOfUtc: string;
+  stale: boolean;
+}
+
+/** One `auto_config` row. */
+export interface ConfigValue {
+  value: string;
+  /** UTC — `auto_config.updated_at` is real UTC, unlike `auto_trades.opened_at`. */
+  updatedAt: string;
+  /**
+   * 🚨 An absent key reports `available: false` WITH a reason. It never falls
+   * back to a literal: a default dressed as a live read is how a config page
+   * starts lying.
+   */
+  available: boolean;
+  reason?: string;
+}
+
 /**
- * The /api/math/values response.
+ * One mirrored Python constant, with the live row's verdict where one exists.
+ *
+ * 🚨 Drift is SURFACED, NEVER RESOLVED. When `mirrored` and `live` disagree,
+ * both are carried and `drift` is true; the layer does not pick a winner,
+ * because a silent resolution in either direction is how a mirror starts lying.
+ */
+export interface ConstantValue {
+  mirrored: string;
+  live?: string;
+  drift: boolean;
+  /** `module.symbol` — never a line number. */
+  source: string;
+  /** The VM commit the mirror was read from. One stamp per reseed. */
+  mirroredFrom: string;
+  mirroredAt: string;
+  /**
+   * Set where a comment in the Python source CONTRADICTS the literal beside it.
+   * Render it: a reader who later opens the module must not be misled by prose
+   * the code outgrew. The literal always wins.
+   */
+  staleComment?: string;
+  /**
+   * True where the constant is real and readable but DECIDES NOTHING on the live
+   * path.
+   * 🚨 A `dead` constant must NEVER be rendered as an active gate. It is served
+   * so the page can name it as dead, which is a different statement.
+   */
+  dead?: boolean;
+}
+
+/**
+ * One derived aggregate.
+ *
+ * 🚨 `window` AND `n` ARE MANDATORY. The paper book is small enough that a bare
+ * count invites the page to imply evidence the data cannot support, so the
+ * sample size travels WITH the number rather than beside it.
+ */
+export interface AggregateValue {
+  value: number;
+  window: string;
+  n: number;
+  note?: string;
+}
+
+/**
+ * Whether the per-sleeve maths is deciding anything.
+ *
+ * 🚨 `level` and `levelSource` are deliberately pinned to `null` /
+ * `"unavailable"`. `rebuild_tracker.db` is not litestream-replicated and is not
+ * reachable from this box, so MAX(level) genuinely cannot be read here — and
+ * baking a 0 would become a lie the moment Ghost mints level 1. Inertness is
+ * PROVEN from `proofs` instead, each a live replica read, so the badge
+ * self-corrects if any of them changes.
+ */
+export interface SleeveStatus {
+  inert: boolean;
+  level: null;
+  levelSource: "unavailable";
+  proofs: { name: string; value: string }[];
+}
+
+export interface GateStatus {
+  name: string;
+  limit: string;
+  /**
+   * 🚨 0 is the UNLIMITED sentinel on the count gates — it does NOT mean
+   * "blocked". `binds` encodes that, so the badge cannot invert the meaning.
+   */
+  binds: boolean;
+  note?: string;
+}
+
+export interface BreakerStatus {
+  name: string;
+  /** In force: breakers enabled AND present in the stored evaluation. */
+  armed: boolean;
+  limit?: string;
+  /** Whether it has actually FIRED. Optional — absent is not "false". */
+  tripped?: boolean;
+}
+
+export interface MathStatus {
+  paperGated: boolean;
+  sleeveStatus: SleeveStatus;
+  portfolioChain: { flag: string; value: string }[];
+  gates: GateStatus[];
+  armedBreakers: BreakerStatus[];
+  entriesAllowed?: boolean;
+  /** When the stored breaker evaluation was written (UTC). */
+  breakerStateAsOfUtc?: string;
+}
+
+/**
+ * A value the page must NOT render as a number.
+ *
+ * 🚨 Each carries a SPECIFIC reason, so the page says why it is missing rather
+ * than showing a blank (which reads as a bug) or a zero (which reads as a
+ * measurement).
+ */
+export interface UnavailableEntry {
+  id: string;
+  label: string;
+  reason: string;
+}
+
+/**
+ * The `/api/math/values` response — THE CANONICAL SHAPE. D1–D6 build against
+ * this; `src/lib/math-values.ts` implements it.
  *
  * 🚨 `error` is REQUIRED and must always be present — `null` on success, a
  * string on failure. It is not optional on purpose: a consumer guarding with
@@ -184,12 +332,23 @@ export interface MathLiveValue {
  */
 export interface MathValuesResponse {
   ok: boolean;
+  replica: ReplicaMeta;
+  /** Live `auto_config` rows, keyed by config key. */
+  config: Record<string, ConfigValue>;
+  /** The VM-constant mirror, drift-checked against `config` where paired. */
+  constants: Record<string, ConstantValue>;
+  /** Derived counts, each carrying its own window and `n`. */
+  aggregates: Record<string, AggregateValue>;
+  status: MathStatus;
+  unavailable: UnavailableEntry[];
+  /** Non-fatal problems. Same content as `warnings`. */
+  errors: string[];
   /** ISO-8601. When the values were read. */
   generatedAt: string;
-  /** Keyed by `MathLiveValue.key`. */
+  /** Flat, display-ready projection of everything above, keyed by value key. */
   values: Record<string, MathLiveValue>;
-  /** null on success. Never omit. */
+  /** null on success. NEVER omitted. */
   error: string | null;
-  /** Non-fatal problems — a single key that failed to resolve, etc. */
+  /** Non-fatal problems — same content as `errors`. */
   warnings?: string[];
 }
