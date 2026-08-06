@@ -74,6 +74,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -657,12 +658,28 @@ except Exception as exc:
 '''
 
 
+# ── [C2] the append-only error-history bounds ────────────────────────────────────
+# error_text is stored far longer than the 200 chars the VM slot gets — the whole point
+# is that the TEXT survives — but still bounded, because an unbounded blob in an
+# append-only table is the orphaned-resource pattern wearing a different hat.
+_ERROR_TEXT_MAX = 2000
+_TRACEBACK_MAX = 4000
+# A signature is written on first sight and then at most once per this window. See
+# TrainerHeartbeat._should_log_error for why this is the append-only substitute for the
+# watcher's first_seen/last_seen UPDATE.
+_ERROR_RELOG_SECONDS = 6 * 3600
+
+
 class TrainerHeartbeat:
     """The trainer daemon's heartbeat on the VM's ``loop_heartbeat`` (via the ssh pipe).
 
     ``pre_register`` once on daemon start (idempotent); ``emit`` each iteration. Both
     NEVER raise (a heartbeat write failure logs + returns False; it never crashes the
-    loop). A stalled daemon → stale ``last_iteration_at`` → 08_service_health CRIT."""
+    loop). A stalled daemon → stale ``last_iteration_at`` → 08_service_health CRIT.
+
+    [C2] ``emit`` is additionally THE CHOKE POINT for the append-only error history in
+    ``trainer.db``: every error-bearing path in ``run_trainer_loop`` reaches the durable
+    record through here, so there is one write site rather than one per error site."""
 
     # NOT in loop_registry.REMOVED_LOOPS (confirmed) — else the stall detector ignores it.
     LOOP_NAME = "trainer_search_loop"
@@ -675,7 +692,8 @@ class TrainerHeartbeat:
     def __init__(self, *, loop_name: Optional[str] = None,
                  cadence_seconds: Optional[int] = None,
                  timeout: Optional[float] = None,
-                 emit_fn: Optional[Callable[[str, str], Dict[str, Any]]] = None) -> None:
+                 emit_fn: Optional[Callable[[str, str], Dict[str, Any]]] = None,
+                 error_log_db_path: Optional[str] = None) -> None:
         self.loop_name = loop_name or self.LOOP_NAME
         self.cadence_seconds = int(cadence_seconds or self.CADENCE_SECONDS)
         self.timeout = float(timeout) if timeout is not None else _RPC_TIMEOUT
@@ -683,6 +701,15 @@ class TrainerHeartbeat:
         # tests inject a fake). Keeps the heartbeat testable without a live VM.
         self._emit_fn = emit_fn or (lambda prog, a: _vm_python(prog, a, self.timeout))
         self._registered = False
+        # [C2] the error-history seam. None => lib.trainer_db resolves normally
+        # (TRAINER_DB_PATH env, else <repo>/data/trainer.db). Always the data/ path —
+        # never a repo-root-relative spelling, which is what minted the stray root .db
+        # files this repo already carries.
+        self._error_log_db_path = error_log_db_path
+        # signature -> monotonic timestamp of the last SUCCESSFUL insert. Per-process and
+        # in-memory ON PURPOSE: a restart resets it, so the first error of every run is
+        # always recorded — which is exactly the moment you most want a durable row.
+        self._error_log_seen: Dict[Tuple[str, str, str], float] = {}
 
     def pre_register(self) -> bool:
         """Create the ``loop_heartbeat`` row once (INSERT…ON CONFLICT — idempotent).
@@ -699,14 +726,90 @@ class TrainerHeartbeat:
 
     def emit(self, error: Optional[BaseException] = None) -> bool:
         """Bump the heartbeat's timestamp (UPDATE-only ``_emit_loop_heartbeat``).
-        Returns True on success. Never raises (mirrors the emit's never-raise contract)."""
+        Returns True on success. Never raises (mirrors the emit's never-raise contract).
+
+        [C2] After the VM emit, append the error TEXT to ``trainer_error_history``. The
+        return value still reports the VM emit ONLY — the local history is diagnostics and
+        must never be able to change what the caller believes about the heartbeat."""
         err_str = (str(error)[:200]) if error else None
         args = json.dumps({"loop_name": self.loop_name, "error": err_str})
+        ok = False
         try:
             res = self._emit_fn(_HEARTBEAT_EMIT, args)
         except Exception:
+            ok = False
+        else:
+            ok = bool(isinstance(res, dict) and res.get("ok"))
+        # 🚨 [C2] AFTER the VM emit, and DELIBERATELY OUTSIDE the branch above — the local
+        # history is written even when the ssh pipe just failed. A pipe outage is precisely
+        # when the durable local record matters most, and making the history conditional on
+        # the transport succeeding would lose the text exactly when the slot is unreachable.
+        if error is not None:
+            self._record_error(error)
+        return ok
+
+    def _should_log_error(self, signature: Tuple[str, str, str]) -> bool:
+        """[C2] The dedup gate: has this exact signature been written within the window?
+
+        🚨 THE DEDUP IS "DO NOT INSERT", NEVER "UPDATE THE PRIOR ROW". The watcher's
+        ``watcher_errors`` collapses repeats with a first_seen/last_seen UPDATE; this table
+        is append-only and has no UPDATE path, so the same collapse is achieved by simply
+        not writing. Re-logging a still-present signature once per ``_ERROR_RELOG_SECONDS``
+        is the append-only substitute for ``last_seen_ts``: it leaves a coarse duration
+        trail without mutating anything.
+
+        🚨 It is keyed per SIGNATURE, not "differs from the previous row" — otherwise two
+        faults alternating A,B,A,B would defeat the dedup entirely and write every hour.
+        A signature never seen before is ALWAYS written immediately, so a genuine fault can
+        never be suppressed by the hourly ``no_simulator`` declaration: their signatures
+        differ, and the declaration's presence in the map says nothing about the fault's."""
+        last = self._error_log_seen.get(signature)
+        return last is None or (time.monotonic() - last) >= _ERROR_RELOG_SECONDS
+
+    def _record_error(self, error: BaseException) -> bool:
+        """[C2] Append ONE row to ``trainer_error_history``. Returns True if a row landed.
+
+        🚨 FAIL-OPEN, UNCONDITIONALLY. Every failure mode — an unwritable db, a locked db,
+        the B11 live-store-under-test refusal, a disk error — is caught here, reported to
+        stderr, and the loop continues. Diagnostics may never become an outage: a trainer
+        that dies because it could not write a log about dying is strictly worse than a
+        trainer with a gap in its log. This is the most important property in the module.
+
+        🚨 The signature is marked seen only AFTER a successful insert, so a transient
+        write failure is retried on the next iteration instead of being silently suppressed
+        for the whole re-log window."""
+        try:
+            kind = "declaration" if isinstance(error, DegradedDeclaration) else "fault"
+            # repr() fallback so error_text can never be the empty string (NOT NULL is
+            # satisfied by "" — a blank row would pass the schema and tell nobody anything).
+            text = (str(error) or repr(error))[:_ERROR_TEXT_MAX]
+            signature = (self.loop_name, kind, text)
+            if not self._should_log_error(signature):
+                return False
+            # The traceback is the diagnostic the 200-char VM slot could never carry.
+            # A declaration is constructed, never raised, so it has none — that is a real
+            # NULL, not a missing read.
+            tb = None
+            if error.__traceback__ is not None:
+                tb = "".join(traceback.format_exception(
+                    type(error), error, error.__traceback__))[:_TRACEBACK_MAX]
+            conn = get_connection(self._error_log_db_path)
+            try:
+                with conn:  # commits on success, rolls back on error
+                    conn.execute(
+                        "INSERT INTO trainer_error_history "
+                        "(loop_name, kind, error_type, error_text, traceback_text, ts) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (self.loop_name, kind, type(error).__name__, text, tb, utc_now()),
+                    )
+            finally:
+                conn.close()
+            self._error_log_seen[signature] = time.monotonic()
+            return True
+        except Exception as exc:  # noqa: BLE001 — see the FAIL-OPEN note above
+            print(f"[trainer_loop] error-history write FAILED (non-fatal, the loop "
+                  f"continues): {exc!r}", file=sys.stderr)
             return False
-        return bool(isinstance(res, dict) and res.get("ok"))
 
     def set_degraded(self, reason: Optional[str]) -> bool:
         """[B1] Set (or CLEAR, on ``None``) ``loop_heartbeat.degraded_reason``.
@@ -1005,15 +1108,37 @@ def _resolve_sim_state(observe_only: bool,
     return False, DEGRADED_NO_SIMULATOR
 
 
+class DegradedDeclaration(RuntimeError):
+    """[C2] A DELIBERATE degraded-state declaration — NOT a genuine fault.
+
+    🚨 IT IS A ``RuntimeError`` SUBCLASS SO NOTHING OBSERVABLE CHANGES. ``str()`` is
+    identical, ``isinstance(x, RuntimeError)`` is still True, and the type never leaves
+    this box — ``TrainerHeartbeat.emit`` transmits ``str(error)[:200]`` and the VM program
+    reconstructs a plain ``Exception(err)``. So the VM's ``last_error`` text is
+    byte-identical before and after this change; only the LOCAL classification is new.
+
+    🚨 WHY A TYPE AND NOT A STRING MATCH. ``trainer_error_history`` must record whether a
+    row is a deliberate declaration (``no_simulator`` rides EVERY iteration by design —
+    [B3]) or a real fault, and the dedup rule leans on that split. Deciding it by matching
+    the message text would silently misclassify every row the day someone rewords
+    ``_DEGRADED_MESSAGES`` — a gloss that rots into a wrong answer rather than an error.
+    The type cannot rot: a declaration is a declaration because of what constructed it."""
+
+
 def _degraded_error(reason: Optional[str]) -> Optional[BaseException]:
     """The per-iteration ``error=`` payload for a degraded reason (``None`` when healthy).
 
     🚨 This is what makes ``error_count`` keep INCREMENTING while the fault holds, instead
     of freezing at the start-up count and reading as "recovered". Every provider-less
-    iteration genuinely IS an iteration that failed to learn, so counting it is honest."""
+    iteration genuinely IS an iteration that failed to learn, so counting it is honest.
+
+    [C2] Returns a ``DegradedDeclaration`` (a ``RuntimeError`` SUBCLASS — see above) so the
+    error history can tell a deliberate declaration from a genuine fault structurally.
+    Every existing behaviour is unchanged: same message, same ``RuntimeError`` isinstance,
+    same 200-char payload on the wire."""
     if not reason:
         return None
-    return RuntimeError(_DEGRADED_MESSAGES.get(reason, reason))
+    return DegradedDeclaration(_DEGRADED_MESSAGES.get(reason, reason))
 
 
 def run_trainer_loop(

@@ -9,13 +9,14 @@ every R9-B1..B6 sibling imports:
     from lib.trainer_db import get_connection
 
 It builds ``trainer.db`` — a NEW, WSL-local SQLite db — lazily on first ``get_connection()``
-and owns 5 additive tables:
+and owns 6 additive tables:
 
-  * bandit_posteriors    — Thompson per-arm Beta posteriors (arm-selection distribution)
-  * rejection_log        — dead-end memory (matters more under stochastic Thompson)
-  * standing_hypotheses  — level-dependent hypotheses, evidence accumulates across levels
-  * compass_weights      — per-level learned compass blend + gate thresholds
-  * trainer_api_budget   — the trainer's daily API-spend accounting
+  * bandit_posteriors     — Thompson per-arm Beta posteriors (arm-selection distribution)
+  * rejection_log         — dead-end memory (matters more under stochastic Thompson)
+  * standing_hypotheses   — level-dependent hypotheses, evidence accumulates across levels
+  * compass_weights       — per-level learned compass blend + gate thresholds
+  * trainer_api_budget    — the trainer's daily API-spend accounting
+  * trainer_error_history — [C2] append-only error history (the error TEXT survives)
 
 WHY ITS OWN DB (A1 / RECON-TRAINER-001):
   * The WSL replica /home/ghost/trevor-replica/trevor.db is 0444 read-only and is
@@ -188,11 +189,53 @@ _SCHEMA_STATEMENTS = (
       call_count INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
     )
     """,
+    # ── [RM-TRAINER-C2] The trainer's append-only error history ──────────────────
+    # WHY IT EXISTS: the ONLY durable record of a trainer error was the VM's
+    # loop_heartbeat.last_error — ONE mutable slot that every new error overwrites, and
+    # NOTHING in either box's codebase ever clears. A1 tried to enumerate the trainer's
+    # errors and could not: 21 of 22 had already been overwritten by the 22nd.
+    #
+    # 🚨 THE OVERWRITE IS SCHEDULED, NOT INCIDENTAL — this is the finding that makes the
+    # table necessary rather than nice-to-have. run_trainer_loop emits
+    # ``error=err or _degraded_error(degraded_reason)`` EVERY iteration, so while the
+    # loop is degraded (no_simulator, the live state) the hourly declaration is
+    # GUARANTEED to destroy any genuine fault's text within <= 1 hour. The loop erases
+    # its own diagnostics on a clock. A count without text is not a diagnostic.
+    #
+    # 🚨 APPEND-ONLY BY CONSTRUCTION. INSERT + SELECT only — this module exposes NO
+    # UPDATE and NO DELETE path for this table, ever. It is a HISTORY: a row records
+    # that this text was reported at this instant, and that fact never stops being true.
+    # Dedup is therefore done by NOT INSERTING (see TrainerHeartbeat._should_log_error),
+    # never by mutating a prior row into a first-seen/last-seen/count shape — that shape
+    # would require the UPDATE path this table refuses to have.
+    #
+    # ⚠️ SCOPE, stated so it is not mistaken for more: this covers the WSL trainer ONLY.
+    # The VM's loop_heartbeat serves 14 loops on the money-path box; giving THEM a history
+    # means a schema change on the live production DB and is a SEPARATE decision on a
+    # separate roadmap. Deliberately not done here.
+    #
+    # ⏰ ts is UTC 'YYYY-MM-DDTHH:MM:SSZ' — utc_now() above, the same clock and the same
+    # format as EVERY other timestamp column in this db. It is deliberately NOT the
+    # heartbeat's offset-aware '+00:00' form and NEVER the naive-Eastern form used by
+    # auto_trades.opened_at: two clock shapes in one db is a standing project landmine.
+    """
+    CREATE TABLE IF NOT EXISTS trainer_error_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loop_name TEXT NOT NULL,
+      kind TEXT NOT NULL,            -- 'fault' | 'declaration'
+      error_type TEXT,               -- exception class name (context)
+      error_text TEXT NOT NULL,      -- THE POINT: the text survives
+      traceback_text TEXT,           -- NULL for declarations (no traceback exists)
+      ts TEXT NOT NULL               -- UTC 'YYYY-MM-DDTHH:MM:SSZ' via utc_now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_trainer_error_history_loop_ts "
+    "ON trainer_error_history(loop_name, ts)",
 )
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Idempotently create all 5 additive trainer tables + their 2 indexes.
+    """Idempotently create all 6 additive trainer tables + their 3 indexes.
 
     CREATE ... IF NOT EXISTS only (additive-DB law) — safe to call on every
     connect. No DROP/DELETE/TRUNCATE; never overwrites existing data. Wrapped in
