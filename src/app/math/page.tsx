@@ -38,30 +38,21 @@ export default function MathPage() {
       <header className="space-y-3">
         <div className="text-micro text-fg-muted">TREVOR // THE MATH</div>
         <h1 className="text-h1 text-fg-primary">How TREVOR decides</h1>
-
-        <div className="space-y-2 text-caption-ui text-fg-muted">
-          <p>
-            This page explains how TREVOR decides, using its live configuration
-            — the real formulas the bot runs, the meaning of every symbol in
-            them, and the standing values that make each one concrete.
-          </p>
-          <p>
-            TREVOR is currently <strong className="text-fg-primary">paper-gated</strong>:
-            the arithmetic runs on every signal, but no real order leaves the
-            box. A formula being live does not mean money moved.
-          </p>
-          <p>
-            The badge on each formula says whether that piece is actually
-            deciding anything right now. Some are live, some compute and are
-            ignored, some are built but switched off, and some cannot fire at
-            all. The badge is the honest answer, not the intended one.
-          </p>
-        </div>
       </header>
 
-      {/* ── Table of contents ────────────────────────────────────────────── */}
-      <nav aria-label="Sections" className="mt-6">
-        <h2 className="text-micro text-fg-dim">Contents</h2>
+      {/* ── The seventeen sections, in order ─────────────────────────────── */}
+      <div className="mt-6 space-y-8">
+        <MathReadingScoring />
+        <MathRegimeThresholds />
+        <MathSizingGates />
+        <MathExitsSleeves />
+        <MathFeesPnl />
+        <MathFundingEquityPaper />
+      </div>
+
+      {/* ── Table of contents — a FOOTER index, below section 17 ─────────── */}
+      <nav aria-label="Sections" className="mt-10 border-t border-border-subtle pt-6">
+        <h2 className="text-micro text-fg-dim">Contents — jump to a section</h2>
         <ol className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
           {MATH_SECTIONS.map((s) => (
             <li key={s.number}>
@@ -78,16 +69,6 @@ export default function MathPage() {
           ))}
         </ol>
       </nav>
-
-      {/* ── The seventeen sections, in order ─────────────────────────────── */}
-      <div className="mt-8 space-y-8">
-        <MathReadingScoring />
-        <MathRegimeThresholds />
-        <MathSizingGates />
-        <MathExitsSleeves />
-        <MathFeesPnl />
-        <MathFundingEquityPaper />
-      </div>
     </div>
   );
 }
