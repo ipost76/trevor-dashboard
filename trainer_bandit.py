@@ -758,10 +758,16 @@ def axis_stats_from_db(conn, level: int) -> Tuple[Dict[str, Dict[str, int]], int
     is summed over arms containing the axis; per-axis last_step is the sample-event
     rank (by ``last_sampled_at`` ascending) of the most recent arm that touched it;
     n_events = number of arms ever sampled (last_sampled_at not null) at this level.
+
+    🚨 Skips malformed-``arm_hash`` rows (RECON-TRAINER-003 / RM-TRAINER-B2): a hash
+    that is not ``_HASH_LEN`` chars cannot have come from ``arm_hash()``, so the row is
+    an unreachable hand-seeded fixture. Unfiltered its ``n_obs`` was summed into the
+    per-axis totals, letting a trial that never happened STEER exploration.
     """
     rows = conn.execute(
-        "SELECT axes_json, n_obs, last_sampled_at FROM bandit_posteriors WHERE level_id=?",
-        (int(level),),
+        "SELECT axes_json, n_obs, last_sampled_at FROM bandit_posteriors "
+        "WHERE level_id=? AND length(arm_hash)=?",
+        (int(level), _HASH_LEN),
     ).fetchall()
     sampled = sorted(((r[2], r[0]) for r in rows if r[2]), key=lambda x: x[0])
     n_events = len(sampled)
@@ -804,11 +810,17 @@ def propose_arm(schema: Dict[str, Any], depth: int, rng: random.Random) -> Dict[
 
 def load_existing_arms(conn, level: int, limit: int = 8) -> List[Dict[str, Any]]:
     """The exploit pool: previously-instantiated arms for this level (most-observed
-    first), parsed back from ``axes_json``."""
+    first), parsed back from ``axes_json``.
+
+    🚨 Skips malformed-``arm_hash`` rows (RECON-TRAINER-003 / RM-TRAINER-B2). This is
+    the sharpest edge of the fixture: ``ORDER BY n_obs DESC`` put an unreachable
+    hand-seeded row — with fabricated evidence — at the TOP of the exploit pool.
+    """
     rows = conn.execute(
         "SELECT axes_json FROM bandit_posteriors WHERE level_id=? "
+        "AND length(arm_hash)=? "
         "ORDER BY n_obs DESC, updated_at DESC LIMIT ?",
-        (int(level), int(max(0, limit))),
+        (int(level), _HASH_LEN, int(max(0, limit))),
     ).fetchall()
     out: List[Dict[str, Any]] = []
     for (aj,) in rows:

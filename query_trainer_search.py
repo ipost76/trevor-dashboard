@@ -38,6 +38,12 @@ from typing import Any, Optional
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB = os.environ.get("TRAINER_DB_PATH") or os.path.join(_SCRIPT_DIR, "data", "trainer.db")
 
+# Well-formed arm_hash length. MIRRORED, not imported, from `trainer_bandit._HASH_LEN`
+# (sha256 hexdigest prefix) — importing `trainer_bandit` here would pull in
+# `compass_metrics` and defeat this module's read-only, import-light contract and its
+# `query_*` naming (see the NAMING note above). Keep the two in step.
+_ARM_HASH_LEN = 32
+
 
 def _empty(error: Optional[str] = None) -> dict[str, Any]:
     out: dict[str, Any] = {
@@ -45,7 +51,8 @@ def _empty(error: Optional[str] = None) -> dict[str, Any]:
         "arms": [],
         "hypotheses": [],
         "compass": None,
-        "counts": {"arms": 0, "hypotheses": 0},
+        "counts": {"arms": 0, "hypotheses": 0, "excluded_malformed": 0},
+        "excluded_malformed": 0,
     }
     if error is not None:
         out["error"] = error
@@ -78,13 +85,32 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     )
 
 
-def _read_arms(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def _read_arms(conn: sqlite3.Connection) -> tuple[list[dict[str, Any]], int]:
+    """Return ``(arms, excluded_malformed)``.
+
+    🚨 MALFORMED-HASH EXCLUSION (RECON-TRAINER-003 / RM-TRAINER-B2). Rows whose
+    ``arm_hash`` is not a full ``_ARM_HASH_LEN``-char hash are pre-daemon hand-seeded
+    fixtures: ``trainer_bandit.arm_hash`` always produces the full length, so such a
+    row can never be sampled or updated by any code path — it is UNREACHABLE, yet it
+    inflated the arm count and rendered on the TRAINER page as a measured trial that
+    never happened. Excluded from display only; the row stays on disk (no DELETE, no
+    repair — repairing the hash would mint a live duplicate-axes arm). The count of
+    what was excluded is returned rather than swallowed, so the exclusion is NAMED,
+    not silent.
+    """
     if not _table_exists(conn, "bandit_posteriors"):
-        return []
+        return [], 0
+    excluded = conn.execute(
+        "SELECT COUNT(*) FROM bandit_posteriors "
+        "WHERE arm_hash IS NULL OR length(arm_hash) <> ?",
+        (_ARM_HASH_LEN,),
+    ).fetchone()[0]
     rows = conn.execute(
         "SELECT arm_hash, level_id, axes_json, alpha, beta, n_obs, "
         "last_sampled_at, updated_at FROM bandit_posteriors "
-        "ORDER BY COALESCE(n_obs,0) DESC, updated_at DESC"
+        "WHERE length(arm_hash) = ? "
+        "ORDER BY COALESCE(n_obs,0) DESC, updated_at DESC",
+        (_ARM_HASH_LEN,),
     ).fetchall()
     out: list[dict[str, Any]] = []
     for r in rows:
@@ -105,7 +131,7 @@ def _read_arms(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "last_sampled_at": r["last_sampled_at"],
             "updated_at": r["updated_at"],
         })
-    return out
+    return out, int(excluded or 0)
 
 
 def _read_hypotheses(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -158,7 +184,7 @@ def main() -> int:
         return 0
 
     try:
-        arms = _read_arms(conn)
+        arms, excluded_malformed = _read_arms(conn)
         hypotheses = _read_hypotheses(conn)
         compass = _read_compass(conn)
     except sqlite3.OperationalError as exc:
@@ -178,7 +204,9 @@ def main() -> int:
         "arms": arms,
         "hypotheses": hypotheses,
         "compass": compass,
-        "counts": {"arms": len(arms), "hypotheses": len(hypotheses)},
+        "counts": {"arms": len(arms), "hypotheses": len(hypotheses),
+                   "excluded_malformed": excluded_malformed},
+        "excluded_malformed": excluded_malformed,
     }, default=str))
     return 0
 
