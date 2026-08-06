@@ -1160,8 +1160,8 @@ def run_trainer_loop(
     # opposite sign. Clearing is a first-class start-up action, not an afterthought.
     if observe_only:
         heartbeat.set_degraded(degraded_reason)
-    if degraded_reason:
-        heartbeat.emit(error=_degraded_error(degraded_reason))
+    # [B3] NO pre-loop emit — a DECLARATION must never bump iteration_count/error_count having
+    # done zero search work (RECON-TRAINER-003 F4/R5: 3 phantom runs banked, +1 every restart).
 
     iterations = 0
     paused_ticks = 0
@@ -1192,6 +1192,9 @@ def run_trainer_loop(
             paused_ticks += 1
             # [B1] alive-but-paused — and STILL degraded if it was. A paused tick that
             # reports clean would reopen the same silence through a side door.
+            # 🚨 [B3] DELIBERATE, though this tick did no search work — it is the ONLY thing
+            # keeping a legitimately-paused daemon from reading as dead. Do NOT remove it to
+            # purify the count; the count is the cheaper of the two (RECON-TRAINER-003 F4/R5).
             heartbeat.emit(error=_degraded_error(degraded_reason))
             if max_iterations is not None and iterations >= max_iterations:
                 break
@@ -1255,6 +1258,9 @@ def run_trainer_loop(
                     f"proposing path. Stopping cleanly; nothing was swept and nothing crossed.",
                     file=sys.stderr,
                 )
+                # 🚨 [B3] DELIBERATE — fires ONCE as the loop stops. The error is genuine and the
+                # single count it costs buys a durable record of WHY observing ended, which no
+                # other surface carries. Not a phantom declaration (RECON-TRAINER-003 F4/R5).
                 heartbeat.emit(error=RuntimeError(observe_stopped_reason))
                 break
 
