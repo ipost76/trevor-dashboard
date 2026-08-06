@@ -29,11 +29,38 @@ watched only BY THEMSELVES. This process is outside both of them.
    Proof recorded B3: the same query returns age=5s for `auto_trader_monitor_loop`, a
    seconds-cadence loop; a 4h clock error would have read +/-14400s.
 
-🚨 THREE STATES, AND UNKNOWN NEVER READS AS OK. `ok` / `bad` / `unknown`. A checker that can
-   only say "healthy" or nothing is the instrument class this campaign exists to eliminate.
-   Distinct UNKNOWN causes — ssh down, DB unreachable, systemctl unusable, no heartbeat row at
-   all — are reported as UNKNOWN and alerted on, never collapsed into "fine". A definite BAD
-   outranks an UNKNOWN (if we KNOW the unit is dead, say so).
+🚨 FOUR STATES, AND NEITHER UNKNOWN NOR DEGRADED READS AS OK. `ok` / `degraded` / `bad` /
+   `unknown`. A checker that can only say "healthy" or nothing is the instrument class this
+   campaign exists to eliminate. Distinct UNKNOWN causes — ssh down, DB unreachable, systemctl
+   unusable, no heartbeat row at all — are reported as UNKNOWN and alerted on, never collapsed
+   into "fine". A definite BAD outranks an UNKNOWN (if we KNOW the unit is dead, say so), and
+   DEGRADED outranks UNKNOWN by the same rule: the loop TOLD us it is impaired, which is
+   knowledge, not doubt. Order: bad > degraded > unknown > ok.
+
+🚨 DEGRADED — WHY THE FOURTH STATE HAD TO EXIST (RM-TRAINER-B1). Until this was added the
+   probe read four fields off the heartbeat row and never `degraded_reason`, so its whole
+   test for the trainer was "is it fresh?". Measured on the live row 2026-08-06: the trainer
+   was reporting `degraded_reason='no_simulator'` with `error_count` climbing every iteration
+   BY DESIGN, age 1310s — comfortably inside the 7200s threshold — and this checker had been
+   reporting `ok` since 2026-08-05T15:55:32, ~19 hours, off the same row it was already
+   reading. Fresh is not the same fact as working. A loop that is alive and telling us it
+   cannot do its job is neither healthy nor dead, and rounding it to either is the eroded-
+   defence pattern: a guard that runs on schedule, passes, and is structurally blind to the
+   fault sitting in the row it just read.
+
+   🚨 LEVEL-TRIGGERED ON `degraded_reason`, NEVER EDGE-TRIGGERED ON `error_count`. The count
+   climbs once per iteration for as long as the fault holds, so "the count went up" would
+   fire every hour forever and get the channel muted. The state is derived from
+   `degraded_reason` being non-empty; `error_count` is carried as CONTEXT ONLY and never
+   votes. NULL and empty string are the same thing (not degraded). An ABSENT
+   `degraded_reason` COLUMN is UNKNOWN, never ok — a schema that drifts must not be able to
+   mint a clean bill of health. This matches `query_loop_heartbeat.classify` on live data
+   (measured: 13 `ok`, 1 `degraded`, 0 `unpopulated`), so the two instruments agree.
+
+   🚨 DEGRADED IS NOT A BUG TO BE CLEARED. `TRAINER_BACKTEST_PROVIDER` is unset ON PURPOSE —
+   the simulator is built but failed its own 10% accuracy bar at 37.6%. Wiring it would turn
+   an honest red into a false green. The job of this state is to make the impairment VISIBLE,
+   never to resolve it.
 
 Edge-triggered with persisted dedup (mirrors scripts/hub_monitor_watchdog.py on the VM):
 alerts fire on a TRANSITION only, and the stored status advances ONLY on confirmed delivery,
@@ -85,14 +112,29 @@ STATE_FILE = Path(os.environ.get(
 ARM_CHECK = _HERE / "watcher_arm_check.py"
 USER_AGENT = "trevor-external-liveness-check/1 (B3)"
 
-OK, BAD, UNKNOWN = "ok", "bad", "unknown"
-_ICON = {OK: "\u2705", BAD: "\U0001F6A8", UNKNOWN: "\u2753"}
+# `degraded` is spelled EXACTLY as query_loop_heartbeat.DEGRADED and ranked in the same
+# order as its _RANK (stale/bad > degraded > unknown > ok). Two instruments read the same
+# column on the same row for the same operator; minting a second name for one fact is how
+# they end up disagreeing in public.
+OK, DEGRADED, BAD, UNKNOWN = "ok", "degraded", "bad", "unknown"
+# \ud83d\udea8 EVERY state MUST have an icon. `_ICON[status]` is indexed unguarded in both run() and
+# main(); a missing key raises KeyError -> exit != 0 -> OnFailure= -> trevor-alert@ fires a
+# SECOND alert about the checker while the real verdict never ships. Adding a state without
+# adding its icon breaks the exit-code contract this whole unit rests on.
+_ICON = {OK: "\u2705", DEGRADED: "\U0001F7E0", BAD: "\U0001F6A8", UNKNOWN: "\u2753"}
 
 
 def _worst(states: list[str]) -> str:
-    """A definite BAD outranks an UNKNOWN: if we KNOW something is broken, say so."""
+    """bad > degraded > unknown > ok.
+
+    A definite BAD outranks an UNKNOWN: if we KNOW something is broken, say so. DEGRADED sits
+    between them by the SAME rule \u2014 the loop reported its own impairment, so that is knowledge
+    and it outranks "could not tell" \u2014 while a dead loop still outranks a merely impaired one.
+    """
     if BAD in states:
         return BAD
+    if DEGRADED in states:
+        return DEGRADED
     if UNKNOWN in states:
         return UNKNOWN
     return OK
@@ -139,21 +181,43 @@ def probe_watcher_arm() -> tuple[str, list[str]]:
 
 
 # ── probe 2: the trainer's heartbeat (T-6) ───────────────────────────────────
-_VM_PROG = (
-    "import sqlite3, json\n"
-    "try:\n"
-    f"    c=sqlite3.connect('file:{VM_DB}?mode=ro', uri=True)\n"
-    "    r=c.execute(\"SELECT last_iteration_at, "
-    "CAST(strftime('%s','now')-strftime('%s',last_iteration_at) AS INTEGER), "
-    "COALESCE(iteration_count,-1), COALESCE(is_dormant,0) "
-    f"FROM loop_heartbeat WHERE loop_name='{TRAINER_LOOP}'\").fetchone()\n"
-    "    c.close()\n"
-    "    print(json.dumps({'present': False}) if r is None else "
-    "json.dumps({'present': True, 'last_iteration_at': r[0], 'age_sec': r[1], "
-    "'iteration_count': r[2], 'is_dormant': r[3]}))\n"
-    "except Exception as e:\n"
-    "    print(json.dumps({'error': str(e)}))\n"
-)
+# 🚨 `degraded_reason` was added to loop_heartbeat by ALTER TABLE, so it is NOT guaranteed to
+# exist on every copy of this schema. The column list is read with PRAGMA first and the SELECT
+# is built around what is actually there: a DB without the column yields degraded_column=False
+# (-> UNKNOWN on the WSL side), never a crash and never a silent green. Same guard for
+# error_count. `__DB__`/`__LOOP__` are substituted with .replace() rather than %-formatting
+# because the program is full of `%s` strftime specifiers that would collide.
+_VM_PROG_TEMPLATE = r"""
+import json, sqlite3
+out = {}
+try:
+    c = sqlite3.connect("file:__DB__?mode=ro", uri=True)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(loop_heartbeat)").fetchall()]
+    if not cols:
+        raise RuntimeError("loop_heartbeat table is absent")
+    has_dr = "degraded_reason" in cols
+    sql = (
+        "SELECT last_iteration_at, "
+        "CAST(strftime('%s','now')-strftime('%s',last_iteration_at) AS INTEGER), "
+        "COALESCE(iteration_count,-1), COALESCE(is_dormant,0), "
+        + ("degraded_reason" if has_dr else "NULL") + ", "
+        + ("COALESCE(error_count,-1)" if "error_count" in cols else "-1")
+        + " FROM loop_heartbeat WHERE loop_name='__LOOP__'"
+    )
+    r = c.execute(sql).fetchone()
+    c.close()
+    if r is None:
+        out = {"present": False, "degraded_column": has_dr}
+    else:
+        out = {"present": True, "last_iteration_at": r[0], "age_sec": r[1],
+               "iteration_count": r[2], "is_dormant": r[3],
+               "degraded_reason": r[4], "error_count": r[5],
+               "degraded_column": has_dr}
+except Exception as e:
+    out = {"error": str(e)}
+print(json.dumps(out))
+"""
+_VM_PROG = _VM_PROG_TEMPLATE.replace("__DB__", VM_DB).replace("__LOOP__", TRAINER_LOOP)
 
 
 def _unit_state(unit: str) -> tuple[str, str]:
@@ -217,11 +281,33 @@ def probe_trainer_heartbeat() -> tuple[str, list[str]]:
         details.append(f"loop_heartbeat=UNKNOWN (age={age}s is NEGATIVE — cross-box clock skew)")
         return _worst([unit_state, UNKNOWN]), details
     fresh = age < TRAINER_STALE_SEC
+    # error_count is CONTEXT, never a verdict input — see the module docstring. It climbs once
+    # per iteration while the fault holds, so deriving state from it would alert forever.
+    errors = data.get("error_count", -1)
     details.append(
         f"loop_heartbeat={'FRESH' if fresh else 'STALE'} (age={age}s, "
-        f"threshold={TRAINER_STALE_SEC}s, iterations={iters}, "
+        f"threshold={TRAINER_STALE_SEC}s, iterations={iters}, errors={errors}, "
         f"last_iteration_at={data.get('last_iteration_at')})")
-    return _worst([unit_state, OK if fresh else BAD]), details
+    if not fresh:
+        # Stopped outranks impaired: if it is not running, that is the more urgent fact.
+        # Identical to query_loop_heartbeat.classify's ordering.
+        return _worst([unit_state, BAD]), details
+    # A DB with no degraded_reason column cannot tell a healthy loop from an impaired one, so
+    # its silence is not evidence of health. Unresolvable, never green.
+    if data.get("degraded_column") is False:
+        details.append("loop_heartbeat=UNKNOWN (this DB has NO degraded_reason column — an "
+                       "impaired loop would look identical to a healthy one here)")
+        return _worst([unit_state, UNKNOWN]), details
+    # Level-triggered: the state is "there is a reason", not "the reason changed". NULL and
+    # empty string are the same fact.
+    reason = (data.get("degraded_reason") or "").strip()
+    if reason:
+        details.append(
+            f"loop_heartbeat=DEGRADED — the loop is RUNNING and reporting that it cannot do "
+            f"its job: \"{reason[:220]}\" (error_count={errors}). Fresh is not the same fact "
+            f"as working; this is NOT ok.")
+        return _worst([unit_state, DEGRADED]), details
+    return _worst([unit_state, OK]), details
 
 
 # ── persisted dedup state ────────────────────────────────────────────────────
@@ -280,6 +366,14 @@ _HEADLINE = {
     (UNKNOWN, OK): "\U0001F7E2 **RECOVERED** (was unverifiable)",
     (BAD, UNKNOWN): "\u26A0\uFE0F **UNVERIFIABLE** (was dead/stale)",
     (UNKNOWN, BAD): "\U0001F534 **DEAD / STALE** (was unverifiable)",
+    # DEGRADED transitions. "RECOVERED" is deliberately never used for a move INTO degraded \u2014
+    # the impairment is the headline, not a shade of fine.
+    (OK, DEGRADED): "\U0001F7E0 **IMPAIRED**",
+    (DEGRADED, OK): "\U0001F7E2 **RECOVERED** (was impaired)",
+    (DEGRADED, BAD): "\U0001F534 **DEAD / STALE** (was impaired)",
+    (BAD, DEGRADED): "\U0001F7E0 **IMPAIRED** (was dead/stale \u2014 running again, still impaired)",
+    (DEGRADED, UNKNOWN): "\u26A0\uFE0F **UNVERIFIABLE** (was impaired)",
+    (UNKNOWN, DEGRADED): "\U0001F7E0 **IMPAIRED** (was unverifiable)",
 }
 
 _WHAT = {
@@ -313,6 +407,10 @@ def run(alert: bool = True) -> tuple[int, dict]:
                 if status == UNKNOWN:
                     body.append("_UNKNOWN is NOT ok — the component could not be verified "
                                 "either way. Treat as unmonitored until this clears._")
+                if status == DEGRADED:
+                    body.append("_DEGRADED is NOT ok — the loop is alive and reporting that "
+                                "it cannot do its job. It will keep ticking and keep looking "
+                                "fresh, so nothing else will raise this._")
                 if not _post("\n".join(body)):
                     # Delivery failed -> keep the PREVIOUS status so the next tick retries.
                     # An alert is never silently dropped.

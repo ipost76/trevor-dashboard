@@ -53,12 +53,23 @@ override does NOT extend here (Hub CLAUDE.md, Hub-Specific Rules).
    unknown      the read failed, or the row cannot be judged
    dormant      `is_dormant=1` — parked deliberately; NOT a fault and NOT green
 
-   `unpopulated` exists because of a fact measured live on 2026-08-05: `[B1]` reported
-   RESTART REQUIRED and did not perform it, so `trainer_search_loop` is executing the
-   PRE-`[B1]` module. Its row therefore shows `degraded_reason` NULL — while `last_error`
-   still reads "no_simulator: observing without a backtest provider". Rendering that NULL
-   as green would report a degraded trainer as healthy, which is the exact defect `[B1]`
-   fixed one layer down. An absent signal is not a negative signal.
+   ⚠️ **THE CONDITION THAT MOTIVATED `unpopulated` HAS SINCE CLEARED — the state has NOT.**
+   This block used to assert, in the present tense, that `[B1]`'s restart was still pending
+   and that `trainer_search_loop` was therefore running the PRE-`[B1]` module with
+   `degraded_reason` NULL. **That restart has happened.** Re-measured live on the VM
+   2026-08-06 (RM-TRAINER-B1): the trainer row now reads `degraded_reason='no_simulator'`,
+   `error_count=21` and climbing once per iteration — the column is POPULATED and the row
+   classifies `degraded`, not `unpopulated`. Whole-table read the same instant: 13 `ok`,
+   1 `degraded`, **0 `unpopulated`**.
+
+   🚨 **DO NOT DELETE `unpopulated` ON THE STRENGTH OF THAT.** It is the guard for a
+   condition that recurs the moment any loop is restarted onto a module that predates its
+   own degraded-reason emit — which is exactly what had happened when it was written. The
+   historical measurement is kept below as the worked example precisely because it is the
+   shape the state exists to catch. Rendering a NULL as green would report a degraded loop
+   as healthy, which is the defect `[B1]` fixed one layer down. **An absent signal is not
+   a negative signal**, and a state that currently matches zero rows is a guard, not dead
+   code.
 
    🚨 THE DISCRIMINATOR IS SINGLE-POLL, and it has to be. The obvious test — "error_count
    is not advancing between polls" — cannot decide the FIRST frame, and the first frame is
@@ -66,7 +77,8 @@ override does NOT extend here (Hub CLAUDE.md, Hub-Specific Rules).
    post-`[B1]` the degraded reason is folded into the per-iteration emit, so `error_count`
    increments every iteration and `last_error_at` tracks `last_iteration_at`. Pre-`[B1]` it
    was emitted ONCE above the loop and went silent, so `last_error_at` freezes while
-   `last_iteration_at` advances. Measured on the live row: `last_error_at`
+   `last_iteration_at` advances. Measured on the live row **as it stood 2026-08-05, before
+   the restart** (the worked example, not current state): `last_error_at`
    2026-08-04T14:00:16Z vs `last_iteration_at` 2026-08-05T18:02:37Z — **28 h and 35
    iterations apart**. One poll decides it. The cross-poll `error_count` check still runs,
    client-side, as corroboration on top (see loop-heartbeat-card.tsx).
