@@ -2,9 +2,20 @@
 """cost_alert_notify.py — anti-spam guard + Discord post for the GCP budget alert (B5).
 
 Reads ONE JSON object from stdin describing an over-threshold month-end forecast and,
-IF it should fire today, posts an embed to the Hub's #downloads channel via
-HUB_DOWNLOADS_WEBHOOK_URL — reusing discord_file_delivery._read_webhook_url (env-only,
-fail-loud, never printed, NO fallback). The webhook value is never logged.
+IF it should fire today, posts it to **#qa-agent** through the ONE shared WSL alert
+ladder (`scripts/alert_delivery.post_alert`).
+
+🚨 M15 / B6-ALERTS — WHY THIS ONE NEEDED A DIFFERENT FIX FROM ITS THREE SIBLINGS. The
+other WSL posters all called `funnel_edge_watch.resolve_webhook()`, which already PREFERS
+#qa-agent and merely lacked the bot-token tier. This one never touched that resolver at
+all: it read `discord_file_delivery._read_webhook_url()`, which is HUB_DOWNLOADS-only,
+env-only, with no QA preference and no fallback — so it was **structurally incapable of
+reaching #qa-agent even if HUB_QA_WEBHOOK_URL were minted**. A resolver-level fix could
+never have moved it. A runaway cloud bill is an OPS WARNING, not an artefact, and it does
+not belong in the file-delivery channel.
+
+`#downloads` keeps its file role: `discord_file_delivery` / `deliver_report` are
+untouched and still deliver reports there. Only this ALERT moved.
 
 ANTI-SPAM: at most ONE alert per UTC day. The date is recorded in data/hub.db
 (cost_alert_state, single row id=1) ONLY AFTER a successful post — so a webhook failure
@@ -36,9 +47,9 @@ HUB_DB = os.path.join(REPO_ROOT, "data", "hub.db")
 REPLICA = "/home/ghost/trevor-replica/trevor.db"
 SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../scripts
 
-ALERT_COLOR = 0xD4A64A  # refined gold — a warning, not an error (matches the hub aesthetic)
-EMBED_TITLE = "⚠️ GCP budget alert"
-TIMEOUT_SECONDS = 20
+# The embed (ALERT_COLOR / EMBED_TITLE / TIMEOUT_SECONDS) is gone with the downloads-only
+# POST: the alert is now a house-shaped CONTENT message delivered by alert_delivery, which
+# owns the HTTP timeout. Severity is carried by the ⚠️ DEGRADED badge, not by a hex colour.
 
 
 def _now_iso() -> str:
@@ -54,21 +65,24 @@ def _out(d: dict) -> int:
     return 0
 
 
-def _build_embed(projected: float, threshold: float, top, mtd, month_label, month_end=None) -> dict:
-    """Clear, actionable budget-alert embed — the forward RUN-RATE that crossed the
-    threshold, the driving service, the honest month-end, and a nudge to the Hub cost
-    card. Plain and direct, no filler.
+def _build_alert(projected: float, threshold: float, top, mtd, month_label, month_end=None):
+    """House-shaped builder: (channel_label, note) -> content string.
+
+    The forward RUN-RATE that crossed the threshold, the driving service, the honest
+    month-end, and a nudge to the Hub cost card. Plain and direct, no filler.
 
     `projected` is the forward run-rate projection (trailing-window daily mean ×
     days-in-month) — NOT the sunk month-to-date. That's the B1 change: an already-ENDED
-    spike (run-rate back to normal) no longer fires; a real ongoing spike still does."""
-    lines = [
-        f"GCP spend on pace for **${projected:,.2f}/mo** at the current run rate (trailing window).",
-        f"Alert threshold: **${threshold:,.2f}**.",
-    ]
+    spike (run-rate back to normal) no longer fires; a real ongoing spike still does.
+    """
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    from alert_delivery import SEV_DEGRADED, house_alert  # noqa: E402
+
+    facts = []
     if month_end is not None:
         try:
-            lines.append(f"This month's projected total: **${float(month_end):,.2f}**.")
+            facts.append(f"this month's projected total: ${float(month_end):,.2f}")
         except (TypeError, ValueError):
             pass
     if isinstance(top, dict) and top.get("service"):
@@ -76,47 +90,49 @@ def _build_embed(projected: float, threshold: float, top, mtd, month_label, mont
             ntl = float(top.get("net_usd") or 0.0)
         except (TypeError, ValueError):
             ntl = 0.0
-        lines.append(f"Top service: **{top['service']}** (${ntl:,.2f} MTD).")
+        facts.append(f"top service: {top['service']} (${ntl:,.2f} MTD)")
     if mtd is not None:
         try:
             ml = f" ({month_label})" if month_label else ""
-            lines.append(f"Month-to-date: ${float(mtd):,.2f}{ml}.")
+            facts.append(f"month-to-date: ${float(mtd):,.2f}{ml}")
         except (TypeError, ValueError):
             pass
-    lines.append("→ Check the Hub cost card: **/health?tab=cost**")
-    return {"title": EMBED_TITLE, "description": "\n".join(lines), "color": ALERT_COLOR}
+
+    def build(channel_label: str, note: str | None) -> str:
+        f = list(facts)
+        if note:
+            f.append(note)
+        return house_alert(
+            SEV_DEGRADED,
+            f"GCP spend is on pace for ${projected:,.2f}/mo — over the "
+            f"${threshold:,.2f} alert threshold",
+            f,
+            "Check the Hub cost card: /health?tab=cost",
+            f"cost_alert_notify · sent to {channel_label}",
+        )
+
+    return build
 
 
-def _post_embed(embed: dict):
-    """Post an embed-only message to #downloads. Returns (ok, message_id, error).
+def _deliver(build):
+    """Post through the shared ladder. Returns (ok, message_id, error). Never raises here —
+    post_alert never raises; the caller's try/except stays as belt-and-braces.
 
-    Reuses discord_file_delivery._read_webhook_url (the proven env-only, fail-loud,
-    no-leak, no-fallback reader). post_file_sync itself can't be reused — it requires
-    a FILE (and would register a manifest entry in the DOCS zone); a budget alert is a
-    message, so this is a trivial embed-only POST against the same webhook.
+    ⚠️ `message_id` is now always None. The old path appended `?wait=true` to a webhook to
+    read the id back; the ladder may deliver over bot-token REST instead, where that query
+    param does not apply. The key is KEPT rather than removed — `src/lib/cost-alert.ts`
+    declares it optional and branches on `alerted`/`reason` only (checked), and deleting a
+    machine contract is unrecoverable while an unused field costs nothing.
     """
-    import requests  # local import — keeps the gate paths free of the dep
-
     if SCRIPTS_DIR not in sys.path:
         sys.path.insert(0, SCRIPTS_DIR)
-    import discord_file_delivery as dfd  # noqa: E402 — reuse the webhook reader
+    from alert_delivery import post_alert  # noqa: E402
 
-    url = dfd._read_webhook_url()  # raises RuntimeError if missing — caught by caller
-    sep = "&" if "?" in url else "?"
-    resp = requests.post(
-        f"{url}{sep}wait=true",
-        json={"embeds": [embed]},
-        timeout=TIMEOUT_SECONDS,
-    )
-    if resp.status_code not in (200, 204):
-        return (False, None, f"webhook HTTP {resp.status_code}: {resp.text[:200]}")
-    message_id = None
-    if resp.status_code == 200:
-        try:
-            message_id = resp.json().get("id")
-        except Exception:  # noqa: BLE001
-            message_id = None
-    return (True, message_id, None)
+    res = post_alert(lambda label, note: {"content": build(label, note)},
+                     source="GCP budget alert")
+    if res.ok:
+        return (True, None, None)
+    return (False, None, f"delivery failed via {res.label}: {res.detail or 'no detail'}")
 
 
 def main(argv) -> int:
@@ -177,14 +193,15 @@ def main(argv) -> int:
     if last_date == today:
         return _out({"alerted": False, "reason": "already_alerted_today", **base})
 
-    embed = _build_embed(projected, threshold, top, mtd, month_label, month_end)
+    build = _build_alert(projected, threshold, top, mtd, month_label, month_end)
 
     if dry_run:
-        return _out({"alerted": False, "reason": "dry_run", "would_post": True, **base})
+        return _out({"alerted": False, "reason": "dry_run", "would_post": True,
+                     "preview": build("#qa-agent (dry-run)", None), **base})
 
     # 3. Post (best-effort). ANY failure → no date recorded → retried next refresh.
     try:
-        ok, message_id, err = _post_embed(embed)
+        ok, message_id, err = _deliver(build)
     except Exception as e:  # noqa: BLE001 — missing webhook (RuntimeError), network, anything
         return _out({"alerted": False, "reason": "post_failed", "error": str(e)[:200], **base})
     if not ok:

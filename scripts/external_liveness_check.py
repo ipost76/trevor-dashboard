@@ -336,45 +336,95 @@ def _save_state(state: dict) -> bool:
         return False
 
 
-def _post(msg: str) -> bool:
-    """Deliver via the ONE shared alert path (resolve_webhook: HUB_QA -> HUB_DOWNLOADS)."""
-    if os.environ.get("LIVENESS_DRY_RUN") == "1":
-        print(f"[liveness] DRY_RUN — not posting:\n{msg}", file=sys.stderr)
-        return True
-    try:
-        from funnel_edge_watch import QA_ENV_VAR, resolve_webhook  # type: ignore
-        url, varname = resolve_webhook()
-        import requests  # type: ignore
-        resp = requests.post(url, json={"content": msg},
-                             headers={"User-Agent": USER_AGENT}, timeout=15)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[liveness] FAILED to post the liveness alert: {exc}. "
-              f"A human must see this line.", file=sys.stderr)
-        return False
-    channel = "#qa-agent" if varname == QA_ENV_VAR else "#downloads (fallback)"
-    if resp.status_code in (200, 204):
-        print(f"[liveness] alert posted to {channel} (HTTP {resp.status_code}).", file=sys.stderr)
-        return True
-    print(f"[liveness] FAILED to deliver to {channel}: HTTP {resp.status_code}.", file=sys.stderr)
-    return False
+def _loud(msg: str) -> None:
+    print(f"[liveness] {msg}", file=sys.stderr, flush=True)
 
 
+def _post(build) -> bool:
+    """Deliver via the ONE shared alert path — alert_delivery.post_alert (B6-ALERTS).
+
+    🚨 The ladder is tier 1 HUB_QA webhook -> tier 2 bot-token REST to #qa-agent ->
+    tier 3 #downloads. Before B6 this resolved a webhook itself, so with HUB_QA absent
+    (403 on Manage Webhooks, open since 2026-07-14) EVERY liveness verdict landed in
+    #downloads among report drops. The resolver was never wrong; it just cannot express
+    a bot-token transport, which is why the fix is a delivery helper and not a resolver.
+    """
+    from alert_delivery import post_alert  # type: ignore
+
+    res = post_alert(lambda label, note: {"content": build(label, note)},
+                     source="external liveness alert",
+                     dry_run=os.environ.get("LIVENESS_DRY_RUN") == "1",
+                     log=_loud)
+    return res.ok
+
+
+# Transition -> headline PHRASE. The icon and SEVERITY word are supplied by the house
+# shape (alert_delivery.house_alert), so these carry the TRANSITION wording only — the
+# thing a bare state name cannot say. "RECOVERED" is deliberately never used for a move
+# INTO degraded: the impairment is the headline, not a shade of fine.
 _HEADLINE = {
-    (OK, BAD): "\U0001F534 **DEAD / STALE**",
-    (OK, UNKNOWN): "\u26A0\uFE0F **UNVERIFIABLE**",
-    (BAD, OK): "\U0001F7E2 **RECOVERED**",
-    (UNKNOWN, OK): "\U0001F7E2 **RECOVERED** (was unverifiable)",
-    (BAD, UNKNOWN): "\u26A0\uFE0F **UNVERIFIABLE** (was dead/stale)",
-    (UNKNOWN, BAD): "\U0001F534 **DEAD / STALE** (was unverifiable)",
-    # DEGRADED transitions. "RECOVERED" is deliberately never used for a move INTO degraded \u2014
-    # the impairment is the headline, not a shade of fine.
-    (OK, DEGRADED): "\U0001F7E0 **IMPAIRED**",
-    (DEGRADED, OK): "\U0001F7E2 **RECOVERED** (was impaired)",
-    (DEGRADED, BAD): "\U0001F534 **DEAD / STALE** (was impaired)",
-    (BAD, DEGRADED): "\U0001F7E0 **IMPAIRED** (was dead/stale \u2014 running again, still impaired)",
-    (DEGRADED, UNKNOWN): "\u26A0\uFE0F **UNVERIFIABLE** (was impaired)",
-    (UNKNOWN, DEGRADED): "\U0001F7E0 **IMPAIRED** (was unverifiable)",
+    (OK, BAD): "DEAD / STALE",
+    (OK, UNKNOWN): "UNVERIFIABLE",
+    (BAD, OK): "RECOVERED",
+    (UNKNOWN, OK): "RECOVERED (was unverifiable)",
+    (BAD, UNKNOWN): "UNVERIFIABLE (was dead/stale)",
+    (UNKNOWN, BAD): "DEAD / STALE (was unverifiable)",
+    (OK, DEGRADED): "IMPAIRED",
+    (DEGRADED, OK): "RECOVERED (was impaired)",
+    (DEGRADED, BAD): "DEAD / STALE (was impaired)",
+    (BAD, DEGRADED): "IMPAIRED (was dead/stale — running again, still impaired)",
+    (DEGRADED, UNKNOWN): "UNVERIFIABLE (was impaired)",
+    (UNKNOWN, DEGRADED): "IMPAIRED (was unverifiable)",
 }
+
+# What the state MEANS for the operator — the house shape's "->" line. Every one of these
+# says what is affected, never just a restatement of the state word.
+_MEANING = {
+    BAD: "This component is NOT running or has gone stale. Nothing else will raise it.",
+    DEGRADED: ("DEGRADED is NOT ok — the loop is alive and reporting that it cannot do its "
+               "job. It keeps ticking and keeps looking fresh, so nothing else will raise it."),
+    UNKNOWN: ("UNKNOWN is NOT ok — the component could not be verified either way. "
+              "Treat it as UNMONITORED until this clears."),
+    OK: "The component is running and reporting normally again. No action needed.",
+}
+
+
+def _severity(status: str):
+    """Map the four liveness states onto the four house severities.
+
+    UNKNOWN folds into DEGRADED (⚠️) rather than BROKEN or INFO: 'could not verify' is
+    not a clean bill of health and is not a confirmed death. The distinction between the
+    two is preserved in the HEADLINE, which is where it belongs.
+    """
+    from alert_delivery import (SEV_BROKEN, SEV_DEGRADED,  # type: ignore
+                                SEV_RECOVERED)
+    return {BAD: SEV_BROKEN, DEGRADED: SEV_DEGRADED,
+            UNKNOWN: SEV_DEGRADED, OK: SEV_RECOVERED}[status]
+
+
+def build_alert(name: str, prev: str, status: str, details: list):
+    """House-shaped alert builder: (channel_label, note) -> content string.
+
+    🚨 The stamp is EASTERN (M27). This module computes everything else in UTC — the probe
+    ages, the dedup state file — and that stays UTC because it is a machine record. The
+    ALERT is read by a human on a phone, so it carries ET and names the box.
+    """
+    from alert_delivery import house_alert, scrub  # type: ignore
+
+    def build(channel_label: str, note: str | None) -> str:
+        facts = [f"transition: {prev} -> {status}"] + [scrub(d) for d in details]
+        if note:
+            facts.append(note)
+        return house_alert(
+            _severity(status),
+            f"{_HEADLINE.get((prev, status), status.upper())}: {_WHAT.get(name, name)}",
+            facts,
+            _MEANING.get(status, ""),
+            f"external_liveness_check · sent to {channel_label}",
+        )
+
+    return build
+
 
 _WHAT = {
     "watcher_arm": "the R10 watcher (`trevor-watcher.service`) — T-5",
@@ -400,18 +450,7 @@ def run(alert: bool = True) -> tuple[int, dict]:
         if status != prev:
             entry["since"] = stamp
             if alert:
-                head = _HEADLINE.get((prev, status), f"{_ICON[status]} **{status.upper()}**")
-                body = [f"{head} — {_WHAT.get(name, name)}",
-                        f"_external check, {prev} \u2192 {status}, @ `{stamp}`_"]
-                body += [f"\u2022 {d}" for d in details]
-                if status == UNKNOWN:
-                    body.append("_UNKNOWN is NOT ok — the component could not be verified "
-                                "either way. Treat as unmonitored until this clears._")
-                if status == DEGRADED:
-                    body.append("_DEGRADED is NOT ok — the loop is alive and reporting that "
-                                "it cannot do its job. It will keep ticking and keep looking "
-                                "fresh, so nothing else will raise this._")
-                if not _post("\n".join(body)):
+                if not _post(build_alert(name, prev, status, details)):
                     # Delivery failed -> keep the PREVIOUS status so the next tick retries.
                     # An alert is never silently dropped.
                     entry["status"] = prev

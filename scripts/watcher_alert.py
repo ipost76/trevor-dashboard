@@ -6,10 +6,7 @@ reaches ``failed`` (a *sustained* crash — ``Restart=on-failure`` retries first
 so a single crash-and-recover fires NOTHING; only exhausting StartLimitBurst
 gets here). Posts the failure to Discord and STATES which channel it landed in.
 
-Why this file exists — the silent-lifecycle-failure class this whole prompt kills:
-  * EXPLICIT User-Agent on the POST. ``urllib``'s default UA gets Cloudflare-403'd;
-    ``requests``' default passes, but we set one anyway — belt-and-suspenders + the
-    C1 mandate (measured: no-UA urllib -> 403, with-UA -> 204).
+Why this file exists — the silent-lifecycle-failure class it kills:
   * WSL-LOCAL transport (WSL -> Discord over the internet), NOT WSL -> VM over the
     tailnet — which is exactly why it survives an unreachable-VM case. The VM-side
     RF3T1-B2 alert handler is VM-only with no VM->WSL path, so it cannot see these
@@ -20,26 +17,20 @@ Why this file exists — the silent-lifecycle-failure class this whole prompt ki
   * NO recursion: the ``trevor-alert@`` template carries NO ``OnFailure=`` of its own.
   * FAIL LOUD: any failure (import / resolve / non-2xx / exception) prints to stderr ->
     the handler's OWN journal, and does NOT record the marker (so the next failure of the
-    same unit retries). A silent alert handler is the failure this prompt exists to end.
+    same unit retries). A silent alert handler is the failure this file exists to end.
 
-DELIVERY IS THREE-TIERED (B4-HUB-RESILIENCE, 2026-08-02). In priority order:
-  1. HUB_QA_WEBHOOK_URL webhook -> #qa-agent   (preferred: lowest blast radius, no token)
-  2. bot-token REST            -> #qa-agent   (the live path today)
-  3. HUB_DOWNLOADS_WEBHOOK_URL -> #downloads  (LAST RESORT, never silently preferred)
+🚨 DELIVERY NOW LIVES IN ``scripts/alert_delivery.py`` (B6-ALERTS). The three-tier ladder
+this file pioneered (B4-HUB-RESILIENCE) was MOVED there verbatim in behaviour so its three
+sibling posters — external_liveness_check, watcher_arm_check, funnel_edge_watch — and the
+budget alert reach #qa-agent through the SAME proven path instead of falling into the
+artefact channel. Read that module for the ladder, the fail-open contract, the
+three-valued double-post guard, and the 403 that makes tier 2 necessary. Nothing about
+this handler's transport changed; it just stopped being the only one that had it.
 
-🚨 WHY TIER 2 EXISTS. Webhook resolution reuses ``funnel_edge_watch.resolve_webhook()``,
-which prefers HUB_QA_WEBHOOK_URL and falls back to HUB_DOWNLOADS_WEBHOOK_URL. Measured
-2026-07-24 and RE-MEASURED 2026-08-02: HUB_QA_WEBHOOK_URL is ABSENT from .env.local, so
-every SERVICE-DEATH page landed in #downloads -- the artifact-delivery channel. A daemon
-death notice arriving at 00:12 AM among report drops is structurally indistinguishable
-from a report drop, which is the same silent-lifecycle failure this handler exists to end.
-The obvious fix, "mint the #qa-agent webhook", IS NOT ACTIONABLE: the bot lacks Manage
-Webhooks on #qa-agent (403), so that step has been open and un-takeable since 2026-07-14.
-Tier 2 routes around it with the pattern the VM's hub_health_monitor.py has used
-successfully all along -- a bot-token REST POST to the channel. No webhook needed.
-🚨 .env.local IS NOT EDITED BY THIS FILE OR ANY PROMPT (CLAUDE.md: minting is Ghost-side).
-Tier 1 stays PRIMARY: the moment Ghost sets HUB_QA_WEBHOOK_URL, tier 2 is bypassed with
-no code change. The alert body always states the channel AND the mechanism it used.
+🚨 EVERY QUOTED JOURNAL LINE IS SCRUBBED BEFORE IT LEAVES THE BOX. This box's journal
+contains a leaked webhook URL (see alert_delivery.scrub), and this handler quotes the
+journal into a Discord message — so an unscrubbed quote would re-publish the credential
+to the very channel it protects. ``alert_delivery.scrub`` is applied to every line.
 
 Honest blind spot: a total WSL->internet outage defeats any webhook. Stated, not hidden.
 
@@ -53,13 +44,14 @@ Exit: 0 posted / dry-run / rate-limited (deliberate)  |  1 post failed (loud)  |
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 # The scripts dir is on sys.path[0] when run as `python3 scripts/watcher_alert.py`,
-# but pin it so `import funnel_edge_watch` resolves regardless of cwd.
+# but pin it so `import alert_delivery` resolves regardless of cwd.
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
@@ -67,14 +59,22 @@ if str(_HERE) not in sys.path:
 REPO = _HERE.parent
 DEFAULT_MARKER_DIR = REPO / "data" / ".alert_markers"
 ALERT_INTERVAL_SEC = int(os.environ.get("WATCHER_ALERT_INTERVAL_SEC", "600"))
-USER_AGENT = "trevor-watcher-alert/1 (RF2-C1)"
-JOURNAL_LINES = 15
-_MAX_CONTENT = 1900  # Discord hard-caps a message at 2000 chars; leave headroom.
 
-# B4-HUB-RESILIENCE: the tier-2 bot-token path. Channel id matches the VM monitor's
-# HUB_MONITOR_QA_CHANNEL_ID (#qa-agent) -- the same channel, reached the same way.
-QA_CHANNEL_ID = os.environ.get("WATCHER_ALERT_QA_CHANNEL_ID", "1479969192139690029")
-BOT_TOKEN_VAR = "DISCORD_BOT_TOKEN"
+# M22 — was 15. The binding constraint is NOT taste: the house shape allows at most 4
+# fact lines, one of which is the unit's own state, so 3 is what physically fits.
+#
+# 🚨 AND A BLIND TAIL AT ANY DEPTH IS A BAD INSTRUMENT — measured, not assumed. The last
+# 15 lines of the real `trevor-tailsync.service` journal are ELEVEN lines of rsync byte
+# counts; the last 5 are five of them. Depth was never the problem: a chronological tail
+# shows whatever the unit said LAST, which on a chatty unit is progress noise, not the
+# fault. So we scan a deeper window and SELECT the lines that look like a failure,
+# falling back to the plain tail when nothing matches. Fewer lines, more signal.
+JOURNAL_LINES = 3
+JOURNAL_SCAN_LINES = 40
+_ERR_RE = re.compile(
+    r"\b(error|errno|fail(ed|ure)?|fatal|critical|traceback|exception|"
+    r"refus\w*|denied|timed?[ -]?out|unreachable|cannot|could not|no such|"
+    r"permission|abort\w*|killed|segfault)\b", re.I)
 
 
 def _loud(msg: str) -> None:
@@ -90,7 +90,12 @@ def _marker_path(unit: str) -> Path:
 
 def _rate_limited(unit: str, now: float) -> bool:
     """True if we posted for this unit within ALERT_INTERVAL_SEC. Fails OPEN (never
-    suppresses a real alert on a marker read error)."""
+    suppresses a real alert on a marker read error).
+
+    🚨 FAIL-OPEN IS LOAD-BEARING AND IS NOT SHARED. This limiter stays local to the
+    death-alert handler and is deliberately NOT in alert_delivery: a rate limit sitting
+    in the shared transport could silently swallow another poster's first-ever alert.
+    """
     mp = _marker_path(unit)
     try:
         last = float(mp.read_text().strip())
@@ -121,85 +126,79 @@ def _run(args: list[str], timeout: int) -> str:
         return ""
 
 
-def _unit_status(unit: str) -> str:
+def unit_state_fact(unit: str) -> str:
+    """One plain-English line from `systemctl show` — never the raw KEY=value block.
+
+    The old body pasted six machine properties into a code fence. That is the raw-dict
+    shape the house rules forbid: it is longer, and it makes a reader parse `Result=`
+    and `ExecMainStatus=` to learn 'it exited 1 after 3 restarts'.
+    """
     out = _run(["systemctl", "show", unit,
                 "--property=ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,NRestarts",
                 "--no-pager"], timeout=10)
-    return out or "(systemctl status unavailable)"
+    if not out:
+        return "state: systemd could not be queried"
+    props = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
+    bits = [f"{props.get('ActiveState', '?')}/{props.get('SubState', '?')}"]
+    result = props.get("Result", "")
+    if result and result != "success":
+        bits.append(f"result {result}")
+    code = props.get("ExecMainStatus", "")
+    if code not in ("", "0"):
+        bits.append(f"exit code {code}")
+    restarts = props.get("NRestarts", "")
+    if restarts not in ("", "0"):
+        bits.append(f"{restarts} restart(s) before it gave up")
+    return "state: " + " · ".join(bits)
 
 
-def _unit_journal(unit: str) -> str:
-    out = _run(["journalctl", "-u", unit, "-n", str(JOURNAL_LINES),
+def journal_facts(unit: str) -> list[str]:
+    """Up to JOURNAL_LINES plain lines, error-preferring, SCRUBBED.
+
+    🚨 The scrub is not hygiene here — the journal on this box demonstrably contains a
+    full Discord webhook URL, and this function's output is posted to Discord.
+    """
+    from alert_delivery import scrub  # type: ignore
+
+    raw = _run(["journalctl", "-u", unit, "-n", str(JOURNAL_SCAN_LINES),
                 "--no-pager", "-o", "cat"], timeout=10)
-    return out or "(journal unavailable)"
+    if not raw:
+        return ["log: journal unavailable"]
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if not lines:
+        return ["log: journal empty"]
+    hits = [ln for ln in lines if _ERR_RE.search(ln)]
+    picked = (hits or lines)[-JOURNAL_LINES:]
+    out = [f"log: {scrub(ln)}" for ln in picked]
+    if not hits:
+        # Say ONCE that these are the plain tail, not selected failure lines — repeating
+        # the caveat per line burned ~120 chars of a 900-char budget to say it three times.
+        out[0] = (f"log (no error line in the last {JOURNAL_SCAN_LINES}; plain tail follows): "
+                  + out[0][5:])
+    return out
 
 
-def _read_bot_token() -> str:
-    """DISCORD_BOT_TOKEN from the process env, else .env.local. '' when unavailable.
+def build_message(unit: str, channel_label: str, note: str | None,
+                  state_fact: str, log_facts: list[str], stamp: str) -> str:
+    """The house shape. Names the channel AND the mechanism (the RF2-C1 contract)."""
+    from alert_delivery import SEV_BROKEN, house_alert  # type: ignore
 
-    🚨 NEVER logged, never returned to a printing caller, never put in an alert body.
-    The unit carries EnvironmentFile=.env.local, so under systemd this normally hits
-    the env branch; the file read is the fallback for a hand-run invocation."""
-    val = os.environ.get(BOT_TOKEN_VAR, "").strip()
-    if val:
-        return val
-    try:
-        for line in (REPO / ".env.local").read_text().splitlines():
-            if line.startswith(BOT_TOKEN_VAR + "="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except OSError:
-        pass
-    return ""
-
-
-def _post_bot_channel(channel_id: str, content: str) -> tuple[bool, object, str]:
-    """Tier 2 — POST one message to a channel with the bot token.
-
-    Returns (ok, http_code, detail). Never raises, never logs the token. `detail` is a
-    short Discord error snippet; Discord echoes the request body, not the auth header,
-    so it is safe to log."""
-    token = _read_bot_token()
-    if not token:
-        return False, None, f"{BOT_TOKEN_VAR} unavailable"
-    try:
-        import requests  # type: ignore
-        resp = requests.post(
-            f"https://discord.com/api/v10/channels/{channel_id}/messages",
-            json={"content": content},
-            headers={"Authorization": f"Bot {token}", "User-Agent": USER_AGENT},
-            timeout=15,
-        )
-    except Exception as exc:  # noqa: BLE001 - a WSL->internet outage lands here; be LOUD
-        return False, None, f"{type(exc).__name__}: {exc}"
-    if resp.status_code in (200, 201, 204):
-        return True, resp.status_code, ""
-    return False, resp.status_code, (resp.text or "")[:200]
-
-
-def _channel_label(varname: str, qa_var: str, via_bot: bool = False) -> str:
-    if via_bot:
-        return "#qa-agent (bot-token REST — the #qa-agent webhook mint is perm-blocked)"
-    if varname == qa_var:
-        return "#qa-agent (HUB_QA_WEBHOOK_URL)"
-    return ("#downloads (HUB_DOWNLOADS_WEBHOOK_URL — LAST RESORT; both the #qa-agent "
-            "webhook and the bot-token path were unavailable)")
-
-
-def build_message(unit: str, stamp: str, status: str, journal: str, channel_label: str) -> str:
-    body = (
-        f"\U0001F6A8 **TREVOR daemon FAILED** — `{unit}`\n"
-        f"time: `{stamp}`\n"
-        f"delivered to: {channel_label}\n"
-        f"```\n{status}\n```\n"
-        f"last {JOURNAL_LINES} journal line(s):\n"
-        f"```\n{journal}\n```"
+    facts = [state_fact] + list(log_facts)
+    if note:
+        facts.append(note)
+    return house_alert(
+        SEV_BROKEN,
+        f"`{unit}` died and systemd has stopped retrying it",
+        facts,
+        "This daemon is DOWN now and will not come back on its own — it needs a restart.",
+        f"watcher_alert · sent to {channel_label}",
+        stamp=stamp,
     )
-    if len(body) > _MAX_CONTENT:
-        body = body[: _MAX_CONTENT - 3] + "..."
-    return body
 
 
 def main(argv: list[str]) -> int:
+    from alert_delivery import et_stamp, post_alert  # type: ignore
+
     if len(argv) < 2 or not argv[1].strip():
         _loud("USAGE: watcher_alert.py <failed-unit-name> (systemd passes %i). No unit given.")
         return 2
@@ -212,69 +211,21 @@ def main(argv: list[str]) -> int:
               f"(deliberate; a flapping unit must not storm the channel).")
         return 0
 
-    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-    status = _unit_status(unit)
-    journal = _unit_journal(unit)
+    stamp = et_stamp()
+    state_fact = unit_state_fact(unit)
+    log_facts = journal_facts(unit)
 
-    # Resolve the webhook — reuse the proven funnel_edge_watch resolver. A resolve/import
-    # failure is LOUD (the whole point of this handler is that its failure is visible).
-    try:
-        from funnel_edge_watch import QA_ENV_VAR, resolve_webhook  # type: ignore
-        url, varname = resolve_webhook()
-    except Exception as exc:  # noqa: BLE001 - resolve failure MUST be loud, never silent
-        _loud(f"FAILED to resolve a webhook for {unit}'s death alert: {exc}. "
-              f"Alert NOT sent — a human must see this line. Not recording a marker (will retry).")
-        return 1
+    def render(channel_label: str, note: str | None) -> dict:
+        return {"content": build_message(unit, channel_label, note,
+                                         state_fact, log_facts, stamp)}
 
-    # ── delivery tier selection (B4-HUB-RESILIENCE) ─────────────────────────
-    # Tier 1 (the QA webhook) wins whenever it resolves. Tier 2 is tried only when the
-    # resolver FELL BACK to #downloads, i.e. exactly the case that used to misroute a
-    # service-death page into the artifact channel. Tier 3 is what tier 2 falls through
-    # to, so the alert can never be LOST by adding a tier -- only re-routed.
-    use_bot = varname != QA_ENV_VAR and bool(_read_bot_token())
-    channel_label = _channel_label(varname, QA_ENV_VAR, via_bot=use_bot)
-    msg = build_message(unit, stamp, status, journal, channel_label)
-
-    if dry:
-        _loud(f"DRY_RUN: would POST to {channel_label} ({varname}); not posting, not marking.")
-        print(msg)
-        return 0
-
-    if use_bot:
-        ok, code, detail = _post_bot_channel(QA_CHANNEL_ID, msg)
-        if ok:
-            _loud(f"POSTED {unit}'s death alert to {channel_label} (HTTP {code}).")
-            _record_marker(unit, now)
-            return 0
-        # Do NOT return here -- fall through to the webhook so a token problem
-        # degrades to the old behaviour instead of silencing the alert entirely.
-        _loud(f"tier-2 bot-token post to #qa-agent FAILED (HTTP {code} {detail!r}) — "
-              f"falling back to the {varname} webhook so the alert is not lost.")
-        channel_label = _channel_label(varname, QA_ENV_VAR, via_bot=False)
-        msg = build_message(unit, stamp, status, journal, channel_label)
-
-    try:
-        import requests  # type: ignore
-        resp = requests.post(
-            url,
-            json={"content": msg},
-            headers={"User-Agent": USER_AGENT},  # EXPLICIT UA (the C1 mandate)
-            timeout=15,
-        )
-    except Exception as exc:  # noqa: BLE001 - a WSL->internet outage lands here; be LOUD
-        _loud(f"FAILED to POST {unit}'s death alert to {channel_label}: {exc}. "
-              f"Alert NOT delivered. Not recording a marker (will retry on the next failure).")
-        return 1
-
-    if resp.status_code in (200, 204):
-        _loud(f"POSTED {unit}'s death alert to {channel_label} (HTTP {resp.status_code}).")
+    result = post_alert(render, source=f"{unit}'s death alert", dry_run=dry, log=_loud)
+    if result.ok and not dry:
         _record_marker(unit, now)
-        return 0
-
-    snippet = (resp.text or "")[:300]
-    _loud(f"FAILED to deliver {unit}'s death alert to {channel_label}: HTTP {resp.status_code} "
-          f"{snippet!r}. Not recording a marker (will retry).")
-    return 1
+    if not result.ok:
+        _loud("Not recording a marker (will retry on the next failure).")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

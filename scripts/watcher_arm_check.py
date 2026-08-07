@@ -120,29 +120,46 @@ def check_local_health() -> tuple[bool, str]:
     return fresh, f"watcher_health={'FRESH' if fresh else 'STALE'} (age={int(age)}s, updated_at={row[0]})"
 
 
-def _post(msg: str) -> int:
-    """Post the verdict loud-either-way. Fails LOUD to stderr; returns process exit code."""
-    if os.environ.get("WATCHER_ARM_DRY_RUN") == "1":
-        print(f"[watcher_arm_check] DRY_RUN — not posting:\n{msg}", file=sys.stderr)
-        return 0
-    try:
-        from funnel_edge_watch import QA_ENV_VAR, resolve_webhook  # type: ignore
-        url, varname = resolve_webhook()
-        import requests  # type: ignore
-        resp = requests.post(url, json={"content": msg},
-                             headers={"User-Agent": USER_AGENT}, timeout=15)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[watcher_arm_check] FAILED to post the arm-check verdict: {exc}. "
-              f"A human must see this line.", file=sys.stderr)
-        return 2
-    channel = "#qa-agent" if varname == QA_ENV_VAR else "#downloads (fallback)"
-    if resp.status_code in (200, 204):
-        print(f"[watcher_arm_check] verdict posted to {channel} (HTTP {resp.status_code}).",
-              file=sys.stderr)
-        return 0
-    print(f"[watcher_arm_check] FAILED to deliver verdict to {channel}: HTTP {resp.status_code}.",
-          file=sys.stderr)
-    return 2
+def _loud(msg: str) -> None:
+    print(f"[watcher_arm_check] {msg}", file=sys.stderr, flush=True)
+
+
+def _post(build) -> int:
+    """Post the verdict loud-either-way through the ONE shared ladder. Returns an exit code.
+
+    🚨 Delivery is alert_delivery.post_alert (B6-ALERTS): tier 1 HUB_QA webhook -> tier 2
+    bot-token REST to #qa-agent -> tier 3 #downloads. Before this, the verdict resolved a
+    webhook directly and therefore ALWAYS landed in #downloads, the artefact channel — an
+    arm-check FAIL sat among report drops, which is the misrouting B6 exists to end.
+    """
+    from alert_delivery import post_alert  # type: ignore
+
+    res = post_alert(lambda label, note: {"content": build(label, note)},
+                     source="W15 arm-check verdict",
+                     dry_run=os.environ.get("WATCHER_ARM_DRY_RUN") == "1",
+                     log=_loud)
+    return 0 if res.ok else 2
+
+
+def build_verdict(checks, all_ok: bool):
+    """House-shaped verdict builder: (channel_label, note) -> content string."""
+    from alert_delivery import (SEV_BROKEN, SEV_RECOVERED, house_alert,  # type: ignore
+                                scrub)
+
+    def build(channel_label: str, note: str | None) -> str:
+        facts = [f"{'✓' if ok else '✗'} {name}: {scrub(detail)}"
+                 for name, (ok, detail) in checks]
+        if note:
+            facts.append(note)
+        meaning = ("The watcher is armed and reporting." if all_ok else
+                   "The watcher may never have STARTED. OnFailure= cannot see a non-start, "
+                   "so this check is its only cover.")
+        return house_alert(SEV_RECOVERED if all_ok else SEV_BROKEN,
+                           f"W15 arm-check {'PASS' if all_ok else 'FAIL'} for `{UNIT}`",
+                           facts, meaning,
+                           f"watcher_arm_check · sent to {channel_label}")
+
+    return build
 
 
 def main() -> int:
@@ -150,16 +167,12 @@ def main() -> int:
               ("vm-heartbeat", check_vm_heartbeat()),
               ("local-health", check_local_health())]
     all_ok = all(ok for _, (ok, _) in checks)
-    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-    head = ("\u2705 **W15 arm-check PASS**" if all_ok else "\U0001F6A8 **W15 arm-check FAIL**")
-    lines = [f"{head} — `{UNIT}` @ `{stamp}`"]
-    for name, (ok, detail) in checks:
-        lines.append(f"{'\u2713' if ok else '\u2717'} {name}: {detail}")
-    if not all_ok:
-        lines.append("_A non-start / refuse is invisible to OnFailure= — this check is its only cover._")
-    msg = "\n".join(lines)
-    print(msg)
-    post_rc = _post(msg)
+    build = build_verdict(checks, all_ok)
+    # 🚨 The local echo is the SAME body the channel gets, so stdout and Discord can
+    # never disagree. external_liveness_check parses these check lines out of stdout to
+    # classify UNKNOWN vs BAD, so their prefix shape is a CONTRACT between the two scripts.
+    print(build("stdout", None))
+    post_rc = _post(build)
     # The daemon-liveness verdict drives the exit code; a post failure is surfaced as rc=2 only
     # when the verdict itself passed (so a broken alert path is never mistaken for a healthy arm).
     if not all_ok:

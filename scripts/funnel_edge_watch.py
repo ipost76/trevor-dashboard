@@ -45,8 +45,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests  # same client as scripts/discord_file_delivery.py — Discord's
-                 # Cloudflare 403s urllib's default UA; requests passes.
+# NOTE: `requests` is no longer imported here. Every POST this script makes now goes
+# through scripts/alert_delivery.py, which owns the HTTP client, the explicit User-Agent
+# (Discord's Cloudflare 403s urllib's default UA; requests passes) and the scrubbing.
 
 REPO = Path(__file__).resolve().parent.parent
 URL = "https://trevorhub-wsl.tail2bf7a3.ts.net/"
@@ -80,34 +81,82 @@ REPROBE_MIN_S = 5                            # need >= this much budget left to 
 REPROBE_MAX_TIME_S = 8                       # cap the re-probe curl --max-time
 
 REVIVE_CMD = "`sudo tailscale funnel --https=443 off && sudo tailscale funnel --bg --https=443 3000`"
+HOST = "trevorhub-wsl.tail2bf7a3.ts.net"  # bare host, never a full URL — see _house() below
 
-DOWN_HEAL_FAILED_MSG = (
-    "🚨 **Hub Funnel edge DOWN — auto-heal FAILED** — public https://trevorhub-wsl.tail2bf7a3.ts.net "
-    "is failing via the Tailscale public edge ({fails} consecutive checks; {detail}). "
-    "Auto-heal ran and did NOT stick ({hdetail}). The box + tailnet path are likely still fine — this "
-    "is the edge leg (same failure mode as the Jun 30 silent death, recon A3). Manual revive from the "
-    "WSL box: " + REVIVE_CMD + ". (trevor-funnel-watch, FUNNEL-B1)"
-)
-DOWN_HEAL_SKIPPED_MSG = (
-    "🚨 **Hub Funnel edge DOWN — auto-heal SKIPPED** — public https://trevorhub-wsl.tail2bf7a3.ts.net "
-    "is failing via the Tailscale public edge ({fails} consecutive checks; {detail}). "
-    "Auto-heal was skipped this tick ({reason}). The box + tailnet path are likely still fine — this is "
-    "the edge leg. Manual revive from the WSL box: " + REVIVE_CMD + ". (trevor-funnel-watch, FUNNEL-B1)"
-)
-HEALED_MSG = (
-    "✅ **Hub Funnel edge AUTO-HEALED** — public https://trevorhub-wsl.tail2bf7a3.ts.net went dark and "
-    "was automatically revived (attempt {attempts}; {detail}). No action needed. (trevor-funnel-watch, FUNNEL-B1)"
-)
-LEFT_OFF_MSG = (
-    "🚨🚨 **Hub Funnel may be LEFT OFF — public Hub DOWN** — auto-heal turned the Funnel off but FAILED "
-    "to turn it back on ({fails} consecutive dead checks; {detail}). trevorhub-wsl.tail2bf7a3.ts.net may "
-    "be fully unreachable RIGHT NOW. Re-arm manually from the WSL box IMMEDIATELY: " + REVIVE_CMD
-    + ". (trevor-funnel-watch, FUNNEL-B1)"
-)
-RECOVERED_MSG = (
-    "✅ Hub Funnel edge RECOVERED — public https://trevorhub-wsl.tail2bf7a3.ts.net "
-    "is serving again ({detail}). (trevor-funnel-watch)"
-)
+
+def _loud(msg: str) -> None:
+    print(f"[funnel_edge_watch] {msg}", file=sys.stderr, flush=True)
+
+
+def _scrub(value: object) -> str:
+    """Redact credentials from any text bound for a log or an alert body.
+
+    🚨 NEVER print a raw exception from `requests`: it embeds the full request URL, and a
+    Discord webhook URL IS the credential. This box's journal already carries a leaked
+    HUB_DOWNLOADS_WEBHOOK_URL from exactly that path (2026-07-28, 2026-07-29 x2).
+    """
+    from alert_delivery import scrub  # type: ignore
+
+    return scrub(value)
+
+
+def _house(severity, headline: str, facts, meaning: str):
+    """Build a house-shaped alert BUILDER: (channel_label, note) -> content string.
+
+    A builder rather than a string so the body can state the channel AND mechanism it
+    actually travelled by, and so a possible-duplicate note can be folded into the
+    tier-3 copy. Every interpolated value is SCRUBBED: curl/tailscale stderr is echoed
+    into these bodies, and an unscrubbed echo is how a credential reaches a channel.
+    """
+    from alert_delivery import house_alert, scrub  # type: ignore
+
+    def build(channel_label: str, note: str | None) -> str:
+        f = [scrub(x) for x in facts if x]
+        if note:
+            f.append(note)
+        return house_alert(severity, headline, f, meaning,
+                           f"funnel_edge_watch · sent to {channel_label}")
+
+    return build
+
+
+def down_heal_failed(fails, detail, hdetail):
+    from alert_delivery import SEV_BROKEN  # type: ignore
+    return _house(SEV_BROKEN, f"the public Hub Funnel edge is DOWN and auto-heal did not fix it",
+                  [f"probe: {fails} consecutive failures · {detail}",
+                   f"auto-heal ran and did NOT stick: {hdetail}",
+                   "the box and the tailnet path are likely fine — this is the public edge leg"],
+                  f"{HOST} is unreachable from outside. Revive on WSL: {REVIVE_CMD}")
+
+
+def down_heal_skipped(fails, detail, reason):
+    from alert_delivery import SEV_BROKEN  # type: ignore
+    return _house(SEV_BROKEN, "the public Hub Funnel edge is DOWN (auto-heal skipped this tick)",
+                  [f"probe: {fails} consecutive failures · {detail}",
+                   f"auto-heal skipped: {reason}",
+                   "the box and the tailnet path are likely fine — this is the public edge leg"],
+                  f"{HOST} is unreachable from outside. Revive on WSL: {REVIVE_CMD}")
+
+
+def healed(attempts, detail):
+    from alert_delivery import SEV_RECOVERED  # type: ignore
+    return _house(SEV_RECOVERED, "the public Hub Funnel edge went dark and was auto-revived",
+                  [f"heal attempt {attempts} · {detail}"],
+                  f"{HOST} is serving again. No action needed.")
+
+
+def left_off(fails, detail):
+    from alert_delivery import SEV_BROKEN  # type: ignore
+    return _house(SEV_BROKEN, "the Hub Funnel may be LEFT OFF — the public Hub is DOWN right now",
+                  ["auto-heal turned the Funnel OFF but could not turn it back ON",
+                   f"{fails} consecutive dead checks · {detail}"],
+                  f"{HOST} may be fully unreachable NOW. Re-arm on WSL IMMEDIATELY: {REVIVE_CMD}")
+
+
+def recovered(detail):
+    from alert_delivery import SEV_RECOVERED  # type: ignore
+    return _house(SEV_RECOVERED, "the public Hub Funnel edge is serving again",
+                  [str(detail)], f"{HOST} is reachable from outside. No action needed.")
 
 
 def utcnow() -> str:
@@ -197,23 +246,41 @@ def resolve_webhook() -> tuple[str, str]:
 
 
 def webhook_target_label() -> str:
-    """The VARNAME (not the URL) the next alert would use, for the per-run log. 'NONE' if unresolved."""
+    """Where the next alert would actually LAND, for the per-run log. Never the URL.
+
+    🚨 This used to report the resolved VARNAME, which since B6-ALERTS is no longer the
+    same fact as the destination: when the resolver falls back AND a bot token is present,
+    the alert goes to #qa-agent over bot-token REST, not to #downloads. Reporting the
+    varname would have printed '#downloads' for a message that lands in #qa-agent.
+    """
     try:
+        from alert_delivery import read_bot_token  # type: ignore
+
         _, name = resolve_webhook()
     except Exception:
         return "NONE"
-    return name if name == QA_ENV_VAR else f"{name} (fallback)"
+    if name == QA_ENV_VAR:
+        return f"{name} -> #qa-agent"
+    if read_bot_token():
+        return f"{name} resolved, but delivering to #qa-agent via bot-token (tier 2)"
+    return f"{name} -> #downloads (fallback)"
 
 
-def alert(msg: str) -> bool:
-    url, name = resolve_webhook()
-    label = name if name == QA_ENV_VAR else f"{name} (fallback)"
-    if os.environ.get("FUNNEL_WATCH_DRY_RUN") == "1":
-        print(f"[DRY_RUN] webhook_target={label} would post: {msg}")
-        return True
-    resp = requests.post(url, json={"content": msg}, timeout=15)
-    print(f"alert posted webhook_target={label} status={resp.status_code}", file=sys.stderr)
-    return resp.status_code in (200, 204)
+def alert(build) -> bool:
+    """Deliver through the ONE shared ladder (alert_delivery.post_alert). Never raises.
+
+    `build(channel_label, note) -> str` — see _house(). The tier-1/2/3 ladder, the
+    fail-open fall-through and the double-post guard all live in alert_delivery.
+    """
+    from alert_delivery import post_alert  # type: ignore
+
+    if callable(build):
+        render = lambda label, note: {"content": build(label, note)}  # noqa: E731
+    else:  # a bare string still works — never break a caller mid-incident
+        render = lambda label, note: {"content": str(build)}  # noqa: E731
+    res = post_alert(render, source="funnel edge-watch alert",
+                     dry_run=os.environ.get("FUNNEL_WATCH_DRY_RUN") == "1", log=_loud)
+    return res.ok
 
 
 def _run_ts(args: list[str], timeout: int) -> tuple[int, str]:
@@ -230,7 +297,7 @@ def _run_ts(args: list[str], timeout: int) -> tuple[int, str]:
     except subprocess.TimeoutExpired:
         return -1, f"timeout after {timeout}s"
     except Exception as e:  # pragma: no cover — defensive; a heal must never crash the run
-        return -2, str(e)
+        return -2, _scrub(e)
 
 
 def heal(deadline: float) -> tuple[str, str]:
@@ -272,15 +339,17 @@ def heal(deadline: float) -> tuple[str, str]:
     return ("healed", detail) if healthy else ("rearmed_still_dead", detail)
 
 
-def _post_down(st: dict, msg: str) -> None:
+def _post_down(st: dict, build) -> None:
     """Fire a state-change DOWN alert ONCE per incident (retry-until-delivered on POST failure)."""
+    from alert_delivery import scrub  # type: ignore
+
     if st.get("alerted"):
         return
     try:
-        st["alerted"] = bool(alert(msg))
+        st["alerted"] = bool(alert(build))
         st["last_alert"] = utcnow()
     except Exception as e:
-        print(f"down alert failed: {e}", file=sys.stderr)
+        _loud(f"down alert failed: {scrub(e)}")
         st["alerted"] = False
 
 
@@ -298,9 +367,9 @@ def main() -> int:
         st["consecutive_fails"] = 0
         if prev == "DEAD" and st.get("alerted"):
             try:
-                alert(RECOVERED_MSG.format(detail=detail))
+                alert(recovered(detail))
             except Exception as e:  # alert is best-effort; recovery is visible anyway
-                print(f"recovery alert failed: {e}", file=sys.stderr)
+                _loud(f"recovery alert failed: {_scrub(e)}")
             st["alerted"] = False
         st["heal_attempts"] = 0  # incident over — reset the per-incident cap
         st["status"] = "HEALTHY"
@@ -326,26 +395,24 @@ def main() -> int:
                     st["heal_attempts"] = 0
                     st["last_ok"] = utcnow()
                     try:
-                        alert(HEALED_MSG.format(attempts=heal_attempts + 1, detail=hdetail))
+                        alert(healed(heal_attempts + 1, hdetail))
                     except Exception as e:
-                        print(f"heal-success alert failed: {e}", file=sys.stderr)
+                        _loud(f"heal-success alert failed: {_scrub(e)}")
                     st["alerted"] = False  # ✅ auto-healed supersedes any DOWN this incident
                 elif outcome == "left_off":
                     # LOUDEST — fire on every occurrence (bounded by HEAL_CAP), before anything else.
                     try:
-                        posted = alert(LEFT_OFF_MSG.format(fails=st["consecutive_fails"], detail=hdetail))
+                        posted = alert(left_off(st["consecutive_fails"], hdetail))
                         st["alerted"] = bool(posted) or bool(st.get("alerted"))
                         st["last_alert"] = utcnow()
                     except Exception as e:
-                        print(f"left-off alert failed: {e}", file=sys.stderr)
+                        _loud(f"left-off alert failed: {_scrub(e)}")
                 else:  # rearmed_still_dead / rearmed_unconfirmed / rearm_failed
-                    _post_down(st, DOWN_HEAL_FAILED_MSG.format(
-                        fails=st["consecutive_fails"], detail=detail, hdetail=hdetail))
+                    _post_down(st, down_heal_failed(st["consecutive_fails"], detail, hdetail))
             else:
                 reason = "heal cap reached" if heal_attempts >= HEAL_CAP else (
                     f"insufficient time budget ({elapsed:.0f}s into tick)")
-                _post_down(st, DOWN_HEAL_SKIPPED_MSG.format(
-                    fails=st["consecutive_fails"], detail=detail, reason=reason))
+                _post_down(st, down_heal_skipped(st["consecutive_fails"], detail, reason))
         # below threshold: grace window — status unchanged, no alert, no heal
     else:  # UNKNOWN — this box's connectivity or a self-resolve; never an edge verdict, never healed
         st["status"] = prev
