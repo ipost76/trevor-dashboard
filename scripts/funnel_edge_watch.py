@@ -22,9 +22,41 @@ Alerts resolve the webhook in order: HUB_QA_WEBHOOK_URL (#qa-agent) if set, else
 HUB_DOWNLOADS_WEBHOOK_URL (both from .env.local, never hardcoded/printed). The
 resolved target VARNAME is logged once per run (webhook_target=…) — never the
 URL. Alerts on STATE CHANGE only: 🚨 when the edge goes dead / auto-heal fails,
-✅ on recovery or auto-heal. Silent while healthy. A failed probe with a failed
-egress canary classifies as UNKNOWN (this box's internet, not the edge) —
-logged, never alerted, state untouched, never healed.
+✅ on recovery. Silent while healthy. A failed probe with a failed egress canary
+classifies as UNKNOWN (this box's internet, not the edge) — logged, never
+alerted, state untouched, never healed.
+
+🚨 THE ONE-TICK HOLD  [B4-PROOF, 2026-08-09]
+A self-recovering edge posts ONCE, as ONE 🔵 INFO line — it is never silenced.
+
+WHY THE OLD SHAPE WAS NOT MERELY NOISY, IT WAS FALSE. `heal()` re-arms the
+Funnel and then re-probes within REPROBE_MAX_TIME_S (8s), while tailscaled needs
+~2.5 min to re-stabilise the Funnel after `--bg` (CLAUDE.md, "WSL Hub Access").
+So a `rearmed_still_dead` verdict is structurally unreachable in the affirmative:
+the re-probe CANNOT see a successful re-arm. Measured over 2026-08-01..09 (777
+probe runs): every one of the 3 incidents that alerted recorded
+`last_heal_outcome=rearmed_still_dead` with BOTH tailscale calls rc=0, and every
+one read HEALTHY on the very next tick (gaps 15.2 / 16.0 / 15.5 min — one timer
+interval). The alert said "auto-heal did NOT fix it" on evidence that only
+supported "not yet observable", then a ✅ landed 15 min later: 6 posts, 10 lines
+and 1121 chars to describe an edge that fixed itself three times.
+
+THE RULE. When the heal RE-ARMED CLEANLY (`rearmed_still_dead` /
+`rearmed_unconfirmed` — both mean `off` and `--bg` returned rc=0 and only the
+re-probe is unconfirmed) the BROKEN alert is HELD for exactly ONE probe cycle,
+recorded in state as `pending`. The next tick decides:
+    HEALTHY  -> ONE 🔵 INFO line naming the window and that it self-cleared
+    DEAD     -> the full 🚨 BROKEN page, revive command intact (now CONFIRMED:
+                the edge is still down a cycle after a successful re-arm)
+    UNKNOWN  -> HOLD. Not cleared, not posted — this box's egress is down, so the
+                edge verdict is unknowable and neither answer would be honest.
+                Bounded by PENDING_MAX_HOLD_S so an incident can never strand.
+
+🚨 NOTHING ELSE IS DEFERRED. `left_off` (the Funnel may be OFF), `rearm_failed`
+(the re-arm itself failed) and `down_heal_skipped` (heal cap / no time budget)
+page IMMEDIATELY at full severity, exactly as before. The cost of the hold is
+stated plainly: a sustained outage pages ~15 min later, and ONLY in the case
+where the auto-heal reported a clean re-arm.
 
 State: data/funnel-edge-status.json (data/ is gitignored). Driven by
 trevor-funnel-watch.timer every 15 min. Always exits 0 unless it crashes.
@@ -83,6 +115,17 @@ REPROBE_MAX_TIME_S = 8                       # cap the re-probe curl --max-time
 REVIVE_CMD = "`sudo tailscale funnel --https=443 off && sudo tailscale funnel --bg --https=443 3000`"
 HOST = "trevorhub-wsl.tail2bf7a3.ts.net"  # bare host, never a full URL — see _house() below
 
+# The ONLY two heal outcomes whose BROKEN alert is held for one cycle. Both mean the
+# tailscale calls returned rc=0 (the edge IS armed) and only the re-probe is unconfirmed
+# — see the "ONE-TICK HOLD" block in the module docstring. Everything else pages now.
+_HOLD_OUTCOMES = ("rearmed_still_dead", "rearmed_unconfirmed")
+# 🚨 A HOLD MUST NEVER BECOME A STRANDED INCIDENT. Only a repeated UNKNOWN verdict can
+# linger (a DEAD tick escalates, a HEALTHY tick posts the INFO line), and UNKNOWN means
+# this box's own egress is down. Past this bound the held incident is reported at full
+# severity naming exactly that, rather than waiting for a verdict that may never come.
+# ~4 probe cycles at the unit's OnUnitActiveSec=15min.
+PENDING_MAX_HOLD_S = 3600
+
 
 def _loud(msg: str) -> None:
     print(f"[funnel_edge_watch] {msg}", file=sys.stderr, flush=True)
@@ -120,12 +163,91 @@ def _house(severity, headline: str, facts, meaning: str):
     return build
 
 
-def down_heal_failed(fails, detail, hdetail):
+def _et(iso: str | None = None):
+    """(datetime in ET, zone-abbrev). Never raises; degrades to UTC, never to empty.
+
+    Mirrors alert_delivery.et_stamp's discipline: a missing timestamp reads as
+    "unknown when", so a tzdata failure must still yield a present, labelled time.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("America/New_York")
+    except Exception:  # noqa: BLE001 - a tz lookup must never break an alert
+        tz = timezone.utc
+    if iso:
+        try:
+            base = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return None, ""
+    else:
+        base = datetime.now(timezone.utc)
+    dt = base.astimezone(tz)
+    return dt, (dt.strftime("%Z") or "UTC")
+
+
+def _et_hm(iso: str | None) -> str:
+    """'16:45 EDT' for one instant. '' when the instant is unrecorded/unparseable."""
+    dt, zone = _et(iso)
+    return f"{dt:%H:%M} {zone}" if dt else ""
+
+
+def _et_window(since_iso: str | None) -> str:
+    """'16:29–17:01 EDT' — the incident window, ET, DST-aware. Never empty.
+
+    An unrecorded start is SAID so rather than guessed at or silently dropped: the whole
+    point of the one line is to say what happened and WHEN.
+    """
+    end, zone = _et(None)
+    start, _ = _et(since_iso) if since_iso else (None, "")
+    if start is None:
+        return f"(start unrecorded)–{end:%H:%M} {zone}"
+    return f"{start:%H:%M}–{end:%H:%M} {zone}"
+
+
+def _age_s(iso: str | None) -> float:
+    """Seconds since an ISO-Z stamp. 0.0 when unrecorded — an unknown age never
+    trips a bound, so a malformed stamp cannot silently escalate an incident."""
+    if not iso:
+        return 0.0
+    try:
+        then = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, (datetime.now(timezone.utc) - then).total_seconds())
+
+
+def _dedupe_err(detail: str, hdetail: str) -> str:
+    """🚨 NEVER PRINT THE SAME ERROR PAYLOAD TWICE IN ONE MESSAGE.
+
+    The probe detail and the post-heal re-probe detail both end in `err=<curl text>`, and
+    on a flapping edge it is the SAME text — Ghost read that wall on a phone. When they
+    match, the second copy is replaced by a back-reference. When they DIFFER, both are
+    kept in full: two distinct errors are two facts, and collapsing them would hide one.
+    """
+    marker = " err="
+    i = detail.find(marker)
+    j = hdetail.find(marker)
+    if i < 0 or j < 0:
+        return hdetail
+    if detail[i + len(marker):].strip() != hdetail[j + len(marker):].strip():
+        return hdetail
+    return hdetail[:j] + " err=(same as above)"
+
+
+def down_heal_failed(fails, detail, hdetail, held_since=None):
     from alert_delivery import SEV_BROKEN  # type: ignore
-    return _house(SEV_BROKEN, f"the public Hub Funnel edge is DOWN and auto-heal did not fix it",
-                  [f"probe: {fails} consecutive failures · {detail}",
-                   f"auto-heal ran and did NOT stick: {hdetail}",
-                   "the box and the tailnet path are likely fine — this is the public edge leg"],
+    facts = [f"probe: {fails} consecutive failures · {detail}",
+             f"auto-heal ran and did NOT fix it: {_dedupe_err(detail, hdetail)}"]
+    held = _et_hm(held_since) if held_since else ""
+    if held:
+        # Only set on the ESCALATION path, where "did not fix it" is no longer an
+        # inference from an 8s re-probe but an observation a full cycle later.
+        facts.append(f"held since {held} and re-checked a full probe cycle later — "
+                     f"still down, so this is not a flap")
+    facts.append("the box and the tailnet path are likely fine — this is the public edge leg")
+    return _house(SEV_BROKEN, "the public Hub Funnel edge is DOWN and auto-heal did not fix it",
+                  facts,
                   f"{HOST} is unreachable from outside. Revive on WSL: {REVIVE_CMD}")
 
 
@@ -138,11 +260,33 @@ def down_heal_skipped(fails, detail, reason):
                   f"{HOST} is unreachable from outside. Revive on WSL: {REVIVE_CMD}")
 
 
-def healed(attempts, detail):
-    from alert_delivery import SEV_RECOVERED  # type: ignore
-    return _house(SEV_RECOVERED, "the public Hub Funnel edge went dark and was auto-revived",
-                  [f"heal attempt {attempts} · {detail}"],
-                  f"{HOST} is serving again. No action needed.")
+def flapped(since_iso, what: str):
+    """🔵 INFO — a self-recovering edge, in STRICTLY ONE LINE. SHORTEN, NEVER SILENCE.
+
+    Replaces the 🚨-then-✅ pair (10 lines / 1121 chars) for the transient case. It still
+    says WHAT happened and WHEN, names the box, carries an ET stamp and a severity from
+    the house four — it is a smaller alert, not a missing one.
+
+    🚨 The one-line guarantee is STRUCTURAL, not conventional: the assembled text is run
+    through `.split()`/join, so a newline reaching it from a scrubbed payload collapses
+    instead of quietly turning a one-line contract into a two-line message.
+    """
+    from alert_delivery import MAX_CHARS, SEV_INFO, BOX, scrub  # type: ignore
+
+    icon, word = SEV_INFO
+    window = _et_window(since_iso)
+
+    def build(channel_label: str, note: str | None) -> str:
+        line = (f"{icon} {word} — the public Hub Funnel edge flapped {window} and {what} · "
+                f"funnel_edge_watch → {channel_label} ({BOX})")
+        if note:
+            line = f"{line} · {note}"
+        line = " ".join(scrub(line).split())
+        if len(line) > MAX_CHARS:
+            line = line[: MAX_CHARS - 10].rstrip() + "…[clipped]"
+        return line
+
+    return build
 
 
 def left_off(fails, detail):
@@ -202,7 +346,8 @@ def load_state() -> dict:
     try:
         return json.loads(STATE_FILE.read_text())
     except (OSError, ValueError):
-        return {"status": "HEALTHY", "consecutive_fails": 0, "alerted": False, "heal_attempts": 0}
+        return {"status": "HEALTHY", "consecutive_fails": 0, "alerted": False,
+                "heal_attempts": 0, "pending": None, "incident_since": None}
 
 
 def save_state(st: dict) -> None:
@@ -353,6 +498,24 @@ def _post_down(st: dict, build) -> None:
         st["alerted"] = False
 
 
+def _post_flap(st: dict, what: str) -> bool:
+    """Post the ONE-LINE 🔵 INFO for a self-cleared incident. Returns delivered?.
+
+    Never raises: an INFO line failing to send must not crash a probe run.
+    """
+    from alert_delivery import scrub  # type: ignore
+
+    try:
+        delivered = bool(alert(flapped(st.get("incident_since"), what)))
+    except Exception as e:  # noqa: BLE001
+        _loud(f"flap INFO alert failed: {scrub(e)}")
+        delivered = False
+    if delivered:
+        st["last_alert"] = utcnow()
+    st["alerted"] = False
+    return delivered
+
+
 def main() -> int:
     start = time.monotonic()
     verdict, detail = classify()
@@ -365,12 +528,25 @@ def main() -> int:
     if verdict == "HEALTHY":
         st["last_ok"] = utcnow()
         st["consecutive_fails"] = 0
-        if prev == "DEAD" and st.get("alerted"):
+        pending = st.get("pending")
+        if pending:
+            # THE TRANSIENT CASE — the held incident cleared on its own. ONE 🔵 INFO line,
+            # after the fact. The hold is released only on CONFIRMED delivery (or once the
+            # bound expires), so a webhook blip retries next tick instead of losing the
+            # notice — the same discipline _post_down uses for a page.
+            delivered = _post_flap(st, "recovered on its own")
+            if delivered or _age_s(pending.get("since")) > PENDING_MAX_HOLD_S:
+                st["pending"] = None
+                st["incident_since"] = None
+        elif prev == "DEAD" and st.get("alerted"):
             try:
                 alert(recovered(detail))
             except Exception as e:  # alert is best-effort; recovery is visible anyway
                 _loud(f"recovery alert failed: {_scrub(e)}")
             st["alerted"] = False
+            st["incident_since"] = None
+        else:
+            st["incident_since"] = None
         st["heal_attempts"] = 0  # incident over — reset the per-incident cap
         st["status"] = "HEALTHY"
 
@@ -378,6 +554,8 @@ def main() -> int:
         # classify() already returned DEAD only because the egress canary PASSED — a local
         # outage classifies UNKNOWN and never reaches here, so the canary gate is preserved
         # upstream and needs no re-check inside the heal.
+        if not st.get("incident_since"):
+            st["incident_since"] = utcnow()  # the window the INFO line will name
         st["consecutive_fails"] = int(st.get("consecutive_fails", 0)) + 1
         if st["consecutive_fails"] >= FAILS_TO_ALERT:
             st["status"] = "DEAD"
@@ -390,36 +568,69 @@ def main() -> int:
                 outcome, hdetail = heal(start + ONESHOT_BUDGET_S - POST_RESERVE_S)
                 st["last_heal_outcome"] = outcome
                 if outcome == "healed":
+                    # Self-recovering and CONFIRMED — the same class as a held flap, so it
+                    # gets the same single 🔵 INFO line rather than a ✅ RECOVERED card.
                     st["status"] = "HEALTHY"
                     st["consecutive_fails"] = 0
                     st["heal_attempts"] = 0
                     st["last_ok"] = utcnow()
-                    try:
-                        alert(healed(heal_attempts + 1, hdetail))
-                    except Exception as e:
-                        _loud(f"heal-success alert failed: {_scrub(e)}")
-                    st["alerted"] = False  # ✅ auto-healed supersedes any DOWN this incident
+                    _post_flap(st, f"auto-heal revived it on attempt {heal_attempts + 1}")
+                    st["pending"] = None
+                    st["incident_since"] = None
                 elif outcome == "left_off":
                     # LOUDEST — fire on every occurrence (bounded by HEAL_CAP), before anything else.
+                    # 🚨 NEVER HELD: the Funnel may be OFF right now.
                     try:
                         posted = alert(left_off(st["consecutive_fails"], hdetail))
                         st["alerted"] = bool(posted) or bool(st.get("alerted"))
                         st["last_alert"] = utcnow()
                     except Exception as e:
                         _loud(f"left-off alert failed: {_scrub(e)}")
-                else:  # rearmed_still_dead / rearmed_unconfirmed / rearm_failed
-                    _post_down(st, down_heal_failed(st["consecutive_fails"], detail, hdetail))
+                    st["pending"] = None
+                elif outcome in _HOLD_OUTCOMES and not st.get("pending") and not st.get("alerted"):
+                    # 🚨 THE ONE-TICK HOLD. Both tailscale calls returned rc=0, so the edge IS
+                    # armed; only the re-probe is unconfirmed, and it fires within
+                    # REPROBE_MAX_TIME_S of a re-arm that needs ~2.5 min to settle. Paging now
+                    # would assert a verdict this tick cannot hold. Wait exactly one cycle.
+                    st["pending"] = {"since": utcnow(), "detail": detail,
+                                     "heal_detail": hdetail, "fails": st["consecutive_fails"]}
+                    _loud(f"edge DEAD, auto-heal re-armed it ({outcome}) — HOLDING the BROKEN "
+                          f"alert for ONE probe cycle; the re-probe fires within "
+                          f"{REPROBE_MAX_TIME_S}s of the re-arm and cannot confirm it yet. "
+                          f"Next tick: HEALTHY -> one INFO line, still DEAD -> full page.")
+                else:  # a second still-dead cycle, or rearm_failed — CONFIRMED, page now
+                    held = st.pop("pending", None)
+                    _post_down(st, down_heal_failed(st["consecutive_fails"], detail, hdetail,
+                                                    held_since=(held or {}).get("since")))
             else:
                 reason = "heal cap reached" if heal_attempts >= HEAL_CAP else (
                     f"insufficient time budget ({elapsed:.0f}s into tick)")
+                st["pending"] = None
                 _post_down(st, down_heal_skipped(st["consecutive_fails"], detail, reason))
         # below threshold: grace window — status unchanged, no alert, no heal
     else:  # UNKNOWN — this box's connectivity or a self-resolve; never an edge verdict, never healed
         st["status"] = prev
+        pending = st.get("pending")
+        # 🚨 HOLD, DON'T CLEAR, DON'T POST. UNKNOWN means THIS box's egress is down, so the
+        # edge verdict is unknowable: clearing would be a false green and paging would blame
+        # the edge for a local outage. But a hold must never become a stranded incident —
+        # past the bound, report the last known DEAD state and say exactly why it is unconfirmed.
+        if pending and _age_s(pending.get("since")) > PENDING_MAX_HOLD_S:
+            st["pending"] = None
+            held = _et_hm(pending.get("since")) or "an unrecorded time"
+            _post_down(st, down_heal_skipped(
+                pending.get("fails", st.get("consecutive_fails", 0)),
+                pending.get("detail", detail),
+                f"held since {held} awaiting re-confirmation, but this box's egress has been "
+                f"down since — the edge verdict cannot be re-checked, so the last known DEAD "
+                f"state is reported rather than held any longer"))
 
     save_state(st)
+    # `pending=` is on the status line deliberately: a held alert that leaves no trace in
+    # the journal is indistinguishable from a swallowed one.
     print(f"{utcnow()} funnel-edge-watch verdict={verdict} status={st['status']} "
           f"fails={st.get('consecutive_fails', 0)} heal_attempts={st.get('heal_attempts', 0)} "
+          f"pending={'held since ' + str((st.get('pending') or {}).get('since')) if st.get('pending') else 'no'} "
           f"webhook_target={webhook_target_label()} {detail}")
     return 0
 
