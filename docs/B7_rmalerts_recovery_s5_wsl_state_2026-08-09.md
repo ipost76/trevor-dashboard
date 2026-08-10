@@ -236,7 +236,7 @@ of evidence than A** — it re-tests the author's own model of the system. Recor
 |---|---|
 | Repo | `/home/ghost/projects/trevor-dashboard` |
 | Branch | `master` |
-| HEAD at measurement | `e06c5fe` (this document's commit is its child) |
+| HEAD at measurement | `e06c5fe` — see the note below; this document's commit is **not** its direct child |
 | HEAD date | 2026-08-09 **12:22:42 EDT** |
 | HEAD subject | `fix: hold a self-healing Funnel-edge alert one cycle -- one INFO line, not a BROKEN/RECOVERED pair` |
 | Remote | `https://github.com/ipost76/trevor-dashboard` (HTTPS) · **PUBLIC** |
@@ -244,6 +244,13 @@ of evidence than A** — it re-tests the author's own model of the system. Recor
 | Working tree | 0 modified, 0 staged, **16 untracked** entries |
 | Hooks | **none** — `.git/hooks/` contains only `*.sample`. Confirms: **no post-commit hook on WSL; pushes are manual.** |
 | Sacred manifest | **ABSENT** — no `scripts/run_guards.sh`, no `scripts/guards/`, no pre-commit chain |
+
+📌 **The snapshot discipline, demonstrated on itself.** HEAD was `e06c5fe` when §3 was measured at
+21:39 EDT. A **sibling WSL prompt (`B6-LEDGER`) committed `558ef19` to this same repo between that
+measurement and this document's commit**, so the parent chain is
+`e06c5fe → 558ef19 (B6-LEDGER) → this commit`. No file collision occurred — the two commits touch
+disjoint files. This is exactly why §3 is labelled a snapshot: a figure was already stale within
+40 minutes of being measured, in the document that measured it.
 
 Untracked entries include `docs/reports/`, 12 loose `docs/*.md` recon files, `shadow_history.db`,
 `trainer_archive.db`, `tmp/`. **`docs/reports/` is untracked but NOT ignored** —
