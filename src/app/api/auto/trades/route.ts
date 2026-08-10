@@ -55,6 +55,15 @@ interface OpenPositionRow {
   peak_pnl_pct?: number | null;
   exit_signals_log?: string | null;
   trade_mode?: string | null;
+  /**
+   * B6-LEDGER: PAPER per the authority (`lib/paper_mode.py`, mirroring the VM's
+   * `_is_paper_position`) — NOT `trade_mode`, which is stamped 'live' on seven
+   * post-cutover paper rows. **`undefined` is load-bearing**: a thin heartbeat
+   * card has no replica row yet, so its mode is genuinely unknown and the card
+   * must render MODE?, never a confident LIVE. Same discipline as `trade_mode`
+   * being null there rather than hardcoded.
+   */
+  is_paper?: boolean;
   thin?: boolean;
   [k: string]: unknown;
 }

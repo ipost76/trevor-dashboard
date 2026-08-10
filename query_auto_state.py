@@ -88,6 +88,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from lib.paper_mode import is_paper_sql
+
 DB = "/home/trevor/trevor/trevor.db"
 ET = ZoneInfo("America/New_York")
 UTC = timezone.utc
@@ -736,9 +738,40 @@ def main() -> int:
             # W4a: how many of that window are PAPER — drives the hero's PAPER
             # label. Counted from the SAME epoch-floored window so the label can
             # never disagree with the number it sits beside.
+            #
+            # 🚨 B6-LEDGER (2026-08-09): the predicate was `trade_mode='paper'`.
+            # That column is NOT the authority and it UNDERCOUNTED PAPER BY SEVEN
+            # — measured on the WSL replica (mtime 2026-08-09 21:20:50 EDT):
+            # epoch-bounded 60 -> 67 of 67 closed trades. The seven, and why each
+            # was mislabelled:
+            #   #101733 FARTCOIN 2026-07-23  trade_mode='live', paper_window=0
+            #       — the FIRST paper fill. BOTH columns lie: `insert_trade` still
+            #         dropped paper_window (default 0) and the row was stamped
+            #         'live'. Only the synthetic oid 9000000000001 tells the truth.
+            #   #101734 kPEPE    2026-07-25  trade_mode='live', paper_window=1
+            #   #101735 kPEPE    2026-07-26  trade_mode='live', paper_window=1
+            #   #101736 kPEPE    2026-07-26  trade_mode='live', paper_window=1
+            #   #101737 kPEPE    2026-07-27  trade_mode='live', paper_window=1
+            #   #101738 DOGE     2026-07-27  trade_mode='live', paper_window=1
+            #   #101739 FARTCOIN 2026-07-27  trade_mode='live', paper_window=1
+            #       — six rows written BEFORE RD-B4 (`dc0458d`) fixed the
+            #         hardcoded stamp, so a paper fill was recorded 'live'.
+            #         paper_window was already persisting truthfully by then.
+            #
+            # 🚨 `paper_window` ALONE IS THE WRONG FIX: it recovers six of the
+            # seven and leaves #101733 wrong — a second wrong answer, harder to
+            # see than the first. The rule is delegated to lib.paper_mode, which
+            # mirrors auto_trader/watchdog.py::_is_paper_position (VM) and
+            # declares the synthetic-oid floor exactly once.
+            #
+            # Over-count is zero: all seven carry an oid >= the 9e12 floor, and
+            # no row this predicate adds is a real order. The epoch floor is
+            # UNCHANGED (Ghost's cutover law) and is what keeps this honest — see
+            # lib/paper_mode.py on why a WHOLE-TABLE count must not be built on
+            # this predicate.
             paper_count_row = conn.execute(
                 "SELECT COUNT(*) AS n FROM auto_trades "
-                "WHERE status='closed' AND closed_at >= ? AND trade_mode='paper'",
+                f"WHERE status='closed' AND closed_at >= ? AND {is_paper_sql()}",
                 (epoch,),
             ).fetchone()
 

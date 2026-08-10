@@ -30,6 +30,12 @@ interface ClosedTrade {
   opened_at?: string | null;
   closed_at: string;
   trade_mode: "live" | "paper";
+  /**
+   * B6-LEDGER: PAPER per the authority (`lib/paper_mode.py`, mirroring the VM's
+   * `_is_paper_position`), never `trade_mode`. Always present on a closed row —
+   * `query_auto_trades._tag_paper` sets it for every row it returns.
+   */
+  is_paper: boolean;
   exit_reason?: string | null;
   // W4a: the Smart-Exit layer that fired. INTEGER with fractional layers ×10 —
   // layer 6.5 is stored 65, 6.2 is 62. See fmtExitLayer.
@@ -524,7 +530,10 @@ export function RecentTab() {
                             both, so the label is load-bearing again. It renders
                             ONLY for paper, so a live-only list stays visually
                             quiet and the marker keeps its meaning. */}
-                        {t.trade_mode === "paper" && (
+                        {/* 🚨 B6-LEDGER: `is_paper` (the authority), not
+                            `trade_mode` — seven post-cutover paper rows are
+                            stamped 'live' and rendered no marker at all. */}
+                        {t.is_paper && (
                           <Pill
                             intent="warn"
                             size="sm"

@@ -32,6 +32,11 @@ interface OpenPosition {
   // W4a: null on a THIN card — heartbeat-only, the replica row carrying the
   // mode has not arrived. Genuinely unknown, and rendered as such.
   trade_mode?: "live" | "paper" | null;
+  /**
+   * B6-LEDGER: PAPER per the authority, never `trade_mode`. `undefined` = a thin
+   * heartbeat card whose replica row hasn't arrived — genuinely unknown.
+   */
+  is_paper?: boolean;
   // KPI-RECON: true ⇒ live-from-heartbeat but not yet in the replica (thin card).
   thin?: boolean;
 }
@@ -212,20 +217,25 @@ function PositionRow({ p, live }: { p: EnrichedPosition; live: boolean }) {
               real money, so a card whose mode we could not resolve says so
               explicitly rather than showing nothing. `live` is the only value
               that renders the confident LIVE pill. */}
+          {/* 🚨 B6-LEDGER: branches on `is_paper` (the authority) instead of
+              `trade_mode`, which is stamped 'live' on seven post-cutover paper
+              rows. The THREE states are unchanged and the unknown one still
+              fails toward "unconfirmed": `is_paper === undefined` means no
+              replica row yet, and an unlabelled card reads as real money. */}
           <Pill
-            intent={p.trade_mode === "live" ? "live" : "warn"}
+            intent={p.is_paper === false ? "live" : "warn"}
             size="sm"
             title={
-              p.trade_mode === "live"
+              p.is_paper === false
                 ? "Real order placed on the exchange"
-                : p.trade_mode === "paper"
+                : p.is_paper === true
                   ? "Simulated position — no order was sent to the exchange"
                   : "Mode not yet known for this position — its detail has not replicated. Treat as unconfirmed."
             }
           >
-            {p.trade_mode === "live"
+            {p.is_paper === false
               ? "LIVE"
-              : p.trade_mode === "paper"
+              : p.is_paper === true
                 ? "PAPER"
                 : "MODE?"}
           </Pill>

@@ -91,6 +91,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from lib.paper_mode import is_paper_row
+
 DB = "/home/trevor/trevor/trevor.db"
 
 # The published-replica age past which this view is materially behind. Matches
@@ -186,6 +188,12 @@ def fetch_signals(conn: sqlite3.Connection, hours: int, limit: int) -> list[dict
 
     One signal can produce several decision_log rows; the LAST one (highest id)
     is the outcome that stuck.
+
+    B6-LEDGER: the converted row also carries `partial_pnl_realized` — realised
+    net for a trade is ALWAYS `pnl_usd + COALESCE(partial_pnl_realized, 0)`, and
+    shipping only `pnl_usd` made every scaled-out trade render smaller on its row
+    than it contributed to the REALIZED card above it. `is_paper` is derived here
+    from `lib.paper_mode` rather than from `trade_mode`, which lies for #101733.
     """
     cur = conn.execute(
         """
@@ -201,6 +209,9 @@ def fetch_signals(conn: sqlite3.Connection, hours: int, limit: int) -> list[dict
                a.trade_mode        AS trade_mode,
                a.status            AS trade_status,
                a.pnl_usd           AS pnl_usd,
+               a.partial_pnl_realized AS partial_pnl_realized,
+               a.paper_window      AS paper_window,
+               a.hl_order_id       AS hl_order_id,
                a.exit_reason       AS exit_reason,
                a.exit_layer        AS exit_layer,
                d.action            AS decision_action,
@@ -227,11 +238,20 @@ def fetch_signals(conn: sqlite3.Connection, hours: int, limit: int) -> list[dict
         # 30d); signal_ab_results.production_score is the same value x100
         # (7532 -> 0.6205 and 62.05). Emit the 0-100 form as `score` so the UI
         # never has to know the convention, and keep the raw value alongside.
-        out.append({
+        # B6-LEDGER: classify PAPER here, from the authority, then drop the two
+        # raw columns the rule needs so the wire payload does not grow a second
+        # place the rule could be re-derived. `trade_mode` still ships (it is
+        # displayed nowhere now, but other consumers read the shape) — it is NOT
+        # what the badge branches on any more.
+        row = {
             **r,
             "score": round(conf * 100, 2) if isinstance(conf, (int, float)) else None,
             "converted": r.get("trade_id") is not None,
-        })
+            "is_paper": r.get("trade_id") is not None and is_paper_row(r),
+        }
+        row.pop("paper_window", None)
+        row.pop("hl_order_id", None)
+        out.append(row)
     return out
 
 

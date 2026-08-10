@@ -69,6 +69,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from lib.paper_mode import is_paper_row
+
 DB = "/home/trevor/trevor/trevor.db"
 
 
@@ -149,20 +151,39 @@ def _rows_to_dicts(cursor) -> list[dict]:
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 
+def _tag_paper(rows: list[dict]) -> list[dict]:
+    """B6-LEDGER: attach `is_paper` from the authority, then drop the two raw
+    columns the rule reads.
+
+    The PAPER pill on a trade row branched on `trade_mode == "paper"`, which is
+    not the authority: seven post-cutover paper rows are stamped 'live' (six by
+    the pre-`dc0458d` hardcode, plus #101733 where `paper_window` lies too), so
+    they rendered with no marker at all. `lib.paper_mode` mirrors the VM's
+    `auto_trader/watchdog.py::_is_paper_position` and holds the synthetic-oid
+    floor in one place. `trade_mode` still ships — the badge no longer reads it.
+    """
+    for r in rows:
+        r["is_paper"] = is_paper_row(r)
+        r.pop("paper_window", None)
+        r.pop("hl_order_id", None)
+    return rows
+
+
 def fetch_open(limit: int) -> dict:
     with _connect_ro() as conn:
         cur = conn.execute(
             f"""
             SELECT id, ticker, direction, entry_price, stop_price, target_price,
                    leverage, confidence, notional_usd, opened_at,
-                   exit_signals_log, peak_pnl_pct, trade_mode
+                   exit_signals_log, peak_pnl_pct, trade_mode,
+                   paper_window, hl_order_id
             FROM auto_trades
             WHERE status='open'
             ORDER BY opened_at DESC
             LIMIT {limit}
             """
         )
-        rows = _rows_to_dicts(cur)
+        rows = _tag_paper(_rows_to_dicts(cur))
     return {
         "type": "open",
         "count": len(rows),
@@ -215,7 +236,7 @@ def fetch_closed(
             f"""
             SELECT id, ticker, direction, pnl_pct, pnl_usd,
                    hold_duration_minutes, opened_at, closed_at, exit_reason,
-                   trade_mode, exit_layer
+                   trade_mode, exit_layer, paper_window, hl_order_id
             FROM auto_trades
             WHERE {where}
             GROUP BY id
@@ -234,7 +255,7 @@ def fetch_closed(
         # those carry NULLs (would collapse) and can be shared by genuinely
         # distinct trades (would merge & hide one), violating "never drop a real
         # closed trade".
-        rows = _rows_to_dicts(cur)
+        rows = _tag_paper(_rows_to_dicts(cur))
     return {
         "type": "closed",
         "count": len(rows),

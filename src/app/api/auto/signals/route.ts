@@ -57,7 +57,16 @@ interface SignalRow {
   trade_id: number | null;
   trade_mode: string | null;
   trade_status: string | null;
+  /** FINAL-LEG net only. Realised net is `pnl_usd + (partial_pnl_realized ?? 0)`. */
   pnl_usd: number | null;
+  /** B6-LEDGER: banked scale-out profit. Never render `pnl_usd` without it. */
+  partial_pnl_realized: number | null;
+  /**
+   * B6-LEDGER: PAPER per the authority (`lib/paper_mode.py`, mirroring the VM's
+   * `_is_paper_position`) — NOT `trade_mode`, which is stamped 'live' on seven
+   * post-cutover paper rows. Branch the badge on this.
+   */
+  is_paper: boolean;
   exit_reason: string | null;
   exit_layer: number | null;
   /** null => no entry decision was ever recorded for this signal. */

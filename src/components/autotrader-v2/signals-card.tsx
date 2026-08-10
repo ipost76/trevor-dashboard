@@ -59,9 +59,31 @@ interface SignalRow {
   trade_id: number | null;
   trade_mode: string | null;
   trade_status: string | null;
+  /** FINAL-LEG net only — see `realisedNet` below. */
   pnl_usd: number | null;
+  /** B6-LEDGER: banked scale-out profit, null when the trade never scaled out. */
+  partial_pnl_realized: number | null;
+  /** B6-LEDGER: PAPER per the authority, never `trade_mode` (which lies for #101733). */
+  is_paper: boolean;
   decision_action: string | null;
   decision_reason: string | null;
+}
+
+/**
+ * Realised net for one trade — the SAME quantity the REALIZED card above sums.
+ *
+ * 🚨 B6-LEDGER (2026-08-09): the row rendered `pnl_usd` alone while the card
+ * sums `pnl_usd + COALESCE(partial_pnl_realized, 0)`, so every scaled-out trade
+ * showed a SMALLER number on its row than it contributed to the card on the same
+ * screen. Measured on #101786 (SUI): row $0.0791 vs contribution $0.1744 — a
+ * $0.0953 permanent disagreement. The card is the one that is right.
+ *
+ * Returns null only when the final leg itself was never captured — that stays a
+ * "no P&L" render, never a 0.00 (RM-RED-2 M10).
+ */
+function realisedNet(s: SignalRow): number | null {
+  if (s.pnl_usd == null) return null;
+  return s.pnl_usd + (s.partial_pnl_realized ?? 0);
 }
 
 interface SignalsResponse {
@@ -343,10 +365,22 @@ export function SignalsCard() {
 
       {/* 🚨 THE HONESTY LINE. The count of signals the DB records no decision
           for, stated on the surface rather than quietly absorbed. Without it
-          the card would imply it explains every signal it lists. */}
+          the card would imply it explains every signal it lists.
+
+          🚨 B6-LEDGER (2026-08-09): THE DENOMINATOR IS PART OF THE HONESTY.
+          These three counts PARTITION the window — they sum to `f.signals` and
+          the rejected/unexplained sets are disjoint (proven against the WSL
+          replica: 21 = 11 + 6 + 4, zero overlap). Printed without their total a
+          reader assumes a universe about the size of the largest of them, which
+          understates it by roughly half — and that hides the finding underneath
+          the arithmetic, which is how large `unexplained` actually is.
+
+          The total is INFORMATION, not a warning: it renders in the line's own
+          muted colour. Gold stays reserved for the unexplained count and the
+          divergence guard below (Hub aesthetic — amber/red mean a real problem). */}
       {f && f.signals > 0 && (
         <p className="mb-3 font-sans text-micro text-fg-muted">
-          {f.converted} converted · {f.rejected} rejected
+          {f.signals} signals: {f.converted} converted · {f.rejected} rejected
           {f.unexplained > 0 && (
             <span className="text-accent-gold">
               {" "}
@@ -361,6 +395,29 @@ export function SignalsCard() {
                 .join(" · ")}
             </span>
           )}
+        </p>
+      )}
+
+      {/* 🚨 B6-LEDGER: THE DIVERGENCE GUARD, AND IT IS SILENT WHEN THINGS AGREE.
+          The three parts and the total are not one measurement: the counts come
+          from a trade_insights/auto_trades/decision_log join, and they agreed by
+          coincidence of that join with NOTHING watching for the day they stop.
+          A signal that was ACCEPTed but never filled is already a state the three
+          counts cannot express, so the partition is a live assumption, not a law.
+
+          This does not FIX that — reconciling the two queries is a later roadmap
+          — it makes the failure VISIBLE the moment it happens, on the surface
+          rather than in a report nobody runs. Gold, because a display that
+          disagrees with itself is a real problem. */}
+      {f && f.signals > 0 && f.converted + f.rejected + f.unexplained !== f.signals && (
+        <p className="mb-3 flex items-start gap-1.5 rounded-md border border-accent-gold/40 bg-accent-gold/5 p-2 font-sans text-micro text-accent-gold">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
+          <span>
+            These counts don&apos;t add up: {f.converted} + {f.rejected} +{" "}
+            {f.unexplained} = {f.converted + f.rejected + f.unexplained}, but{" "}
+            {f.signals} signals were posted. Some signals are in none of the three
+            groups, or in more than one — read the breakdown as incomplete.
+          </span>
         </p>
       )}
 
@@ -406,9 +463,12 @@ export function SignalsCard() {
                   </span>
                   {/* 🚨 The paper marker rides the SIGNAL's own trade row, so a
                       converted paper signal is labelled here too — the same
-                      rule as the trade rows. Only a real 'live' value renders
-                      no marker; anything else is not asserted as live. */}
-                  {s.converted && s.trade_mode === "paper" && (
+                      rule as the trade rows.
+
+                      🚨 B6-LEDGER: branches on `is_paper` (the authority), not
+                      on `trade_mode === "paper"`. Seven post-cutover paper rows
+                      are stamped 'live' and rendered NO marker at all. */}
+                  {s.is_paper && (
                     <Pill intent="warn" size="sm" className="shrink-0">
                       PAPER
                     </Pill>
@@ -451,8 +511,15 @@ export function SignalsCard() {
                     <Pill intent="live" size="sm" title={`Trade #${s.trade_id}`}>
                       TRADED
                     </Pill>
-                    {s.pnl_usd != null && (
-                      <MoneyText value={s.pnl_usd} unit="$" size="sm" showSign />
+                    {/* B6-LEDGER: realised net = final leg + banked partials,
+                        matching the REALIZED card. See `realisedNet`. */}
+                    {realisedNet(s) != null && (
+                      <MoneyText
+                        value={realisedNet(s) as number}
+                        unit="$"
+                        size="sm"
+                        showSign
+                      />
                     )}
                   </div>
                 ) : s.decision_reason ? (

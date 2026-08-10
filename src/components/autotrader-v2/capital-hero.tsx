@@ -416,11 +416,22 @@ export function CapitalHero() {
             </span>
             {/* W4a: says plainly that the figure above is not money. Shown only
                 while paper trades are actually in the window — once the window
-                closes and live trades age past it, this disappears by itself. */}
+                closes and live trades age past it, this disappears by itself.
+
+                🚨 B6-LEDGER (2026-08-09): LABEL ONLY. `paperCount` is bounded by
+                the cutover EPOCH, not by the window this card is scoped to, so
+                "Includes N paper trades" sitting under a 1W/1M/today headline
+                read as "N in the period shown" and was not. The bound is
+                DELIBERATE — it exists so this label can never disagree with the
+                `total` beside it (both epoch-floored, query_auto_state) — and
+                Ghost's cutover law says it does not move. What was missing was
+                saying so. The predicate behind the count changed in the same
+                commit (see query_auto_state.py); the BOUND did not. */}
             {paperMode && paperCount > 0 && (
               <span className="block font-sans text-micro text-accent-gold">
                 Includes {paperCount} paper{" "}
-                {paperCount === 1 ? "trade" : "trades"} — simulated, not money.
+                {paperCount === 1 ? "trade" : "trades"} since the cutover —
+                simulated, not money.
               </span>
             )}
             {/* W4a: the data's age. An empty window must never be mistaken for a
@@ -523,7 +534,7 @@ export function CapitalHero() {
                 isCustomActive && customStart && customEnd
                   ? `${fmtDay(customStart)}–${fmtDay(customEnd)}`
                   : windowLabel.toLowerCase()
-              } · ${totalCount.toLocaleString()} total${
+              } · ${totalCount.toLocaleString()} total since cutover${
                 paperCount > 0 ? ` (${paperCount} paper)` : ""
               }`}
             />
