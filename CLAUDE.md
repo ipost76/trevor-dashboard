@@ -465,6 +465,7 @@ Whole files: `replica-age.tsx` · `shadow-overview.tsx` · `sentinels-card.tsx` 
 | 🚨 **`MAX(level)`** | 🚨 **NEVER read from a WSL table.** Read it from the **VM** via `scripts/level/level_query.py current` (read-only over the pipe). The level chain is **VM-only**; never write a level row here. | — |
 | Parallel ceiling | **3**, and **1** for any `CLAUDE.md` reader | the VM is 5 |
 | Scratch | **`/home`**, never `/tmp` — 🚨 **`/tmp` is `noexec` on the VM** and the house rule is uniform | — |
+| 🚨 **Inbound sshd** | **PORT 2232, not 22** (`/etc/ssh/sshd_config.d/99-ghost.conf`, socket-activated by `ssh.socket`). A client using the default port gets `connection refused`. 🚨 **That is NOT "no sshd"** — sshd is installed, `enabled` and reachable. See the C4 section below. | the VM is on 22 |
 
 ---
 
@@ -850,6 +851,14 @@ grep -rn -i "route 13|route_13|route-13|ROUTE13" --include=*.ts --include=*.tsx 
 - 🚨 **`next build` WITH AN ABSOLUTE `NEXT_DIST_DIR` WRITES INSIDE THE REPO (found RM-TRAINER-B4).** `distDir` is resolved repo-relative, so `NEXT_DIST_DIR=/home/ghost/tmp/b4-build` produced `<repo>/home/ghost/tmp/b4-build/` (1073 entries) and `next-env.d.ts` rewritten to the tell-tale `.//home/ghost/...`. The staging trick still protects the live `.next` — **but use a RELATIVE dist dir** (e.g. `NEXT_DIST_DIR=.next.build`) or clean up `<repo>/home/` afterwards. As always, `git checkout -- tsconfig.json next-env.d.ts` after any build.
 - ⚠️ **This box cannot reliably run `next build` with sibling prompts live.** Measured mid-wave: **399 MB free, swap 1741/2048**, three idle tsservers holding ~2.6 GB — one build was OOM-killed and took the CC session with it. **Run the build backgrounded** (`run_in_background`) so a kill cannot take the session down, and cap it (`NODE_OPTIONS=--max-old-space-size=1536`); that combination succeeded on the retry.
 - ⚠️ **Two 0-byte stray `.db` files sit at the repo root** — `shadow_history.db` and `trainer_archive.db`, untracked, both dated `2026-08-03 21:42`. **Predate this wave; DEFERRED to their own prompt by Ghost's ruling — do not create, delete or stage them.** Likely the same relative-path defect that once minted a stray root `trainer.db`.
+
+---
+
+## RM-CUTOVER Wave C · C4 — cross-box repoint (2026-08-10)
+
+**Scope: the Hub gains a read-only view of the second instance. 🚨 THE REPOINT IS STAGED, NOT FIRED — the Hub still reads the VM.**
+
+- **Phase 1 — inbound SSH: FIXED, 3 causes, proven from ghostbox.** B3's and B4's recorded diagnosis (*"trevorhub-wsl refuses SSH — no sshd"*) is **WRONG and propagated through two prompts unchallenged.** sshd is installed (`openssh-server 1:9.6p1`), `active`, `enabled`, and reachable — it listens on **:2232**. The three real causes: (1) the port, (2) ghostbox's key was **not** in this box's `authorized_keys`, (3) ghostbox had **no `~/.ssh/config` at all**. Fixed additively — key appended (the pre-existing `trevorhub-ghost-v2` key untouched), and a `Host trevorhub-wsl hub-wsl 100.113.60.59` stanza written on ghostbox pinning `Port 2232`. 🚨 **sshd was NOT reconfigured and nothing moved off 2232.** Proven **from ghostbox** (the failure was inbound; a local test proves nothing) before *and* after `systemctl restart ssh.socket ssh.service`, both via the alias and via the raw `ghost@100.113.60.59` form. Tailscale key expiry checked: **already off** (`KeyExpiry: None`).
 
 ---
 
