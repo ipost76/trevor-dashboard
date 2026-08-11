@@ -2,6 +2,7 @@ import { HealthSection } from "@/components/memory/health-section";
 import { AiDocsFeed } from "@/components/memory/ai-docs-feed";
 import { CostTrackerCard } from "@/components/memory/cost-tracker-card";
 import { ActivityFeedSection } from "@/components/memory/activity-feed-section";
+import { ShadowWeekCard } from "@/components/shadow/shadow-week-card";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,14 @@ export default async function HealthPage({ searchParams }: HealthPageProps) {
       ) : tab === "activity" ? (
         <ActivityFeedSection />
       ) : (
-        <HealthSection />
+        <>
+          {/* RM-CUTOVER C4 Phase 2 — the dual-instance shadow-week card. ADDITIVE:
+              a NEW card reading the NEW /api/shadow-week route. <HealthSection />
+              and every other surface below keep their existing data sources
+              unchanged — the Hub still reads the VM. */}
+          <ShadowWeekCard />
+          <HealthSection />
+        </>
       )}
     </div>
   );
