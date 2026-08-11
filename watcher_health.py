@@ -133,6 +133,20 @@ except Exception as exc:
 
 
 def _vm_python(program: str, args_json: str, timeout: float = _RPC_TIMEOUT) -> Dict[str, Any]:
+    """The VM RPC, with C4's persistent failure counter wrapped around it.
+
+    🚨 BEHAVIOUR IS UNCHANGED. This is a pass-through: it returns `_vm_python_raw`'s
+    dict verbatim, still never raises, and still surfaces transport faults as
+    {"ok": False, ...}. The ONLY addition is that the boolean it already produced is
+    counted on disk, so a sustained silent outage becomes visible to
+    `trevor-liveness-check` (C4 Phase 3). Wrapping rather than editing the returns
+    is deliberate — every one of the five return paths is covered, including the
+    ones added later.
+    """
+    return _escalator_count(_vm_python_raw(program, args_json, timeout))
+
+
+def _vm_python_raw(program: str, args_json: str, timeout: float = _RPC_TIMEOUT) -> Dict[str, Any]:
     """Run a VM-side python program over ssh (as trevor); parse its last JSON line. NEVER
     raises — a transport/parse failure surfaces as ``{"ok": False, "error": ...}`` so a broken
     pipe can't crash the watcher. HOME is set DEFENSIVELY ONLY — ssh resolves ~/.ssh from the
@@ -165,6 +179,30 @@ def _vm_python(program: str, args_json: str, timeout: float = _RPC_TIMEOUT) -> D
         except json.JSONDecodeError:
             continue
     return {"ok": False, "error": f"rpc_unparseable: {out[:200]}"}
+
+
+def _escalator_count(result: Dict[str, Any]) -> Dict[str, Any]:
+    """C4 Phase 3 — feed the VM-RPC boolean to the PERSISTENT consecutive-failure
+    counter, then return the result UNCHANGED.
+
+    🚨 THIS REMOVES NO NEVER-RAISE CONTRACT. `_vm_python` still returns
+    {"ok": False, ...} on every transport fault and still never raises; this only
+    COUNTS the boolean it already produced (B3 property 1: count, don't sense).
+    The alert decision is NOT made here — `trevor-liveness-check` reads the counter
+    and latches, so the watcher stays exactly as quiet as it was designed to be.
+
+    🚨 Swallows every exception ON PURPOSE. A counter that could raise would break
+    the very never-raise contract this wave exists to preserve.
+    """
+    try:
+        import vm_escalator  # local import: the watcher must start even if this is absent
+        vm_escalator.record_result(
+            vm_escalator.SURFACE_WATCHER,
+            bool(isinstance(result, dict) and result.get("ok")),
+        )
+    except Exception:  # noqa: BLE001 - never let bookkeeping break the transport
+        pass
+    return result
 
 
 class WatcherHeartbeat:
@@ -223,7 +261,21 @@ class WatcherHeartbeat:
 def record_self_health(watcher_conn, status: str, detail: str) -> None:
     """The local 'who watches the watcher' mirror — one watcher_health row keyed
     ``watcher_loop`` for the daemon's OWN liveness, visible from watcher.db even when the
-    VM heartbeat path / monitor_center is unavailable."""
+    VM heartbeat path / monitor_center is unavailable.
+
+    C4 Phase 3 (A7 §8.7): the row now also carries ``consecutive_vm_failures``, so the
+    persistent counter is legible from watcher.db itself and not only from the state
+    file. 🚨 This is an ADDITIVE suffix on an existing free-text column — no DDL, no
+    schema change, and the row is written exactly as before when the counter is
+    unavailable."""
+    try:
+        import vm_escalator
+        st = vm_escalator.evaluate(vm_escalator.SURFACE_WATCHER, latch=False)
+        n = st.get("consecutive_failures")
+        if n is not None:
+            detail = f"{detail} | consecutive_vm_failures={n}"
+    except Exception:  # noqa: BLE001 - bookkeeping must never break self-health
+        pass
     record_health(watcher_conn, WATCHER_LOOP_NAME, status, detail)
 
 

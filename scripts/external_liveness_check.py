@@ -432,9 +432,61 @@ _WHAT = {
 }
 
 
+def probe_vm_rpc_escalator() -> tuple[str, list[str]]:
+    """C4 Phase 3 (A7 §8.7) — surface the PERSISTENT consecutive-failure counter that
+    `watcher_health._vm_python` feeds on every cycle.
+
+    🚨 WHY THIS PROBE EXISTS. `trevor-watcher` is silent BOTH ways: it stayed
+    `active (running)` with `NRestarts=0` through a real 17-hour total VM outage, and
+    a restart with the VM absent is ALSO silent because it has no startup gate. Its
+    never-raise contract is CORRECT and is not removed — this reads the boolean the
+    watcher already produced and lets the existing liveness alerting say something.
+
+    🚨 NO `systemctl` STATE IS CONSULTED. Unit state is not a liveness signal for
+    this surface — that is the exact thing the 17-hour outage disproved. The
+    assertion is on a real artifact: the on-disk counter and its timestamps.
+
+    Latching: `vm_escalator.evaluate` owns the BROKEN/RECOVERED latch, and `run()`'s
+    existing change-detection gates delivery, so a surface that has been broken for
+    hours produces ONE alert, not one per tick. Silence after that is the anti-spam
+    contract working — it is NOT evidence of health.
+    """
+    details: list[str] = []
+    try:
+        sys.path.insert(0, str(REPO))
+        import vm_escalator  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return UNKNOWN, [f"vm_escalator unavailable: {exc} — the counter cannot be read, "
+                         f"which is NOT a clean bill of health"]
+
+    v = vm_escalator.evaluate(vm_escalator.SURFACE_WATCHER)
+    fails = v.get("consecutive_failures")
+    age = v.get("seconds_since_ok")
+    th = v.get("thresholds", {})
+
+    if v.get("state") == "UNKNOWN":
+        return UNKNOWN, [f"watcher VM-RPC escalator: {v.get('why')}. "
+                         f"Absence of a counter is not evidence the RPC is healthy."]
+    if v.get("state") == "BROKEN":
+        details.append(
+            f"watcher VM-RPC escalator BROKEN — {v.get('why')} "
+            f"(thresholds: {th.get('fails')} consecutive failures OR {th.get('seconds')}s "
+            f"without a success, whichever first). 🚨 trevor-watcher reports "
+            f"`active (running)` throughout this condition and NRestarts stays 0 — unit "
+            f"state is not a liveness signal here. The VM RPC has been failing silently.")
+        if v.get("latched_silent"):
+            details.append("(latched — already reported; repeats are suppressed by design)")
+        return BAD, details
+    details.append(
+        f"watcher VM-RPC escalator ok — consecutive_failures={fails}, "
+        f"last success {age}s ago")
+    return OK, details
+
+
 def run(alert: bool = True) -> tuple[int, dict]:
     probes = {"watcher_arm": probe_watcher_arm(),
-              "trainer_heartbeat": probe_trainer_heartbeat()}
+              "trainer_heartbeat": probe_trainer_heartbeat(),
+              "vm_rpc_escalator": probe_vm_rpc_escalator()}
     state = _load_state()
     prev_all = state.get("probes", {}) if isinstance(state.get("probes"), dict) else {}
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
