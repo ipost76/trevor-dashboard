@@ -57,6 +57,19 @@ const HEARTBEAT_STALE_MS = 3 * 60 * 60 * 1000;
 // legitimate OFFLINE. Only consulted when the heartbeat probe is 'unavailable'.
 const REPLICA_ALIVE_MAX_S = 60 * 60;
 
+// [B9] 2026-08-11 — how stale the BOT's own newest heartbeat may be, measured at the
+// replica snapshot (see the decision block below for why that framing matters).
+// 🚨 DELIBERATELY NOT `max(3600, cadence*2)`, the project's per-loop stale rule. That
+//   rule is correct for judging ONE loop; this is a MAX across 23 of them, and the
+//   slowest carries cadence_seconds=86400, which would yield a 48-hour "bound" — a
+//   number that reads like a threshold and functions like the absence of one. When the
+//   bot dies EVERY loop stops, so the signal is governed by the FASTEST loop (30s), and
+//   the only real question is how much jitter to absorb. 3600s is 120x that cadence and
+//   is the same hour REPLICA_ALIVE_MAX_S already spends, so this makes the hour the code
+//   always claimed into the hour it actually enforces, rather than minting a fourth
+//   definition of stale beside the three that already agree.
+const BOT_HEARTBEAT_MAX_S = 60 * 60;
+
 interface HeartbeatServiceItem {
   name?: string;
   active?: boolean;
@@ -120,6 +133,7 @@ async function computeStatus(): Promise<Record<string, unknown>> {
   let signalStats = { total: 0, wins: 0, losses: 0, pending: 0 };
   let recentSignals: Array<{ ticker: string; direction: string; confidence: number; timestamp: string }> = [];
   let replicaAgeSeconds: number | null = null;
+  let botHeartbeatLagSeconds: number | null = null;
 
   // RM-DECOM B5: probe the bot via the heartbeat (fresh + trevor.service active).
   // Post-B3 the Observatory is decommissioned → 'unavailable' → the replica-
@@ -155,6 +169,32 @@ try:
     result["replica_age_seconds"] = int(datetime.now(timezone.utc).timestamp() - st.st_mtime)
 except: result["replica_age_seconds"] = None
 
+# [B9] 2026-08-11 — THE BOT-AUTHORED SIGNAL. See the TS note on BOT_HEARTBEAT_MAX_S.
+# Measured against the REPLICA FILE'S OWN MTIME, not wall clock: both terms then come
+# from the SAME snapshot, so the replica's sync lag cancels exactly. Measured live at
+# build time: age-at-snapshot 79.4s vs a naive wall-clock 182.2s on the same row, the
+# difference being the 102.8s the file had been sitting there. That cancellation is
+# what makes a replica read legitimate here — B6's "never staleness-check the replica"
+# rule stands, and this does not break it, because this is not a wall-clock check.
+# trainer_search_loop is EXCLUDED: it is written from WSL over the ssh pipe by
+# trevor-trainer-observe, so it keeps advancing while trevor.service is dead — using
+# it would rebuild the very false-green this replaces, one layer down.
+try:
+    hb = conn.execute(
+        "SELECT MAX(last_iteration_at) FROM loop_heartbeat "
+        "WHERE loop_name <> 'trainer_search_loop' AND last_iteration_at IS NOT NULL"
+    ).fetchone()
+    if hb and hb[0]:
+        newest = datetime.fromisoformat(str(hb[0]).replace("Z", "+00:00"))
+        if newest.tzinfo is None:
+            newest = newest.replace(tzinfo=timezone.utc)
+        st2 = os.stat(os.path.realpath("${dbPath}"))
+        result["bot_heartbeat_lag_seconds"] = int(st2.st_mtime - newest.timestamp())
+    else:
+        result["bot_heartbeat_lag_seconds"] = None
+except Exception:
+    result["bot_heartbeat_lag_seconds"] = None
+
 conn.close()
 print(json.dumps(result))
 `;
@@ -165,6 +205,9 @@ print(json.dumps(result))
       if (typeof dbData.replica_age_seconds === "number") {
         replicaAgeSeconds = dbData.replica_age_seconds;
       }
+      if (typeof dbData.bot_heartbeat_lag_seconds === "number") {
+        botHeartbeatLagSeconds = dbData.bot_heartbeat_lag_seconds;
+      }
     } catch { /* DB query failed — graceful */ }
 
   // RM-DECOM B5: decide running. 'active'/'inactive' are DEFINITE heartbeat
@@ -173,9 +216,32 @@ print(json.dumps(result))
   // REPLICA_ALIVE_MAX_S ⇒ the VM litestream/restore pipeline is alive, so don't
   // false-OFFLINE just because the Observatory is gone. A genuinely stale replica
   // (whole pipeline dead) legitimately reports OFFLINE.
+  // 🚨 [B9] 2026-08-11 — THE 60-MINUTE BOUND WAS NOT A BOUND. (A5 F-4 / master B-29.)
+  //   `replica_age_seconds` is the age of a FILE, and `trevor-tailsync` republishes that
+  //   file by atomic mv every ~21 minutes knowing NOTHING about the bot — it contains
+  //   zero references to trevor.service, is-active or any heartbeat. So if the bot died
+  //   while the VM and the sync pipeline stayed up, the age never approached 3600 and
+  //   this asserted running:true INDEFINITELY. The constant said one hour; the mechanism
+  //   said forever. The bound only ever bound the SYNC PIPELINE, never the bot.
+  //
+  //   Fixed by gating on a signal the BOT ITSELF writes — loop_heartbeat, 23 bot-owned
+  //   rows — and measuring it against the replica file's own mtime so the sync lag
+  //   cancels. When the bot dies, tailsync keeps advancing the mtime while the newest
+  //   heartbeat freezes, so this delta grows without bound and crosses the threshold.
+  //   That is the same event that used to be invisible.
+  //
+  //   A read failure yields null and is reported as UNVERIFIED, never as OK and never as
+  //   a false OFFLINE: `running` keeps its old replica-freshness answer, but the source
+  //   says the bot signal could not be read, and the screen renders that. An absent
+  //   signal is not a negative signal.
   let trevorRunning: boolean;
   const trevorPid = probe.pid;
-  let runningSource: "heartbeat" | "replica-fresh" | "replica-stale";
+  let runningSource:
+    | "heartbeat"
+    | "replica-fresh"
+    | "replica-stale"
+    | "bot-heartbeat-stale"
+    | "replica-fresh-bot-unverified";
   if (probe.state === "active") {
     trevorRunning = true;
     runningSource = "heartbeat";
@@ -185,8 +251,19 @@ print(json.dumps(result))
   } else {
     const fresh =
       replicaAgeSeconds !== null && replicaAgeSeconds < REPLICA_ALIVE_MAX_S;
-    trevorRunning = fresh;
-    runningSource = fresh ? "replica-fresh" : "replica-stale";
+    if (!fresh) {
+      trevorRunning = false;
+      runningSource = "replica-stale";
+    } else if (botHeartbeatLagSeconds === null) {
+      trevorRunning = true;
+      runningSource = "replica-fresh-bot-unverified";
+    } else if (botHeartbeatLagSeconds >= BOT_HEARTBEAT_MAX_S) {
+      trevorRunning = false;
+      runningSource = "bot-heartbeat-stale";
+    } else {
+      trevorRunning = true;
+      runningSource = "replica-fresh";
+    }
   }
 
   const responseData = {
@@ -195,7 +272,16 @@ print(json.dumps(result))
     // inferred from a live restore pipeline once the Observatory is gone;
     // replica-stale = the pipeline itself looks dead. Consumers read only
     // `running`/`pid` (header, status-bar) — the new field is non-breaking.
-    trevor: { running: trevorRunning, pid: trevorPid, source: runningSource },
+    // [B9] botHeartbeatLagSeconds / replicaAgeSeconds are additive and are what let the
+    // screen show the REAL age instead of a bare ONLINE. Both may be null (unreadable),
+    // and null must render as "unverified", never as 0 and never as a clean state.
+    trevor: {
+      running: trevorRunning,
+      pid: trevorPid,
+      source: runningSource,
+      botHeartbeatLagSeconds,
+      replicaAgeSeconds,
+    },
     signals: signalStats,
     recentSignals,
     timestamp: new Date().toISOString(),

@@ -132,14 +132,58 @@ def unit_state_fact(unit: str) -> str:
     The old body pasted six machine properties into a code fence. That is the raw-dict
     shape the house rules forbid: it is longer, and it makes a reader parse `Result=`
     and `ExecMainStatus=` to learn 'it exited 1 after 3 restarts'.
+
+    🚨 NEVER-STARTED AND RAN-AND-SUCCEEDED USED TO RENDER IDENTICALLY, AS `inactive/dead`.
+      `Result` is suppressed below when it reads `success` and `ExecMainStatus` when it
+      reads `0` — sensible, except that BOTH ARE THE INITIAL VALUES OF FIELDS THAT ARE
+      NEVER POPULATED UNTIL A MAIN PROCESS RUNS. A unit that has never started in its
+      life reports `Result=success, ExecMainStatus=0` and was therefore described here
+      in exactly the same words as one that ran and exited cleanly.
+
+      Measured [B9] 2026-08-11 across a four-unit control matrix on two boxes — the
+      container's `trevor-vm-gateway` and WSL's `trevor-restore` (both never run) vs
+      WSL's `trevor-tailsync` and the container's `trevor.service` (both run): the
+      never-run pair reported `Result=success ExecMainStatus=0` with an EMPTY
+      `ExecMainStartTimestamp` and `ConditionResult=no`, while the run pair reported the
+      identical Result/status with a populated timestamp and `ConditionResult=yes`.
+      `trevor-vm-gateway` carries no `Condition*`/`Assert*` directives at all, which is
+      what proves `ConditionResult=no` there is a never-evaluated default rather than a
+      failed check.
+
+      So `ExecMainStartTimestamp` being empty is the discriminator, and it is stated
+      rather than implied. This is the project's archetype — a green reading produced by
+      a field nobody ever wrote — sitting in the death-alert path itself.
     """
     out = _run(["systemctl", "show", unit,
-                "--property=ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,NRestarts",
+                "--property=ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,"
+                "NRestarts,ExecMainStartTimestamp,UnitFileState,LoadState",
                 "--no-pager"], timeout=10)
     if not out:
         return "state: systemd could not be queried"
     props = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)
     bits = [f"{props.get('ActiveState', '?')}/{props.get('SubState', '?')}"]
+
+    # 🚨 UNRESOLVABLE OUTRANKS NEVER-STARTED, and this ordering was found by driving it:
+    #   `systemctl show` answers for a unit that DOES NOT EXIST with the same empty
+    #   `ExecMainStartTimestamp`, so the never-started branch below claimed a nonexistent
+    #   unit "has never run" — true, and misleading, because it implies the unit is there.
+    #   Mirrors `external_liveness_check._unit_state`, which already treats an
+    #   unresolvable unit as its own answer rather than folding it into a verdict.
+    if props.get("LoadState", "") != "loaded":
+        return ("state: UNRESOLVABLE — systemd has no such unit on this box "
+                f"(LoadState={props.get('LoadState', '?')}). Check the unit name and the box.")
+
+    # The discriminator comes FIRST and short-circuits: if no main process has ever run,
+    # every other field below is an initial value and reporting them would be inventing
+    # an outcome for something that never happened.
+    if not props.get("ExecMainStartTimestamp", "").strip():
+        bits.append("NEVER STARTED — no main process has ever run for this unit")
+        unit_file = props.get("UnitFileState", "")
+        if unit_file:
+            bits.append(f"unit file is {unit_file}")
+        bits.append("its `success`/exit-0 are unwritten defaults, not an outcome")
+        return "state: " + " · ".join(bits)
+
     result = props.get("Result", "")
     if result and result != "success":
         bits.append(f"result {result}")
