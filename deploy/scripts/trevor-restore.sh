@@ -25,9 +25,9 @@
 # be confused with the dangerous replicate (push) config in /home/ghost/litestream.yml.
 #
 # SAFE ATOMIC PUBLISH: restore to a staging file on the SAME filesystem -> checkpoint it to a
-# single self-contained DELETE-mode db (no -wal/-shm) -> sanity-check it advances (auto_trades
-# MAX(id) monotonic, never backwards/empty) -> rename(2) over the live path. The Hub opens a
-# fresh read-only sqlite connection in a fresh subprocess PER REQUEST (no long-lived fd), so
+# single self-contained DELETE-mode db (no -wal/-shm) -> gate it on trade IDENTITY (it must
+# not LOSE a trade; re-keyed 2026-08-11, see the gate below) -> rename(2) over the live path.
+# The Hub opens a fresh read-only sqlite connection in a fresh subprocess PER REQUEST (no long-lived fd), so
 # the swap is picked up on the very next request with NO Hub restart.
 #
 # Note: the real efficiency win (shrink each restore from ~14 min to seconds) is shortening
@@ -76,36 +76,37 @@ c.execute("PRAGMA journal_mode=DELETE")
 c.commit(); c.close()
 PY
 
-# Sanity gate: staged db must be valid sqlite AND must not regress (live ids only grow).
+# Sanity gate: staged db must be valid sqlite AND must not lose trades.
 # Protects a working replica from being clobbered by a partial/corrupt/stale restore.
-SANITY="$(python3 - "$TMP" "$DST" <<'PY'
-import sqlite3, sys
-def maxid(p):
-    try:
-        c = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
-        v = c.execute("SELECT COALESCE(MAX(id),0) FROM auto_trades").fetchone()[0]
-        c.close(); return int(v or 0)
-    except Exception:
-        return -1
-print(maxid(sys.argv[1]), maxid(sys.argv[2]))
-PY
-)"
-STAGE_MAX="$(awk '{print $1}' <<<"$SANITY")"
-CUR_MAX="$(awk '{print $2}' <<<"$SANITY")"
-log "staged auto_trades MAX(id)=${STAGE_MAX}, current published=${CUR_MAX}."
-
-if [ "${STAGE_MAX:-0}" -le 0 ]; then
-  log "ABORT: staged db invalid/empty (MAX id=${STAGE_MAX}); keeping current replica."
+#
+# ð¨ RE-KEYED 2026-08-11 (RM-REPAIR [B2], finding B-01) EVEN THOUGH THIS SCRIPT IS
+# DISABLED. It was gating on `auto_trades MAX(id)`, a PER-DATABASE AUTOINCREMENT
+# that is NOT a cross-box key â measured on the two live ledgers, id 101826 is
+# XRP|SHORT|10:57:52 on the VM and FARTCOIN|SHORT|12:22:31 on the shadow. This file
+# is kept on disk as the documented ROLLBACK PATH (see the header), so leaving the
+# old key here would have left a dormant copy of the defect that a rollback â
+# exactly the moment nobody is looking closely â would arm. It now calls the same
+# tailsync_gate.py the live path uses; there is ONE gate, not two.
+SOURCE_ID="litestream-gcs:${GCS_URL}"
+GATE="$(dirname "$(readlink -f "$0")")/tailsync_gate.py"
+if [ ! -x "$GATE" ]; then
+  log "ABORT: publish gate ${GATE} is missing or not executable; keeping current replica."
   exit 1
 fi
-if [ "${CUR_MAX:-0}" -ge 0 ] && [ "$STAGE_MAX" -lt "$CUR_MAX" ]; then
-  log "ABORT: staged id ${STAGE_MAX} < current ${CUR_MAX} (would regress); keeping current replica."
+GATE_OUT="$(python3 "$GATE" check --staged "$TMP" --published "$DST" --source "$SOURCE_ID" 2>&1)" && GATE_RC=0 || GATE_RC=$?
+printf '%s
+' "$GATE_OUT" | sed 's/^/    gate: /'
+if [ "$GATE_RC" -ne 0 ]; then
+  log "ABORT: publish gate refused (rc=${GATE_RC}); keeping current replica ${DST}."
   exit 1
 fi
 
 chmod 0444 "$TMP"
 mv -f "$TMP" "$DST"                 # atomic rename over the live path (same filesystem)
 rm -f "${DST}-wal" "${DST}-shm"     # drop stale wal/shm left by the old WAL-mode replica
+# Record WHERE this replica came from, so the next run (by EITHER script) can tell
+# a source change from a truncation instead of guessing from an integer.
+python3 "$GATE" record --published "$DST" --source "$SOURCE_ID" >/dev/null
 # Leave the EXIT trap armed: on success it now clears litestream's .tmp-* stragglers from
 # the (already-mv'd) staging dir, so staging never accumulates between runs.
 log "published fresh replica -> ${DST} (auto_trades MAX id=${STAGE_MAX}). done."

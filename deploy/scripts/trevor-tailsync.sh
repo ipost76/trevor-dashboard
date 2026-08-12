@@ -32,9 +32,21 @@
 #     the live file is corrupt: the -wal holds uncommitted pages). The VM makes a
 #     consistent snapshot with `VACUUM INTO`, run as user `trevor` (the DB owner) so it
 #     reads WAL-safely alongside the live bot writer.
-#   * The pulled snapshot is integrity-checked (PRAGMA integrity_check) AND gated on a
-#     monotonic auto_trades MAX(id) (refuse to regress to a truncated/empty/stale
-#     snapshot) BEFORE it is published.
+#   * The pulled snapshot is integrity-checked (PRAGMA integrity_check) AND gated by
+#     deploy/scripts/tailsync_gate.py BEFORE it is published.
+#     🚨 RE-KEYED 2026-08-11 (RM-REPAIR [B2], finding B-01). The gate used to compare
+#     `auto_trades MAX(id)` on the two files. That column is a PER-DATABASE
+#     AUTOINCREMENT and is NOT a cross-box key: measured on the two live ledgers,
+#     id 101826 is XRP|SHORT|10:57:52 on the VM and FARTCOIN|SHORT|12:22:31 on the
+#     shadow, and both boxes once read MAX(id)=101824/rows=1839/open=2
+#     SIMULTANEOUSLY while holding different trades there. So the old gate could
+#     ABORT on a perfectly good cutover snapshot with a message about truncation
+#     (A7 R-24: "the message reads as corruption"), and — far worse — could PUBLISH
+#     SILENTLY across a source change whenever the other box's integer happened to
+#     be larger, swapping the Hub onto a different instance's ledger with no
+#     message at all. It now gates on the trade IDENTITY (ticker|direction|
+#     opened_at) with C5's INHERITED/POST-START partition, and on the replica's
+#     recorded PROVENANCE. See tailsync_gate.py for the full reasoning.
 #   * Publish is an atomic rename(2) over ${DST} on the same filesystem. The Hub keeps
 #     reading the OLD copy until the instant of swap; it opens the replica read-only
 #     (?mode=ro) in a fresh subprocess per request, so it picks up the swap on the next
@@ -129,27 +141,20 @@ if [ "$INTEG" != "ok" ]; then
   exit 1
 fi
 
-SANITY="$(python3 - "$PUB" "$DST" <<'PY'
-import sqlite3, sys
-def maxid(p):
-    try:
-        c = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
-        v = c.execute("SELECT COALESCE(MAX(id),0) FROM auto_trades").fetchone()[0]
-        c.close(); return int(v or 0)
-    except Exception:
-        return -1
-print(maxid(sys.argv[1]), maxid(sys.argv[2]))
-PY
-)"
-STAGE_MAX="$(awk '{print $1}' <<<"$SANITY")"
-CUR_MAX="$(awk '{print $2}' <<<"$SANITY")"
-log "staged auto_trades MAX(id)=${STAGE_MAX}, current published=${CUR_MAX}."
-if [ "${STAGE_MAX:-0}" -le 0 ]; then
-  log "ABORT: staged db invalid/empty (MAX id=${STAGE_MAX}); keeping current replica."
+# 🚨 THE RE-KEYED GATE (RM-REPAIR [B2] 2026-08-11). See the header note and
+# tailsync_gate.py. SOURCE_ID is the identity this replica's provenance is recorded
+# under; it MUST change when SSH_HOST/VM_DB change, which is exactly how the gate
+# detects the Wave D repoint instead of silently publishing across it.
+SOURCE_ID="${SSH_HOST}:${VM_DB}"
+GATE="$(dirname "$(readlink -f "$0")")/tailsync_gate.py"
+if [ ! -x "$GATE" ]; then
+  log "ABORT: publish gate ${GATE} is missing or not executable; keeping current replica."
   exit 1
 fi
-if [ "${CUR_MAX:-0}" -ge 0 ] && [ "$STAGE_MAX" -lt "$CUR_MAX" ]; then
-  log "ABORT: staged id ${STAGE_MAX} < current ${CUR_MAX} (would regress); keeping current replica."
+GATE_OUT="$(python3 "$GATE" check --staged "$PUB" --published "$DST" --source "$SOURCE_ID" 2>&1)" && GATE_RC=0 || GATE_RC=$?
+printf '%s\n' "$GATE_OUT" | sed 's/^/    gate: /'
+if [ "$GATE_RC" -ne 0 ]; then
+  log "ABORT: publish gate refused (rc=${GATE_RC}); keeping current replica ${DST}."
   exit 1
 fi
 
@@ -157,4 +162,7 @@ fi
 chmod 0444 "$PUB"
 mv -f "$PUB" "$DST"                 # atomic rename over the live path (same filesystem)
 rm -f "${DST}-wal" "${DST}-shm"     # drop stale wal/shm left by an older WAL-mode replica
-log "published fresh replica -> ${DST} (auto_trades MAX id=${STAGE_MAX}). done."
+# Record WHERE this replica came from. The next run compares against it; without a
+# provenance record the gate can only make the INHERITED assertion and says so.
+python3 "$GATE" record --published "$DST" --source "$SOURCE_ID" >/dev/null
+log "published fresh replica -> ${DST} (source ${SOURCE_ID}). done."
