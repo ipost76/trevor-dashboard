@@ -157,6 +157,39 @@ def read_max_id(db_path):
         return -1
 
 
+def ledger_fingerprint(db_path, t0):
+    """-> the key of the EARLIEST trade opened after t0, or None.
+
+    A second, CONTENT-DERIVED identity for the ledger, immune to configuration
+    entirely. Once a box has opened its first post-cutover trade that key never
+    changes, and two independently-trading instances open different ones.
+
+    🚨 IT IS SECONDARY, AND HERE IS THE MEASUREMENT THAT SAYS WHY. On the two
+    live ledgers it is FARTCOIN|LONG|2026-08-10 23:42:34 (VM) and
+    FARTCOIN|LONG|2026-08-10 23:43:32 (shadow) -- the same ticker, the same
+    direction, FIFTY-EIGHT SECONDS APART. That is well inside this gate's own
+    190s match window, so anything that PAIRED these would read two different
+    ledgers as one. It is therefore compared EXACTLY here, never windowed -- and
+    even then, had both boxes opened their first post-cutover trade in the same
+    second it would be blind. The authoritative discriminator is the runtime box
+    identity in `--source`; this exists to catch the case where that is
+    unresolvable or stale, not to replace it.
+    """
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True)
+        try:
+            r = con.execute(
+                "SELECT ticker, direction, opened_at FROM auto_trades "
+                "WHERE opened_at > ? ORDER BY opened_at ASC, ticker ASC LIMIT 1",
+                (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)),)
+            ).fetchone()
+        finally:
+            con.close()
+        return tradekey.trade_key(*r) if r else None
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def sidecar_path(published):
     return os.path.join(os.path.dirname(os.path.abspath(published)), SIDECAR)
 
@@ -233,13 +266,18 @@ def check(staged, published, source, conf):
     # -- 1. WHERE did the currently-published replica come from? --------------
     side = read_sidecar(published)
     declared = (side or {}).get("source")
-    if declared is None:
+    rep["source"]["published_was_from"] = declared
+    # 🚨 AN UNRESOLVABLE SOURCE IS NOT A MATCHING SOURCE. The caller resolves
+    # the identity from the REMOTE BOX at run time; if that lookup failed it
+    # passes an UNRESOLVED marker, and the gate must degrade to the
+    # inherited-only assertion rather than fall back to a local literal that
+    # cannot change (see the SOURCE_ID note in trevor-tailsync.sh).
+    if declared is None or str(source).startswith("UNRESOLVED"):
         src_class = "SOURCE_UNKNOWN"
     elif declared == source:
         src_class = "SAME_SOURCE"
     else:
         src_class = "SOURCE_CHANGED"
-    rep["source"]["published_was_from"] = declared
     rep["source"]["class"] = src_class
 
     # -- 2. the D2 partition, on both files ----------------------------------
@@ -260,6 +298,17 @@ def check(staged, published, source, conf):
             "a data defect: the replica is untouched and still valid.")
         return False, rep
 
+    # -- the SECOND, content-derived identity signal ----------------------
+    fp_pub = ledger_fingerprint(published, t0)
+    fp_stg = ledger_fingerprint(staged, t0)
+    declared_fp = (side or {}).get("ledger_fingerprint")
+    rep["source"]["ledger_fingerprint"] = {
+        "published_recorded": declared_fp, "published_now": fp_pub,
+        "staged": fp_stg,
+        "note": "the earliest post-cutover trade -- compared EXACTLY, never "
+                "windowed. Secondary to the runtime box identity: the two live "
+                "ledgers differ here by only 58 seconds on the same "
+                "ticker/direction."}
     pubP = tradekey.partition(read_trades(published), t0)
     stgP = tradekey.partition(read_trades(staged), t0)
     pub_inh = set(e["key"] for e in pubP["inherited"])
@@ -288,6 +337,32 @@ def check(staged, published, source, conf):
                + (" …" if len(lost_inh) > 6 else "")))
         rep["checks"]["inherited_lost"] = lost_inh[:20]
         return False, rep
+
+    # 🚨 ESCALATION REQUIRES BIDIRECTIONAL DIVERGENCE, AND THAT CONDITION WAS
+    # FOUND BY A FAILING TEST, NOT BY REASONING. The first version escalated on a
+    # fingerprint difference alone -- which ALSO fires when a same-source snapshot
+    # simply LOST its earliest post-cutover trade. That reclassified a genuine
+    # TRUNCATION as a source change, i.e. downgraded "your data is missing" to
+    # "acknowledge this cutover", which an operator can wave through. Test (f)
+    # caught it.
+    #
+    # The discriminator is direction: a truncation loses rows and invents none
+    # (staged is a subset), whereas two independently-trading instances each hold
+    # rows the other has never seen. So escalate ONLY when BOTH sides have rows
+    # the other lacks -- that is what "a different book" actually looks like.
+    ps_pub = set(e["key"] for e in pubP["post_start"])
+    ps_stg = set(e["key"] for e in stgP["post_start"])
+    bidirectional = bool((ps_pub - ps_stg) and (ps_stg - ps_pub))
+    if src_class == "SAME_SOURCE" and bidirectional and fp_pub != fp_stg:
+        # The source string claimed one box; the content says two books.
+        src_class = "SOURCE_CHANGED"
+        rep["source"]["class"] = src_class
+        rep["source"]["escalated_by"] = (
+            "ledger fingerprint disagreement WITH divergence in both directions "
+            "(%d post-cutover trade(s) only on the published replica, %d only on "
+            "the staged snapshot). The source identity claimed the same box, but "
+            "each side holds trades the other never saw -- that is two books, not "
+            "a truncation." % (len(ps_pub - ps_stg), len(ps_stg - ps_pub)))
 
     # -- 4. POST-START: what may be concluded depends on the source -----------
     lost_ps = sorted(set(e["key"] for e in pubP["post_start"])
@@ -378,9 +453,12 @@ def check(staged, published, source, conf):
     return False, rep
 
 
-def record(published, source):
+def record(published, source, conf=None):
     """Write the provenance sidecar next to the published replica."""
-    rec = {"source": source,
+    t0 = tradekey.ts_epoch((conf or {}).get("t0_naive_et"))
+    rec = {"ledger_fingerprint": (ledger_fingerprint(published, t0)
+                                  if t0 is not None else None),
+           "source": source,
            "published_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
            "auto_trades_max_id_CONTEXT_ONLY": read_max_id(published),
            "note": "🚨 `source` is the identity this gate compares. "
@@ -392,6 +470,21 @@ def record(published, source):
     with open(tmp, "w") as fh:
         json.dump(rec, fh, indent=1, sort_keys=True)
     os.replace(tmp, p)
+    # 🚨 THE ACK IS SINGLE-USE. It authorises ONE transition, and it is
+    # consumed the moment that transition is published. A surviving ack would
+    # stand as a permanent pre-authorisation for that source string, so the NEXT
+    # genuine change onto it would sail through unannounced -- which is the
+    # silent-publish hole this gate exists to close, reintroduced by leftover
+    # operational state rather than by code.
+    ackp = os.path.join(os.path.dirname(os.path.abspath(published)), ACK)
+    try:
+        if os.path.exists(ackp):
+            with open(ackp) as fh:
+                if fh.read().strip() == str(source).strip():
+                    os.remove(ackp)
+                    rec["ack_consumed"] = True
+    except OSError:
+        pass
     return rec
 
 
@@ -407,8 +500,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     if a.mode == "record":
-        print(json.dumps(record(a.published, a.source), indent=1,
-                         sort_keys=True))
+        print(json.dumps(record(a.published, a.source, load_conf(a.conf)),
+                         indent=1, sort_keys=True))
         return 0
 
     if not a.staged:

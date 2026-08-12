@@ -225,6 +225,49 @@ check("(d) same source, newer snapshot -> PUBLISH (the 67x/day case)", "QUIET",
 
 # ==========================================================================
 print("\n" + "=" * 74)
+print("2b. THE REPOINT THE FIRST VERSION COULD NOT SEE")
+print("=" * 74)
+# 🚨 The gate's FIRST SOURCE_ID was "${SSH_HOST}:${VM_DB}" -- both local literals.
+# Repoint rows 17/18 deliberately leave both ALONE, so the string is identical
+# before and after the cutover and the gate read SAME_SOURCE on a different
+# ledger. Two independent fixes are proven here.
+
+# (l) source string IDENTICAL (literals unchanged) but the ledgers differ ->
+#     the content fingerprint must escalate it to SOURCE_CHANGED.
+build(a_db, [(i, t, d, o) for i, t, d, o in INHERITED]
+      + [(101820, "FARTCOIN", "LONG", "2026-08-10 23:42:34")])
+build(b_db, [(i, t, d, o) for i, t, d, o in INHERITED]
+      + [(101820, "FARTCOIN", "LONG", "2026-08-10 23:43:32")])
+sidecar(a_db, VM_SRC)
+rc, rep = run_gate(b_db, a_db, VM_SRC)          # SAME source string on purpose
+check("(l) repoint with UNCHANGED literals -> caught by ledger fingerprint",
+      "REPOINT", rc == 1 and rep["source"]["class"] == "SOURCE_CHANGED"
+      and "escalated_by" in rep["source"],
+      "class=%s escalated=%s" % (rep["source"]["class"],
+                                 "escalated_by" in rep["source"]))
+
+# (m) 🚨 and the 58-SECOND NEAR MISS: these two real first-post-t0 trades are the
+#     SAME ticker and direction 58s apart, well inside the 190s window. Windowed
+#     pairing would call them one ledger. Proven that the fingerprint is EXACT.
+from datetime import datetime as _dt
+_a = _dt.strptime("2026-08-10 23:42:34", "%Y-%m-%d %H:%M:%S")
+_b = _dt.strptime("2026-08-10 23:43:32", "%Y-%m-%d %H:%M:%S")
+_delta = abs((_b - _a).total_seconds())
+check("(m) the 58s near-miss WOULD have paired inside the 190s window",
+      "REPOINT", _delta < 190 and rep["source"]["class"] == "SOURCE_CHANGED",
+      "delta=%.0fs < window 190s, still SOURCE_CHANGED (compared exactly)"
+      % _delta)
+
+# (n) an UNRESOLVED remote identity must NOT read as a matching source.
+sidecar(a_db, VM_SRC)
+rc, rep = run_gate(b_db, a_db, "UNRESOLVED:/home/trevor/trevor/trevor.db")
+check("(n) unresolved remote identity -> SOURCE_UNKNOWN, never SAME_SOURCE",
+      "REPOINT", rep["source"]["class"] == "SOURCE_UNKNOWN",
+      "class=%s" % rep["source"]["class"])
+
+
+# ==========================================================================
+print("\n" + "=" * 74)
 print("3. NEGATIVE CONTROLS — it must still be able to fail")
 print("=" * 74)
 
@@ -318,7 +361,7 @@ check("(k) partition side is TZ-independent (t0 parsed like the rows)", "NEG",
 # ==========================================================================
 n_pass = sum(1 for _, _, ok, _ in RESULTS if ok)
 print("\n" + "=" * 74)
-for kind in ("CATCH", "QUIET", "NEG"):
+for kind in ("CATCH", "QUIET", "REPOINT", "NEG"):
     sub = [r for r in RESULTS if r[0] == kind]
     print("%-6s %d/%d" % (kind, sum(1 for r in sub if r[2]), len(sub)))
 print("TOTAL  %d/%d" % (n_pass, len(RESULTS)))

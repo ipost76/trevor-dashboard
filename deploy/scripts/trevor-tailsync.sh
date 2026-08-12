@@ -142,10 +142,27 @@ if [ "$INTEG" != "ok" ]; then
 fi
 
 # 🚨 THE RE-KEYED GATE (RM-REPAIR [B2] 2026-08-11). See the header note and
-# tailsync_gate.py. SOURCE_ID is the identity this replica's provenance is recorded
-# under; it MUST change when SSH_HOST/VM_DB change, which is exactly how the gate
-# detects the Wave D repoint instead of silently publishing across it.
-SOURCE_ID="${SSH_HOST}:${VM_DB}"
+# tailsync_gate.py.
+#
+# 🚨 SOURCE_ID IS RESOLVED FROM THE REMOTE BOX AT RUN TIME, AND THE FIRST VERSION
+# OF THIS LINE WAS BROKEN. It read `SOURCE_ID="${SSH_HOST}:${VM_DB}"` -- both LOCAL
+# LITERALS -- and its own comment claimed they "MUST change at the Wave D repoint".
+# They do not. Repoint rows 17 and 18 deliberately leave `SSH_HOST` and `VM_DB`
+# ALONE (confirmed independently by [B9]'s dry-apply), so the string was provably
+# IDENTICAL before and after the cutover. The gate would have read SAME_SOURCE and
+# published the shadow's ledger over the VM's replica in silence -- the exact
+# failure it was built to prevent, reintroduced by the way its own identity was
+# computed. A gate keyed on a value the change does not touch cannot see the change.
+#
+# It now asks the box on the far side of $SSH_HOST who it is. That answer changes
+# when the ssh alias resolves somewhere else, whether or not any literal here was
+# edited. 🚨 If the lookup FAILS the marker is UNRESOLVED and the gate degrades to
+# the inherited-only assertion -- it must never fall back to a local literal, which
+# is what made the first version blind.
+SOURCE_IDENT="$(ssh -o BatchMode=yes "$SSH_HOST" 'printf "%s/%s" "$(hostname)" "$(cat /etc/machine-id 2>/dev/null || echo no-machine-id)"' 2>/dev/null || true)"
+[ -n "$SOURCE_IDENT" ] || SOURCE_IDENT="UNRESOLVED"
+SOURCE_ID="${SOURCE_IDENT}:${VM_DB}"
+log "source identity resolved from the far side: ${SOURCE_ID}"
 GATE="$(dirname "$(readlink -f "$0")")/tailsync_gate.py"
 if [ ! -x "$GATE" ]; then
   log "ABORT: publish gate ${GATE} is missing or not executable; keeping current replica."
