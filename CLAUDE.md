@@ -18,7 +18,7 @@
 ---
 
 > **Last corrected: 2026-08-06 (RM-TRAINER-C2 — the only writer running; RM-TRAINER-B4 was the B-wave's single writer).** Last full rebuild: 2026-05-16. CC's current-state reference for the **WSL Hub** — read top-to-bottom in Phase 0 of every Hub prompt.
-> **Length: 971 lines (measured RM-TRAINER-C2 2026-08-06; was 957 at RM-TRAINER-C1 2026-08-06, 952 at RM-TRAINER-B4 2026-08-06, 929 at B1-HUB-TRAINER-COMPACT 2026-08-05, 912 at D6-MATH-PAPER 2026-08-05, 894 at B6-HUB-HEARTBEAT-SURFACE 2026-08-05, 879 at B1-TRAINER-DEGRADED-EMIT 2026-08-05, 852 at B3 2026-08-05, 834 at B1-MATH-SCAFFOLD 2026-08-05, 811 at B2-RULER-POINTER 2026-08-05, 804 at B7-TEST-HARNESS 2026-08-03, 769 at B11 2026-08-02, 747 at B12 2026-08-01, 742 at B1 2026-08-01, 737 at F1-SURFACE-CLOSEOUT — ⚠️ the file measured 736 BEFORE this prompt's one-line addition while this line still read 734 — F1's number was already two stale, so it is re-measured here rather than incremented. Was 694 after B1 2026-07-30, 690 after B7, ~680 after RP-D2's cut, 2,477 before it).** ⚠️ **The previous line here read "Hard ceiling: under 300 lines" while the file stood at 2,477 — 8× breached and unmet for ten weeks.** 🚨 **This number is the MEASURED length, not an aspiration** — an earlier draft of this very line said "~500" before the cut was measured at 679, and shipping that would have minted a fresh false constraint in the act of correcting one. If you grow this file, update this number. A constraint nobody has honoured in ten weeks is not a constraint, it is a stale record; it is corrected rather than satisfied by hiding load-bearing content. The narrative changelog now lives in `docs/HUB_WAVE_CHANGELOG.md`; the 92 durable preferences stayed **here**, in `## Preferences`, because a pointer risks their going unread — the exact failure class this campaign exists to close.
+> **Length: 1077 lines (measured RM-REPAIR [B9] 2026-08-11; was 971 at RM-TRAINER-C2 2026-08-06; was 957 at RM-TRAINER-C1 2026-08-06, 952 at RM-TRAINER-B4 2026-08-06, 929 at B1-HUB-TRAINER-COMPACT 2026-08-05, 912 at D6-MATH-PAPER 2026-08-05, 894 at B6-HUB-HEARTBEAT-SURFACE 2026-08-05, 879 at B1-TRAINER-DEGRADED-EMIT 2026-08-05, 852 at B3 2026-08-05, 834 at B1-MATH-SCAFFOLD 2026-08-05, 811 at B2-RULER-POINTER 2026-08-05, 804 at B7-TEST-HARNESS 2026-08-03, 769 at B11 2026-08-02, 747 at B12 2026-08-01, 742 at B1 2026-08-01, 737 at F1-SURFACE-CLOSEOUT — ⚠️ the file measured 736 BEFORE this prompt's one-line addition while this line still read 734 — F1's number was already two stale, so it is re-measured here rather than incremented. Was 694 after B1 2026-07-30, 690 after B7, ~680 after RP-D2's cut, 2,477 before it).** ⚠️ **The previous line here read "Hard ceiling: under 300 lines" while the file stood at 2,477 — 8× breached and unmet for ten weeks.** 🚨 **This number is the MEASURED length, not an aspiration** — an earlier draft of this very line said "~500" before the cut was measured at 679, and shipping that would have minted a fresh false constraint in the act of correcting one. If you grow this file, update this number. A constraint nobody has honoured in ten weeks is not a constraint, it is a stale record; it is corrected rather than satisfied by hiding load-bearing content. The narrative changelog now lives in `docs/HUB_WAVE_CHANGELOG.md`; the 92 durable preferences stayed **here**, in `## Preferences`, because a pointer risks their going unread — the exact failure class this campaign exists to close.
 > Hub-specific only. Bot-side engineering rules, the feature registry, and recurring bugs live in **`BEHAVIOR_RULES.md` + `CLAUDE.md` on the VM** — read those; this file does not restate them. 🚨 **They are NOT readable from this box by path.** `/home/trevor/trevor/` on WSL is a **root-owned shim holding exactly one entry** (the `trevor.db` symlink), so `cat /home/trevor/trevor/BEHAVIOR_RULES.md` fails here. **Use the pipe — verified from this box (B2, 2026-08-05):** `ssh vm 'cat /home/trevor/trevor/BEHAVIOR_RULES.md'` (likewise `…/CLAUDE.md`). ⚠️ **CORRECTED B2:** this line used to name those two bare VM paths as if a WSL session could read them — **a false pointer, the same defect class as the one the block below closes**, sitting on the most-read line of this header.
 >
 > 🚨 **THE v5 DESIGN INTENT → `docs/DREAM_SPEC.md` (THE RULER) — read it in Phase 0, beside this file, for any Hub prompt that touches v5 design, the level model, the trainer/watcher/memory (R9/R10/R11), the compass, or the cutover.** 🚨 **IT IS ON THIS BOX AND GIT-TRACKED** — installed by `R2-CONFORMANCE-AUDIT` (`61364fd`); its anchored body checksum was re-derived by B2 and is **byte-identical to the VM's**. **Read it LOCALLY — no `ssh vm`, and never a second copy:** `sed -n '1,120p' docs/DREAM_SPEC.md` (EXERCISED B2, 2026-08-05).
@@ -873,6 +873,89 @@ grep -rn -i "route 13|route_13|route-13|ROUTE13" --include=*.ts --include=*.tsx 
 - ✅ **Escalator Discord delivery — PROVEN END TO END by read-back** (2026-08-11, `LIVENESS_DRY_RUN` dropped). 🚨 **An HTTP 200 is transmission, not arrival**, so both messages were read back out of the channel with the bot token: **BROKEN `1536550627046596698`** and **RECOVERED `1536550730360430653`**, channel `1479969192139690029` (**#qa-agent**), author `TREVOR`, via **tier 2 bot-token REST** (tier 1's HUB_QA mint stays 403-blocked, so the ladder routed around it as designed). A third message at `01:00:28Z` shows it had already delivered on its first timer-driven run — the earlier "unproven" caveat was conservative, not wrong. State self-restored: counter 0, latch OK. **WSL has a working external paging path**; ghostbox's missing `GHOSTBOX_ALERT_WEBHOOK` is a separate gap on a separate box.
 - ⚠️ **DEFERRED — WSL swap growth, SECOND sighting.** B4 measured 17%/0% → **51%/37%** in a day; C4 measured 48%/47% start → **65%/51%** peak during `next build` → **49%/52%** settled. **Memory returns to baseline after a build; swap does not** — ~5 pp net upward, unreleased. A build explains the peak, not the ratchet. **Not a C4 defect and not chased here** — handed to its own prompt. A single point reading would have shown nothing, which is exactly B4's M-5 argument for trends over samples.
 - 🚨 **BLOCKER B-3 is STILL OPEN — do not read it as progress.** `trevor-prime-3:22` is now **OPEN** (A7 recorded "sshd refuses"), but auth fails: `Permission denied (publickey,password)`. **Reachability is not authentication.** Repoint rows #1–#3 cannot fire until a container-accepted key is installed. Handed to C5.
+
+---
+
+## RM-REPAIR Wave B · [B9] — the repoint apply path, the container gateway, and `running:true` (2026-08-11)
+
+**Scope: repair what Wave D would have fired. 🚨 THE REPOINT IS STILL NOT FIRED** — six markers re-confirmed at open and close, **0 of the atomic 9 moved**, sentinel and `repoint-backups` absent, all four target files sha256-identical throughout. Every change below was verified on **isolated copies under `/home/ghost/tmp`**, never the live tree.
+
+### 🚨 A DRY RUN PRINTS INTENTIONS. IT NEVER PRINTS OUTCOMES.
+
+That one sentence is the whole wave. `--dry-run` reads each row's current value and prints the target beside it, so it reported the staged repoint as fine while it carried defects that would have broken the Hub. **The durable fix is `--dry-apply`** (A5's R3): it copies the four targets to scratch, runs the **real** apply against the copies, and diffs the **outcome** against intent per row. **`--apply` now runs it automatically and refuses with exit 7 if it fails** — advisory would rot. Full record: `/home/ghost/REPOINT.md` §5.
+
+### The five defects, in one file's two rows
+
+| # | Defect | Status |
+|---|---|---|
+| 1 | **Row 8's `sed` prepended to all 204 lines of `middleware.ts`** — the auth gate — and still left row 8 unmoved (master **B-26**) | fixed |
+| 2 | **Row 23 asserted but never implemented** (master **B-27**) | implemented |
+| 3 | **Row 19 left 2 stale comments** (A5 F-11) | rewritten |
+| 4 | 🚨 **NEW — assertions #8/#23 are `grep -c` over the WHOLE file and both dead literals also live in COMMENTS**, so even a perfect code-only edit left them at 1 and 2. **Both assertions would have failed permanently on a correctly applied row** | fixed by rewriting the prose as part of rows 8/19/23 |
+| 5 | 🚨 **NEW — A5's own recommended fix (R1) does not compile.** It yields `const HUB_VM_IP = process.env.HUB_VM_IP` typed `string \| undefined`, failing `tsc --strict` with **TS2345** (proven with a positive control: HEAD's form compiles) | rows 8+23 now move together |
+
+- 🚨 **THE `sed` MECHANISM, PROVEN WITH `sed --debug` RATHER THAN INFERRED.** With `|` as the s-delimiter, sed treats `\|` as an **escaped delimiter and strips the backslash**, emitting a **bare** `|`; under `-E` that is ERE **alternation**, so the compiled program was `s/X || Y/R/` — three branches whose **middle one is empty**. The empty branch matches zero-length at offset 0 of every line (`regex[0] = 0-0 ''`) and `s` without `/g` takes that leftmost match. **A different delimiter fixes it because `\|` then stops being a delimiter escape** — not because `#` is special. Controls: BRE + `|` → silent no-op; `#` or `/` → correct; bare `|` → parse error.
+- 🚨 **ROWS 8 AND 23 ARE COUPLED AND THE MANIFEST DID NOT SAY SO.** Row 23 removes the direct-IP 301, which holds the **only** consumer of row 8's constant. Do not restore either half alone.
+- 🚨 **`middleware.ts` IS 204 LINES, NOT 408.** A5, master B-26 and the [B9] prompt all say 408; that is the **diff** line count (204 deletions + 204 additions). The corruption was total either way, but the file length is 204.
+- **Every substitution now asserts it fired**, and each file carries a post-condition checked against the very probe its assertion uses. A `sed` that matches nothing exits 0, and that silence is what carried both defects to the edge of Wave D; these refuse with exit 5. ✅ **The post-condition immediately caught this wave's own first draft** — the replacement comment for row 19 re-introduced the literal it must remove.
+- **`--dry-apply` is proven able to fail**, three negative controls: the original `sed` (#8 ×2, #23 ×2), **A5's R1 verbatim** (#8 ×1, #23 ×2), and row 19's rewrite removed (#19). All exit 1. `REPOINT_DRY_APPLY_ROOT` redirects every path **including the sentinel** and is refused unless under `/home/ghost/tmp/` (exit 6).
+- ⚠️ **A RESTART WITHOUT A REBUILD KEEPS SERVING THE OLD `.next`.** Rows 8/23 change compiled source; C4's closing instruction says restart both services and omits the build. `REPOINT.md`'s Wave D runbook now carries it.
+
+### 🚨 The container write-gateway — C1's deferral is CLOSED, and the surface stays DOWN
+
+**`VM_GATEWAY_BIND_IP=100.89.253.42` PROVEN AT THE PROCESS LEVEL**, three independent ways, by a supervised `start` → capture → `stop` inside `trevor-prime-3` (Ghost-approved; **`start`, never `enable`**):
+
+1. `/proc/131154/environ` → `VM_GATEWAY_BIND_IP=100.89.253.42`
+2. the process's own logged startup line → `listening on 100.89.253.42:3940 (dispatch_wired=true)`
+3. `ss -ltnp` → `LISTEN 100.89.253.42:3940`
+
+**The bind IP is the CONTAINER's own, not the host's** — A7 §5.1's `100.110.77.115` is ghostbox the host and would be EADDRNOTAVAIL inside. **Left DOWN afterwards and proven so**: `inactive/dead`, `MainPID=0`, `UnitFileState=disabled`, 0 listeners on `:3940`. **No gateway op was called; neither allowlist was touched.** ⚠️ The gateway's hardcoded fallback is the **VM's** `100.95.174.30`, so a drop-in failure would crash on EADDRNOTAVAIL rather than mis-bind — a successful bind is itself proof the drop-in delivered.
+
+⚠️ **`trevor.db` mtime moved during the capture and it was NOT the gateway.** Control: with the gateway **stopped**, mtime advanced again on its own and size grew +20 KB — the live shadow bot writing. Across the capture, **size and inode were identical, no WAL/SHM appeared**, `vm_gateway.js` opens no DB at startup, and no request was sent. Attribution by control, not assumption.
+
+🚨 **THE FALSE-GREEN MECHANISM, AND IT WAS IN THE DEATH-ALERT PATH.** `Result=success` + `ExecMainStatus=0` on a never-started unit are the **initial values of fields nothing ever writes**. Proven with a four-unit control matrix across two boxes:
+
+| unit | `ExecMainStartTimestamp` | `Result` | `ExecMainStatus` | `ConditionResult` |
+|---|---|---|---|---|
+| container `trevor-vm-gateway` (never ran) | **empty** | success | 0 | **no** |
+| WSL `trevor-restore` (never ran) | **empty** | success | 0 | **no** |
+| WSL `trevor-tailsync` (ran ok) | populated | success | 0 | yes |
+| container `trevor.service` (running) | populated | success | 0 | yes |
+
+`trevor-vm-gateway` carries **no `Condition*`/`Assert*` directives at all**, which is what proves `ConditionResult=no` there is a never-evaluated default, not a failed check. **`scripts/watcher_alert.py::unit_state_fact` is the only place in TREVOR that parses those two fields**, and it *suppressed* them when they read `success`/`0` — so a unit that had **never started in its life** was described in the identical words as one that ran and exited cleanly. **Empty `ExecMainStartTimestamp` is now the discriminator and is stated outright.** Driving it also found that a **nonexistent** unit answers with the same empty timestamp, so `LoadState != loaded` is checked first and outranks it. **Units that have run render byte-identically to before.**
+
+### 🚨 `running:true` was UNBOUNDED, not 60 minutes — now gated on a bot-authored signal
+
+`REPLICA_ALIVE_MAX_S = 3600` was applied to the **replica FILE's mtime**, and `trevor-tailsync` republishes that file by atomic `mv` every ~21 min containing **zero** references to `trevor.service`, `is-active` or any heartbeat. A bot death with the VM and sync pipeline up never moved the age toward 3600. **The constant said an hour; the mechanism said forever.** It bounded the *sync pipeline*, never the bot.
+
+- **Now gated on `loop_heartbeat`** (23 bot-owned rows), measured against **the replica file's own mtime** so the sync lag cancels exactly — both terms come from one snapshot. Measured live: **79.4s age-at-snapshot vs 182.2s naive wall clock**, the difference being the 102.8s the file had been sitting there. 🚨 **This does NOT breach B6's "never staleness-check the replica" rule** — that rule forbids a *wall-clock* check; this is a within-snapshot delta.
+- 🚨 **`trainer_search_loop` is EXCLUDED.** It is written from **WSL** over the ssh pipe by `trevor-trainer-observe`, so it keeps advancing while `trevor.service` is dead. Proven with a control: a stub whose trainer row is **fresh** and whose bot rows are 3 h stale still resolves to **DEAD**.
+- 🚨 **The threshold is deliberately NOT `max(3600, cadence*2)`.** That per-loop rule is right for one loop; this is a MAX across 23, and the slowest carries `cadence_seconds=86400`, which yields a **48-hour "bound"** — a number that reads like a threshold and functions like its absence. Every loop stops when the bot dies, so the fastest (30 s) governs; 3600 s is 120× that and is the hour the code already claimed.
+- **The screen now shows provenance.** `status-bar.tsx` rendered a bare `ONLINE` while `trevor.source` had been in the payload since RM-DECOM B5 with **zero readers**. `describeTrevor()` is a **pure state→screen map** (the `loop-heartbeat-format.ts` precedent) driven through **all 9 states** via the repo's own typescript in a `vm` sandbox — the only way to prove the bot-dead rendering **without stopping the bot**. The case that was invisible now reads **`OFFLINE · bot silent 3h0m — replica still syncing`**. An unrecognised or absent `source` falls through to the pre-[B9] rendering unchanged; a null bot signal reads **UNVERIFIED in gold** — never ok, never a false OFFLINE. ⚠️ The bar is `hidden md:flex` — **desktop only; a phone does not see it.**
+
+### 🚨 The swap "leak" does not exist — A5's F-5 is OVERTURNED
+
+The deferred ledger has carried this as a leak across three measurements. It is not one.
+
+| | A5 (08:37) | **[B9] (20:5x)** |
+|---|---|---|
+| swap | 56.0% (1147 MB) | **32.7% (670 MB)** |
+| Σ `VmSwap` | 523.9 MB | 509 MB (**75%**) |
+| "held by no live process" | **623 MB (54%)** | **20 MB (2%)** |
+
+🚨 **`SwapCached = 141 MB (21%)` is the missing term A5 never measured** — pages resident in RAM that still hold their swap slot so they can be evicted again without a write. It counts in `SwapUsed` and belongs to **no** process's `VmSwap`, so the entire gap was attributed to a leak. **Causes found: 3.** (1) `SwapCached` accounting — **RULED IN, the mechanism**; (2) language servers / CC as ordinary holders — **RULED IN, contributors, not cause**; (3) *"WSL2 never releases swap after a process exits"* — **RULED OUT: swap fell 477 MB with no reboot, which a non-releasing kernel cannot do.** Residual 20 MB is accounting slop. **No `swapoff`, no emergency, and the exhaustion projection is falsified.** ⚠️ Two samples are not a slope; do not claim a downward trend either.
+
+### Scope not mentioned — 4
+
+1. 🚨 **`0.0.0.0:8471` — `Journal · Ingest` (uvicorn), HTTP 200 on `100.113.60.59:8471`**, no owning process even under sudo ⇒ a sibling WSL distro via the shared netns. **Owner: the `sandbox` distro's Journal project** — *inferred from the RM-SANDBOX record, not measured*: `wsl.exe` is unavailable from CC-in-tmux, so the owning distro could not be confirmed from here. **Named, not touched** — binding it to `127.0.0.1` is that project's change. 🚨 **A5's "zero references anywhere in TREVOR" is REFUTED**: `docs/B7_rmalerts_recovery_s5_wsl_state_2026-08-09.md` lists `127.0.0.1:8420`, `0.0.0.0:8471` as "local/tailnet helpers" — it was seen and shrugged at two days earlier.
+2. **`0.0.0.0:2225`** — a second sshd, ownerless (this distro's is 2232). Confirmed, unchanged.
+3. 🚨 **A5's `127.0.0.1:8420` is GONE** — nothing listening. A surface that disappears on its own is a surface nobody owns.
+4. **Timers: 5 TREVOR timers** in `list-timers --all` (incl. `trevor-shadow-panel`) + `trevor-restore.timer` **installed-disabled** = 6 unit files. A5 said 6, this file said 5; **both are defensible and the record should say which convention it uses.** Failed units: **2** (`console-getty`, `getty@tty1`) — still contradicts the "sole cause" line elsewhere in this file.
+
+### 📋 Two record corrections
+
+- 🚨 **The [B9] prompt's `B-33`/`B-34` do not match the master.** Master **B-33** is the 82% disk tripwire (A4 F-19) and **B-34** is `/etc/cron.daily` bypassing the aide mask (A4 F-12). The container gateway is **B-28** and `running:true` is **B-29**. Recorded so a reader of either document is not misled.
+- 🚨 **CROSS-PROMPT DEFECT IN [B2]'s TAILSYNC RE-KEY, found because both prompts touch `trevor-tailsync.sh`.** Its new gate keys on `SOURCE_ID="${SSH_HOST}:${VM_DB}"` and its own comment says that value *"MUST change when SSH_HOST/VM_DB change, which is exactly how the gate detects the Wave D repoint"*. **It does not change.** Repoint rows **17 and 18 deliberately leave both literals alone** — the alias is repointed by row 1 and the DB path is identical inside the container. Measured across a real dry-apply: `vm:/home/trevor/trevor/trevor.db` **before and after**. **B2's gate therefore cannot detect the repoint by this key** — the one event it was built for. Not fixed here (B2's file, B2's scope); handed over.
 
 ---
 
