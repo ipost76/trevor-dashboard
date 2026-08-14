@@ -136,6 +136,79 @@ function fmtAge(s: number | null): string {
   return `${(s / 3600).toFixed(1)}h ago`;
 }
 
+/** A DURATION, never an "ago" — used for the age of the panel itself. */
+function fmtSpan(s: number): string {
+  if (s < 90) return `${Math.round(s)}s`;
+  if (s < 5400) return `${Math.round(s / 60)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B3-RM-PROFIT (2026-08-14) — THE HEARTBEAT LINE STOPS QUOTING A FROZEN SCALAR.
+//
+// 🚨 WHAT WAS WRONG. `last_heartbeat_age_s` is a SCALAR B4 computes at panel
+// GENERATION time, and the panel was written once a day by the 07:15 digest. So
+// this line rendered a green "▶ HARNESS RUNNING · heartbeat 2m ago" off a number
+// that was itself hours old. Measured 2026-08-14 09:47 ET: the panel said
+// 127.19 s, the panel was 9,061 s old, and the true heartbeat age at that instant
+// was 61.87 s. Every figure was internally consistent, which is what made it
+// believable — the same shape as the money card [B2] fixed, one level worse,
+// because that card at least re-rendered.
+//
+// 🚨 THE CADENCE FIX ALONE IS NOT ENOUGH. b4-sweep now rewrites the panel hourly,
+// which shortens the gap; it does not make a scalar able to age. A faster liar is
+// still a liar. The panel has always carried `generated_at_et`, and
+// query_shadow_week.py has always derived `age_s` from it AT READ TIME — that
+// datum was sitting in the payload, rendered only in the footer, while the line
+// people actually read printed the frozen number bare. The reconciliation is what
+// makes this honest at ANY cadence; the cadence just makes the answer tighter.
+//
+// ⚠️ Correction to the roadmap's T-3 wording, recorded so it is not re-inherited:
+// the panel is NOT missing an `as_of`. It carries `generated_at` and
+// `generated_at_et` and always did. What was missing was a VIEWER that reconciled
+// against them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** b4-sweep's lane runs hourly, so a panel older than this is behind its own cadence. */
+const PANEL_REGEN_S = 3600;
+const PANEL_BEHIND_S = 1.5 * PANEL_REGEN_S;
+/** Under this the panel is essentially "now" and the scalar needs no qualifier. */
+const PANEL_NOW_S = 300;
+
+export type HeartbeatReading =
+  | { kind: "measured"; text: string }
+  | { kind: "as_of"; text: string; behind: boolean }
+  | { kind: "unknown"; text: string };
+
+/**
+ * PURE — reconciles B4's frozen heartbeat scalar against the panel's own age.
+ * No clock of its own: `panelAgeS` is what the route already computed at read
+ * time. Drivable in a harness, which is how the gap case below is proven.
+ */
+export function reconcileHeartbeat(
+  heartbeatAgeS: number | null | undefined,
+  panelAgeS: number | null | undefined,
+): HeartbeatReading {
+  if (typeof heartbeatAgeS !== "number" || !isFinite(heartbeatAgeS)) {
+    return { kind: "unknown", text: "heartbeat age not reported by the panel" };
+  }
+  if (typeof panelAgeS !== "number" || !isFinite(panelAgeS)) {
+    // We hold a reading but cannot tell when it was taken, so we will not date
+    // it. An undated measurement presented as current is the whole defect.
+    return { kind: "unknown", text: "heartbeat age cannot be dated — panel age unknown" };
+  }
+  if (panelAgeS < PANEL_NOW_S) {
+    return { kind: "measured", text: `heartbeat ${fmtAge(heartbeatAgeS)}` };
+  }
+  return {
+    kind: "as_of",
+    // The scalar is stated as a PAST measurement with the gap beside it, so it
+    // cannot be read as a current reading no matter how old the panel gets.
+    text: `heartbeat was ${fmtSpan(heartbeatAgeS)} old when measured · panel ${fmtAge(panelAgeS)}`,
+    behind: panelAgeS > PANEL_BEHIND_S,
+  };
+}
+
 // A full-card fault banner. Used for every state in which the panel must NOT be
 // read as a clean day. Deliberately replaces the body rather than sitting beside
 // it — "instead of a green tick, never beside one".
@@ -239,6 +312,9 @@ export function ShadowWeekCard({ initialData }: { initialData?: ShadowData } = {
 
   const row = data.row;
   const harnessRunning = row.harness_state === "RUNNING";
+  // `row.age_s` is the PANEL's own age, derived at read time by
+  // query_shadow_week.py from generated_at_et. It has always been in the payload.
+  const hb = reconcileHeartbeat(row.last_heartbeat_age_s, row.age_s);
   const notDrift = Object.entries(row.not_drift ?? {}).filter(([, n]) => n > 0);
 
   return (
@@ -261,8 +337,20 @@ export function ShadowWeekCard({ initialData }: { initialData?: ShadowData } = {
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 font-mono text-sm text-emerald-300">
-            ▶ HARNESS RUNNING · heartbeat {fmtAge(row.last_heartbeat_age_s)}
+          // 🚨 The RUNNING verdict is B4's and is carried VERBATIM; only the AGE
+          //    beside it is reconciled. When the panel is behind its own hourly
+          //    cadence the line leaves emerald — the verdict is still B4's, but
+          //    nothing on this card can confirm it is current.
+          <div
+            className={
+              hb.kind === "measured"
+                ? "rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 font-mono text-sm text-emerald-300"
+                : hb.kind === "as_of" && !hb.behind
+                  ? "rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-200"
+                  : "rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-2 font-mono text-sm text-amber-200"
+            }
+          >
+            ▶ HARNESS RUNNING · {hb.text}
           </div>
         )}
 

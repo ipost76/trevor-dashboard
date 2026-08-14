@@ -25,6 +25,13 @@ interface HeartbeatShape {
   overall_status?: string | null;
   critical_count?: number | null;
   warning_count?: number | null;
+  // B3-RM-PROFIT (2026-08-14): the two fields the RETIRED shape already carried
+  // and nothing read. /api/heartbeat's failure path returns
+  // `{ observatory: "retired", reason }` — see its RM-DECOM B5 comment. They
+  // have been in this component's state since that day; only the render ignored
+  // them, which is why an honest UNKNOWN was unreadable for 36 days.
+  observatory?: string | null;
+  reason?: string | null;
 }
 interface Finding {
   severity: string | null;
@@ -146,20 +153,54 @@ export function HealthRollup() {
     detail = `${n} AI finding${n === 1 ? "" : "s"}${note}`;
   }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // B3-RM-PROFIT (2026-08-14) — MAKE THE UNKNOWN LEGIBLE.
+  //
+  // ✅ THIS BADGE IS NOT BROKEN AND WAS NOT "FIXED". A permanently-UNKNOWN
+  // rollup is the CORRECT, designed rendering of a decommissioned health
+  // source: the Observatory was deliberately retired on 2026-07-08 (unit
+  // masked, never started) and its second input, the AI findings table, died
+  // with it. The endpoint returns a `retired` shape precisely so consumers show
+  // calm neutral rather than a false green, and `hbAvailable === false` is what
+  // makes that happen. 🚨 THE STATE IS UNCHANGED — no replacement source is
+  // wired, nothing is synthesised from another signal, the panel is not
+  // removed. All of that is G-5 and Ghost has not ruled.
+  //
+  // What WAS wrong: it had been honest and UNREAD for 36 days, because
+  // "retired by design, decision pending" and "the thing is broken" rendered in
+  // the identical five words. The reason is now on the badge — and it is the
+  // ENDPOINT'S OWN reason string, not one composed here.
+  // ───────────────────────────────────────────────────────────────────────────
+  const retired = hb?.observatory === "retired";
+  const marker = retired
+    ? "UNKNOWN · retired by design — decision pending"
+    : "UNKNOWN · health source unavailable";
+  // Verbatim from the payload. If the endpoint stops sending one, the line is
+  // omitted rather than replaced by something invented.
+  const reasonLine =
+    typeof hb?.reason === "string" && hb.reason.trim() !== "" ? hb.reason.trim() : null;
+
   return (
-    <div className="flex items-center gap-2" aria-live="polite">
-      <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
-        System health
-      </span>
-      {unknown ? (
-        <Pill tone="neutral" size="md">
-          UNKNOWN · health source unavailable
-        </Pill>
-      ) : (
-        <Pill intent={INTENT[combined]} size="md" pulse={combined === 2}>
-          {WORD[combined]} · {detail}
-        </Pill>
-      )}
+    <div aria-live="polite">
+      <div className="flex items-center gap-2">
+        <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
+          System health
+        </span>
+        {unknown ? (
+          <Pill tone="neutral" size="md">
+            {marker}
+          </Pill>
+        ) : (
+          <Pill intent={INTENT[combined]} size="md" pulse={combined === 2}>
+            {WORD[combined]} · {detail}
+          </Pill>
+        )}
+      </div>
+      {unknown && reasonLine ? (
+        <p className="mt-1 font-mono text-micro leading-relaxed text-fg-muted">
+          {reasonLine}
+        </p>
+      ) : null}
     </div>
   );
 }
