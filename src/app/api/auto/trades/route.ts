@@ -29,6 +29,15 @@ export const dynamic = "force-dynamic";
 interface TradesResponse {
   type: "open" | "closed";
   count: number;
+  /** W4a: replica lag measured when this payload was BUILT (a duration). */
+  replica_age_seconds?: number | null;
+  /**
+   * B2-RM-PROFIT: the ABSOLUTE replica watermark (real UTC epoch SECONDS) the
+   * freshness stamp derives from. Deliberately ABSENT from `fallback` below —
+   * a failed read has no watermark, and <ReplicaAge> renders AGE UNKNOWN for
+   * it rather than inventing a fresh-looking one.
+   */
+  replica_mtime_epoch_s?: number | null;
   positions?: Record<string, unknown>[];
   trades?: Record<string, unknown>[];
   // KPI-RECON: open-set freshness tier. true ⇒ live heartbeat-sourced;

@@ -111,18 +111,28 @@ def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
-def _replica_age_seconds() -> int | None:
-    """Age of the published replica (mtime of the file DB resolves to).
+def _replica_freshness() -> dict:
+    """Freshness of the published replica (mtime of the file DB resolves to).
 
     Same idiom as query_auto_state._replica_age and drift-state/route.ts, so
-    every surface reports one age for one file. None on failure — the caller
-    then renders no freshness claim rather than a fabricated one.
+    every surface reports one age for one file.
+
+    🚨 B2-RM-PROFIT (2026-08-14): emits BOTH terms from ONE stat — the duration
+    (`replica_age_seconds`, true only at build time, kept for back-compat) and
+    the ABSOLUTE watermark (`replica_mtime_epoch_s`, real UTC epoch seconds),
+    which is what the freshness stamp is derived from. A duration cannot age;
+    a watermark can. Both None on failure — the Hub renders UNKNOWN.
     """
     try:
         st = os.stat(os.path.realpath(DB))
-        return max(0, int(datetime.now(timezone.utc).timestamp() - st.st_mtime))
+        return {
+            "replica_age_seconds": max(
+                0, int(datetime.now(timezone.utc).timestamp() - st.st_mtime)
+            ),
+            "replica_mtime_epoch_s": int(st.st_mtime),
+        }
     except Exception:
-        return None
+        return {"replica_age_seconds": None, "replica_mtime_epoch_s": None}
 
 
 def _rows(cur) -> list[dict]:
@@ -315,10 +325,11 @@ def main() -> int:
         limit = 60
     limit = max(1, min(500, limit))
 
-    replica_age = _replica_age_seconds()
+    _fresh = _replica_freshness()
+    replica_age = _fresh["replica_age_seconds"]
     out: dict = {
         "window_hours": hours,
-        "replica_age_seconds": replica_age,
+        **_fresh,
         # Fail-safe shape: every consumer can render without a null check, and
         # `state` defaults to the one value that claims nothing.
         "state": "scanner_silent",

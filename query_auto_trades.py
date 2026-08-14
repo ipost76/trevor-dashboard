@@ -78,23 +78,38 @@ def _connect_ro() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
 
 
-def _replica_age_seconds() -> int | None:
+def _replica_freshness() -> dict:
     """W4a: age of the published read-only replica, from the mtime of the file
     `DB` resolves to. Mirrors query_auto_state._replica_age (same idiom as
     drift-state/route.ts) so the two surfaces cannot report different ages for
-    the same file. Returns None on any failure — the Hub then renders no
-    freshness claim at all, rather than a fabricated one.
+    the same file.
+
+    🚨 B2-RM-PROFIT (2026-08-14): emits BOTH terms from ONE stat.
+      · `replica_age_seconds` — the duration, measured when this payload was
+        BUILT. Kept for back-compat. It cannot age, so any layer that holds the
+        payload keeps re-serving a lag that stopped being true.
+      · `replica_mtime_epoch_s` — the ABSOLUTE watermark (real UTC epoch
+        seconds), which is what the freshness stamp is derived from. A step
+        function: `now - watermark` grows for as long as the payload is held.
+    One stat, so the two terms can never straddle a tailsync publish and
+    describe different files.
+
+    Both None on any failure — the Hub then renders UNKNOWN, never a
+    fabricated claim and never a healthy-looking default.
     """
     try:
         import os
 
         st = os.stat(os.path.realpath(DB))
-        return max(
-            0,
-            int(datetime.now(timezone.utc).timestamp() - st.st_mtime),
-        )
+        return {
+            "replica_age_seconds": max(
+                0,
+                int(datetime.now(timezone.utc).timestamp() - st.st_mtime),
+            ),
+            "replica_mtime_epoch_s": int(st.st_mtime),
+        }
     except Exception:
-        return None
+        return {"replica_age_seconds": None, "replica_mtime_epoch_s": None}
 
 
 def _cutover_epoch(conn: sqlite3.Connection) -> str:
@@ -188,7 +203,7 @@ def fetch_open(limit: int) -> dict:
         "type": "open",
         "count": len(rows),
         "positions": rows,
-        "replica_age_seconds": _replica_age_seconds(),
+        **_replica_freshness(),
     }
 
 
@@ -260,7 +275,25 @@ def fetch_closed(
         "type": "closed",
         "count": len(rows),
         "trades": rows,
-        "replica_age_seconds": _replica_age_seconds(),
+        # ─────────────────────────────────────────────────────────────────────
+        # B2-RM-PROFIT (2026-08-14): ECHO the ET window this result was actually
+        # queried over, so the list can name the day it is showing.
+        #
+        # 🚨 Echoed from the QUERY, not recomputed in the browser. The client
+        # derives its range chip from its own clock; if the tab has been open
+        # since yesterday that clock has moved on and the rows have not, so a
+        # client-derived label would print today's date over yesterday's trades
+        # — the same class of lie the freshness stamp carried. These two values
+        # are frozen into the payload beside the rows they describe.
+        #
+        # `null` when no range was applied (MAX / malformed range): the result
+        # is the whole cutover-floored set and there is no single day to name.
+        # `window_floor_utc` is the cutover epoch that bounds EVERY path.
+        # ─────────────────────────────────────────────────────────────────────
+        "window_et_start": start if bounds is not None else None,
+        "window_et_end": end if bounds is not None else None,
+        "window_floor_utc": epoch,
+        **_replica_freshness(),
     }
 
 

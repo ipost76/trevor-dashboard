@@ -89,6 +89,9 @@ function realisedNet(s: SignalRow): number | null {
 interface SignalsResponse {
   window_hours: number;
   replica_age_seconds: number | null;
+  /** B2-RM-PROFIT: absolute replica watermark (real UTC epoch SECONDS) — the
+   *  term the freshness stamp derives from, because a duration cannot age. */
+  replica_mtime_epoch_s?: number | null;
   state: SignalState;
   replica_stale: boolean;
   scanner_silent_seconds: number | null;
@@ -313,7 +316,7 @@ export function SignalsCard() {
       </CardHeader>
 
       {/* Data age — the (c) discriminator, always visible. */}
-      <ReplicaAge ageSeconds={data?.replica_age_seconds} className="mb-2 block" />
+      <ReplicaAge asOfEpochS={data?.replica_mtime_epoch_s} className="mb-2 block" />
 
       {/* 🚨 (c) as a BANNER, not a state. A stale view can still be showing real
           signals, so staleness sits OVER whatever else is true rather than

@@ -102,6 +102,15 @@ interface AutoStateResponse {
   /** W4a: age of the read-only replica this payload came from. null => no claim. */
   replica_age_seconds: number | null;
   replica_mtime_utc: string | null;
+  /**
+   * B2-RM-PROFIT: the ABSOLUTE replica watermark (real UTC epoch SECONDS).
+   * 🚨 This is what the freshness stamp derives from, and the reason is this
+   * route: `cache.swr` serves the last-good payload to the first caller after
+   * any idle gap, so `replica_age_seconds` above — a duration frozen at build
+   * time — kept asserting a 15-minute lag on a payload measured 23h07m old.
+   * A watermark ages; a duration cannot. null => the card renders AGE UNKNOWN.
+   */
+  replica_mtime_epoch_s: number | null;
   killswitch_on: boolean;
   per_ticker_thresholds_enabled: boolean;
   data_available: boolean;
@@ -148,6 +157,9 @@ const FALLBACK: AutoStateResponse = {
   paper_window_enabled: true,
   replica_age_seconds: null,
   replica_mtime_utc: null,
+  // B2-RM-PROFIT: null, never Date.now()/1000. A failed read has no watermark;
+  // stamping one would make the fail-safe payload the freshest thing on screen.
+  replica_mtime_epoch_s: null,
   killswitch_on: false,
   per_ticker_thresholds_enabled: false,
   data_available: false,

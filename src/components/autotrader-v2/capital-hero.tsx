@@ -57,9 +57,16 @@ interface AutoState {
   equity_usd: number;
   realized: RealizedWindows;
   realized_pct: NullableWindows;
+  // B2-RM-PROFIT (T-6): the DENOMINATOR behind realized_pct — the real account
+  // value at the window's start. Named on screen so the % cannot read as a
+  // claim about account performance when its numerator is simulated.
+  realized_base?: NullableWindows;
   realized_count: RealizedWindows;
   realized_unknown_count: number;
   open_margin_usd: number;
+  // B2-RM-PROFIT (T-7): Σ(margin × leverage) — the position notional actually
+  // exposed to the market. Equal to open_margin_usd only at leverage 1.0.
+  open_notional_usd?: number | null;
   unrealized_usd: number;
   open_count: number;
   // RM-EQUITY-RESTORE B1: true live account value (the bot writes it to
@@ -80,8 +87,24 @@ interface AutoState {
   // mode. Drive the PAPER label from these — never from `live_enabled`.
   trades_paper_count?: number;
   paper_window_state?: PaperWindowState;
+  // B2-RM-PROFIT: the ET calendar day(s) each window covers, sliced from the
+  // query's OWN boundaries (query_auto_state._et_window_starts). Frozen into
+  // the payload beside the numbers, so a held payload names the day it
+  // measured. null on the fail-safe path => no date is claimed.
+  window_et_dates?: {
+    today?: string | null;
+    yesterday?: string | null;
+    week?: string | null;
+    month?: string | null;
+    all?: string | null;
+    end?: string | null;
+  } | null;
   // W4a: age of the replica these figures were read from.
   replica_age_seconds?: number | null;
+  // B2-RM-PROFIT: the ABSOLUTE watermark the freshness stamp derives from.
+  // `replica_age_seconds` above is a duration that was true when the payload
+  // was built and cannot age; this can. See src/lib/replica-age.tsx.
+  replica_mtime_epoch_s?: number | null;
   data_available: boolean;
 }
 
@@ -125,10 +148,97 @@ function fmtDay(iso: string): string {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// B2-RM-PROFIT (2026-08-14) — T-5: NAME THE DAY.
+//
+// Every day-scoped figure on this card said "today" and none said WHICH day.
+// The incident's read was a coherent, self-consistent snapshot of the PREVIOUS
+// day served under a "today" heading; had the card read "Wed 12 Aug" it would
+// have been self-evidently wrong at a glance, with no instrument needed at all.
+//
+// 🚨 The dates come from `window_et_dates` — the QUERY's own ET boundaries,
+// frozen into the payload — never from the browser's clock. That is the whole
+// mechanism: a stale render must show the STALE day. Deriving "today" locally
+// here would print the current date over yesterday's numbers, which is the
+// exact failure this label exists to make visible.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** "2026-08-14" → "Fri 14 Aug". Timezone-independent: the ISO parts are read as
+ *  a UTC instant and formatted in UTC, so the viewer's own timezone can never
+ *  roll the label onto an adjacent day (the recent-tab `dayLabel` precedent). */
+function fmtEtDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+/** "2026-08-14" → "14 Aug" (no weekday — used for the far end of a range). */
+function fmtEtDateShort(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * The ET day or span the selected window covers, phone-compact.
+ * Returns null when the payload carried no window — the card then says nothing
+ * rather than substituting the reader's own "today".
+ */
+function fmtWindowScope(
+  win: WindowKey,
+  dates: AutoState["window_et_dates"],
+): string | null {
+  if (!dates) return null;
+  const end = dates.end;
+  switch (win) {
+    case "today":
+      return dates.today ? fmtEtDate(dates.today) : null;
+    case "yesterday":
+      return dates.yesterday ? fmtEtDate(dates.yesterday) : null;
+    case "week":
+      return dates.week && end
+        ? `${fmtEtDateShort(dates.week)} – ${fmtEtDateShort(end)}`
+        : null;
+    case "month":
+      return dates.month && end
+        ? `${fmtEtDateShort(dates.month)} – ${fmtEtDateShort(end)}`
+        : null;
+    case "all":
+      return dates.all && end
+        ? `${fmtEtDateShort(dates.all)} – ${fmtEtDateShort(end)}`
+        : null;
+    // WA-P2 already renders the applied custom span from the picker state.
+    case "custom":
+      return null;
+  }
+}
+
 // RM-HUB-POLISH B1: signed-USD glance formatter (U+2212 minus), matching the
 // prior RM-PNL secondary-line convention. `$0.00` for exactly zero.
 function fmtUsd(n: number): string {
   return `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
+}
+
+/** B2-RM-PROFIT (T-6): compact "how long ago", for the account value's own age. */
+function fmtAgo(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "age unknown";
+  const m = Math.round(seconds / 60);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m ago`;
+  return `${Math.floor(h / 24)}d ${h % 24}h ago`;
 }
 const LABEL_TO_KEY: Record<string, WindowKey> = Object.fromEntries(
   WINDOWS.map((w) => [w.label, w.key]),
@@ -311,6 +421,12 @@ export function CapitalHero() {
   // RF3T2-B5: posted margin, NOT leveraged exposure. The visible label below
   // ("deployed") is the honest word for margin and is deliberately UNCHANGED.
   const openMargin = data?.open_margin_usd ?? 0;
+  // B2-RM-PROFIT (T-7): position notional. `null` (an older payload without the
+  // key) is kept DISTINCT from 0 — 0 is a real reading meaning "nothing open",
+  // and coercing an absent value into it would print a confident "$0 notional"
+  // over a live position. The notional clause is simply withheld when unknown.
+  const openNotional =
+    typeof data?.open_notional_usd === "number" ? data.open_notional_usd : null;
   const openCount = data?.open_count ?? 0;
   const totalCount = data?.trades_total ?? 0;
   // 🚨 W4a: this headline blends paper and live P&L (correct — mode-blind
@@ -329,6 +445,12 @@ export function CapitalHero() {
   const headlinePnl = realized[win] ?? 0;
   const headlinePct = realizedPct[win] ?? null;
   const headlineCount = realizedCount[win] ?? 0;
+
+  // B2-RM-PROFIT (T-5): the ET day this window covers, taken from the payload's
+  // own query boundary. null => say nothing rather than name the reader's day.
+  const windowScope = fmtWindowScope(win, data?.window_et_dates);
+  // B2-RM-PROFIT (T-6): the % denominator, for the honesty line under the hero.
+  const headlineBase = data?.realized_base?.[win] ?? null;
 
   // RM-HUB-POLISH B1: total session P&L = window realized + live floating. Null
   // (→ "—") whenever floating is unavailable — a total can't be honestly summed
@@ -376,8 +498,18 @@ export function CapitalHero() {
         <>
           {/* ── Realized headline (primary) — booked, closed trades only ── */}
           <div className="space-y-2">
+            {/* B2-RM-PROFIT (T-5): the day this figure summarises, from the
+                query's own ET boundary. Had this read "Wed 12 Aug" over
+                yesterday's numbers, the stale-page incident would have been
+                self-evident with no instrument needed at all. */}
             <span className="font-sans text-micro uppercase tracking-wider text-fg-muted">
               Realized P&L · booked
+              {windowScope && (
+                <span className="text-accent-cyan-soft-strong">
+                  {" "}
+                  · {windowScope}
+                </span>
+              )}
             </span>
             <div className="flex flex-wrap items-baseline gap-3">
               <MoneyText
@@ -410,6 +542,32 @@ export function CapitalHero() {
                 </span>
               )}
             </div>
+            {/* ── B2-RM-PROFIT (T-6): WHAT THE PERCENTAGE ACTUALLY IS ──
+                Measured 2026-08-14: the denominator — the real account value —
+                has been the SAME $82.0542 across 520 equity snapshots since
+                2026-07-23 03:11:15, and `LIVE_ACCOUNT_VALUE_USD` has been
+                rewritten 6,459 times since with only 2 distinct values. It does
+                not move because the book is paper and paper trades never touch
+                real equity. So this % is a SIMULATED numerator over a REAL,
+                FROZEN denominator, printed in the register of account
+                performance — a reader can reasonably conclude their account
+                fell 1.26% today when it has not moved in three weeks.
+                Nothing computed here changed; the sentence under it did. */}
+            {headlinePct != null && (
+              <span
+                className={`block font-sans text-micro ${
+                  paperMode ? "text-accent-gold" : "text-fg-muted"
+                }`}
+              >
+                % ={" "}
+                {paperMode ? "simulated P&L" : "realized P&L"} ÷{" "}
+                {headlineBase != null
+                  ? `$${headlineBase.toFixed(2)}`
+                  : "account value"}{" "}
+                real capital at window start
+                {paperMode && " — not a move in your account"}
+              </span>
+            )}
             <span className="font-sans text-micro text-fg-faint">
               {headlineCount} closed {headlineCount === 1 ? "trade" : "trades"} · open
               positions count $0 until closed
@@ -435,9 +593,13 @@ export function CapitalHero() {
               </span>
             )}
             {/* W4a: the data's age. An empty window must never be mistaken for a
-                stale one — see src/lib/replica-age.tsx. */}
+                stale one — see src/lib/replica-age.tsx.
+                B2-RM-PROFIT: fed the ABSOLUTE watermark, not the stored
+                duration, so a payload held by a cache or a suspended tab ages
+                on screen instead of re-asserting a lag that stopped being
+                true. Past 30 min this renders STALE and no reading at all. */}
             <ReplicaAge
-              ageSeconds={data.replica_age_seconds}
+              asOfEpochS={data.replica_mtime_epoch_s}
               className="block pt-0.5"
             />
             {/* WA-P2: the applied custom span, so the headline's scope is legible. */}
@@ -471,7 +633,13 @@ export function CapitalHero() {
                   label now says where it came from, not how fresh it is. */}
               Account value{" "}
               <span className="text-fg-faint">
-                · balance on the exchange, updated periodically
+                {/* B2-RM-PROFIT (T-6): this figure is the % denominator, so its
+                    own age belongs beside it. "updated periodically" told a
+                    reader nothing they could weigh. */}
+                · balance on the exchange
+                {typeof data?.live_account_value_age_s === "number"
+                  ? `, read ${fmtAgo(data.live_account_value_age_s)}`
+                  : ", age unknown"}
               </span>
             </span>
             {liveAccountValue === null ? (
@@ -520,8 +688,36 @@ export function CapitalHero() {
                 </span>
               </div>
             </div>
+            {/* ── B2-RM-PROFIT (T-7): MARGIN AND NOTIONAL, NAMED SEPARATELY ──
+                This line read "$55.92 deployed". `notional_usd` is POSTED
+                MARGIN, and "deployed" is an honest word for margin — but the
+                only open position sits at leverage 1.0, so margin and notional
+                are the same number and nothing on screen said which one it was.
+                At the historic 10x default the identical line would have
+                understated market exposure by 10×. Both terms now render, with
+                the implied leverage, so the distinction is legible at ANY
+                leverage rather than accidentally correct at 1.0.
+                Confirmed arithmetically on live rows before shipping:
+                `pnl_pct` reproduces as ROE-on-MARGIN (directional/entry ×
+                leverage) on 1,324 of 1,325 levered rows, vs 9 of 1,325 for the
+                unlevered form — so notional_usd is the posted margin. See
+                query_auto_state's open_row comment for why the notional is
+                computed as margin × leverage and NOT read from the
+                `original_notional_usd` column. */}
             <div className="font-mono text-caption tabular-nums text-fg-muted">
-              {openCount} open · ${openMargin.toFixed(2)} deployed
+              {openCount} open · ${openMargin.toFixed(2)} margin
+              {openNotional !== null && (
+                <>
+                  {" "}
+                  · ${openNotional.toFixed(2)} position size
+                  {openMargin > 0 && (
+                    <span className="text-fg-faint">
+                      {" "}
+                      ({(openNotional / openMargin).toFixed(1)}×)
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
@@ -530,10 +726,13 @@ export function CapitalHero() {
             <MetricTile
               label="Trades"
               value={String(headlineCount)}
+              // B2-RM-PROFIT (T-5): name the DAY, not the word "today". The
+              // scope comes from the payload's own window boundary, so a held
+              // payload labels itself with the day it measured.
               sub={`${
                 isCustomActive && customStart && customEnd
                   ? `${fmtDay(customStart)}–${fmtDay(customEnd)}`
-                  : windowLabel.toLowerCase()
+                  : (windowScope ?? windowLabel.toLowerCase())
               } · ${totalCount.toLocaleString()} total since cutover${
                 paperCount > 0 ? ` (${paperCount} paper)` : ""
               }`}

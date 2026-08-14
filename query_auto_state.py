@@ -423,7 +423,7 @@ def _paper_window_state(cfg: dict) -> tuple[str, bool]:
     return ("absent", True)
 
 
-def _replica_age(now_utc: datetime) -> tuple[int | None, str | None]:
+def _replica_age(now_utc: datetime) -> tuple[int | None, str | None, int | None]:
     """W4a: age of the published read-only replica, from the mtime of the file
     `DB` resolves to (on WSL, /home/trevor/trevor/trevor.db is a symlink to
     /home/ghost/trevor-replica/trevor.db — the tailsync-published copy).
@@ -433,9 +433,28 @@ def _replica_age(now_utc: datetime) -> tuple[int | None, str | None]:
     old and would libel a perfectly fresh replica as stale. mtime answers "when
     was this data published", which is the question an empty screen raises.
 
+    🚨 B2-RM-PROFIT (2026-08-14) — THE THIRD ELEMENT IS THE LOAD-BEARING ONE.
+    `replica_age_seconds` (element 0) is a DURATION measured at the instant this
+    payload was BUILT. That is a correct measurement and it is kept, but it is
+    the wrong thing to render a freshness stamp from, because a duration cannot
+    age. Any layer that holds this payload — the route's stale-while-revalidate
+    cache, a suspended browser tab — keeps serving a duration that was true
+    hours ago, and a stamp derived from it slides forward with the wall clock
+    while claiming a constant lag. Measured on this box: a payload built
+    2026-08-13 09:04:45 was served 2026-08-14 08:12:30 still carrying
+    `replica_age_seconds=933`, a 23h07m-old page stamped 15 minutes.
+
+    Element 2 is the ABSOLUTE watermark — the replica file's mtime as real UTC
+    epoch SECONDS. It is a step function: it jumps when tailsync publishes and
+    sits still between publishes, so `now - watermark` grows for exactly as long
+    as the data is actually held, at whatever layer holds it. Emitted as an
+    integer epoch, never a formatted string, so no consumer can re-parse it on
+    the wrong clock (the naive `replica_mtime_utc` string beside it is real UTC
+    but carries no offset, and `new Date(str)` in a browser reads it as LOCAL).
+
     Mirrors the `_replica_age` idiom already used by drift-state/route.ts and
-    query_shadow_registry. Fails to (None, None) — the Hub then renders no age
-    claim at all, never a fabricated one.
+    query_shadow_registry. Fails to (None, None, None) — the Hub then renders
+    UNKNOWN, never a fabricated claim and never a healthy-looking default.
     """
     try:
         st = os.stat(os.path.realpath(DB))
@@ -444,9 +463,10 @@ def _replica_age(now_utc: datetime) -> tuple[int | None, str | None]:
             datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
+            int(st.st_mtime),
         )
     except Exception:
-        return (None, None)
+        return (None, None, None)
 
 
 def _cutover_epoch(conn: sqlite3.Connection) -> str:
@@ -602,9 +622,14 @@ def main() -> int:
         # C2 (2026-07-02): account value at AUTO_CUTOVER_EPOCH — route.ts's fixed
         # realized-% denominator. None → the route renders every % as "—".
         "cutover_base_usd": None,
+        # B2-RM-PROFIT: no window was computed on the fail-safe path, so there is
+        # no day to name. None => the card omits the date rather than printing
+        # the browser's "today" over numbers that were never measured.
+        "window_et_dates": None,
         "realized_count": {"today": 0, "yesterday": 0, "week": 0, "month": 0, "all": 0},
         "realized_unknown_count": 0,
         "open_margin_usd": 0.0,
+        "open_notional_usd": 0.0,  # B2-RM-PROFIT: Σ(margin × leverage)
         "unrealized_usd": 0.0,
         "open_count": 0,
         # RM-EQUITY-RESTORE B1: true live account value (auto_config
@@ -651,6 +676,11 @@ def main() -> int:
         # rather than a false one.
         "replica_age_seconds": None,
         "replica_mtime_utc": None,
+        # B2-RM-PROFIT: absent watermark on the fail-safe path => the Hub
+        # renders UNKNOWN. Never 0 (epoch 1970 would read as maximally stale,
+        # which is a measurement nobody took) and never `now` (which would read
+        # as perfectly fresh — the exact defect this key exists to close).
+        "replica_mtime_epoch_s": None,
         "killswitch_on": False,
         "per_ticker_thresholds_enabled": False,
         "data_available": False,
@@ -722,8 +752,51 @@ def main() -> int:
             # sum it DIRECTLY, never ÷ leverage (that trap ~7×'s the figure).
             # True notional = margin × leverage; this field is deliberately the
             # margin, which is what the card's "deployed" label means.
+            #
+            # ─────────────────────────────────────────────────────────────────
+            # B2-RM-PROFIT (2026-08-14): `position_notional` added ALONGSIDE the
+            # margin — additive, the margin sum is byte-unchanged.
+            #
+            # 🚨 THE RISK IS CONCENTRATED IN THE NAMING, AND IT IS INVISIBLE
+            # TODAY. The card rendered the margin under the word "deployed",
+            # which is honest for margin — but the only open position is at
+            # leverage 1.0, so margin and notional are the SAME NUMBER and no
+            # reader can tell which one they are looking at. At the historic 10x
+            # default the same line would have understated real exposure by 10×.
+            # A test at 1.0 proves nothing; both terms now ship so the
+            # distinction is legible at every leverage.
+            #
+            # Semantics CONFIRMED ARITHMETICALLY against live rows rather than
+            # taken from the standing law. The decisive test is `pnl_pct`: on
+            # 1,324 of 1,325 levered closed rows with no partials it reproduces
+            # as `directional/entry * LEVERAGE` — ROE on MARGIN. The unlevered
+            # form (which is what it would be if `notional_usd` held the
+            # position size) matches only 9 of 1,325. Corroborated by
+            # `pnl_usd / (pnl_pct% * notional_usd)` having median 0.8488 — a
+            # fee-reduced fraction of 1, i.e. the ROE% applies to notional_usd.
+            #
+            # 🚨 DO NOT USE `original_notional_usd` HERE, AND DO NOT BELIEVE IT
+            # IS ALWAYS `notional_usd * leverage`. Measured across all 1,913
+            # rows: 994 are NULL, and of the rest 375 differ. Two distinct
+            # reasons, both real:
+            #   · PRE-CUTOVER the column held the MARGIN, not the notional —
+            #     id=4 carries notional_usd=10, leverage=10, orig=10. Its
+            #     meaning changed over time, so it is not a safe authority.
+            #   · POST-CUTOVER (139 of 166 agree) the 27 that differ are
+            #     PARTIAL EXITS: `notional_usd` is decremented as the position
+            #     is scaled out while `original_notional_usd` stays frozen at
+            #     ENTRY (id=101740: orig 64.49 vs current margin 38.69).
+            # That second case is exactly why the product is the right term
+            # here — this line answers "how much is exposed RIGHT NOW", not
+            # "how much was exposed at entry". Mirrors query_leverage_regime's
+            # `total_ntl_pos`, so the two surfaces cannot report different
+            # exposure for the same book.
+            # COALESCE(leverage, 1) — a NULL leverage means un-levered, and the
+            # row must still contribute its margin rather than vanishing.
+            # ─────────────────────────────────────────────────────────────────
             open_row = conn.execute(
-                "SELECT COUNT(*) AS n, COALESCE(SUM(notional_usd), 0) AS notional "
+                "SELECT COUNT(*) AS n, COALESCE(SUM(notional_usd), 0) AS notional, "
+                "COALESCE(SUM(notional_usd * COALESCE(leverage, 1)), 0) AS position_notional "
                 "FROM auto_trades WHERE status='open'"
             ).fetchone()
 
@@ -796,7 +869,37 @@ def main() -> int:
             # derive here, inside the successful-read branch, so the fail-safe
             # `out` defaults ("error"/None) survive untouched on any throw.
             _pw_state, _pw_is_paper = _paper_window_state(cfg)
-            _replica_age_s, _replica_mtime = _replica_age(now_utc)
+            _replica_age_s, _replica_mtime, _replica_mtime_epoch = _replica_age(now_utc)
+
+            # ─────────────────────────────────────────────────────────────────
+            # B2-RM-PROFIT (2026-08-14): the ET CALENDAR DAY each window covers,
+            # so a card can name the day it is summarising.
+            #
+            # 🚨 SLICED FROM `_et_window_starts`' OWN OUTPUT, never recomputed.
+            # The whole point is that a held payload shows the day it actually
+            # measured, not the day it is being looked at — so the label must be
+            # the query's own boundary, and deriving it a second way (here or in
+            # the browser from `now`) would let the two disagree by exactly the
+            # amount that matters. `_et_window_starts` is UNCHANGED; this reads
+            # the naive-ET 'YYYY-MM-DD 00:00:00' strings it already produced and
+            # takes the date half. No new clock, no conversion, no new boundary.
+            #
+            # `end` is the last ET day the windows include (all windows run to
+            # the end of the current ET day) — carried so a range can be printed
+            # without the browser re-deriving "today" from its own clock.
+            # ─────────────────────────────────────────────────────────────────
+            _et_starts = _et_window_starts(now_utc)
+            _window_et_dates = {
+                "today": _et_starts["today"][:10],
+                "yesterday": _et_starts["yesterday"][:10],
+                "week": _et_starts["week"][:10],
+                "month": _et_starts["month"][:10],
+                # ALL is floored at the cutover epoch, which is the real left
+                # edge of every "all-time" figure on this card. `epoch` is UTC
+                # 'YYYY-MM-DD HH:MM:SS'; its DATE is what a reader needs.
+                "all": epoch[:10] if isinstance(epoch, str) and len(epoch) >= 10 else None,
+                "end": _et_starts["today"][:10],
+            }
 
             # RM-EQUITY-RESTORE B1: true live account value + freshness, read from
             # the SAME mode=ro connection (display-only, no HL call, never writes).
@@ -897,9 +1000,20 @@ def main() -> int:
             "realized_pct": realized_pct,
             "realized_base": realized_base,
             "cutover_base_usd": cutover_base,  # PCT-DENOM-FIX3: post-cutover starting capital (~$69.74)
+            # B2-RM-PROFIT: the ET calendar day(s) each window covers, sliced
+            # from the query's OWN boundaries so a held payload names the day it
+            # measured rather than the day it is being read on.
+            "window_et_dates": _window_et_dates,
             "realized_count": win["realized_count"],
             "realized_unknown_count": win["realized_unknown_count"],
             "open_margin_usd": round(float(open_row["notional"] or 0.0), 4),
+            # B2-RM-PROFIT: Σ(margin × leverage) — the POSITION NOTIONAL, i.e.
+            # the size actually exposed to the market. Additive and display-only;
+            # `open_margin_usd` above is untouched. Equal to the margin only
+            # while every open position sits at leverage 1.0.
+            "open_notional_usd": round(
+                float(open_row["position_notional"] or 0.0), 4
+            ),
             "unrealized_usd": unrealized,
             "open_count": open_count,
             # RM-EQUITY-RESTORE B1: true live account value + freshness (real $ or,
@@ -931,6 +1045,10 @@ def main() -> int:
             "paper_window_enabled": _pw_is_paper,
             "replica_age_seconds": _replica_age_s,
             "replica_mtime_utc": _replica_mtime,
+            # B2-RM-PROFIT: the ABSOLUTE watermark the freshness stamp is
+            # derived from. See _replica_age's docstring for why the duration
+            # above cannot carry that job. Additive; None => Hub renders UNKNOWN.
+            "replica_mtime_epoch_s": _replica_mtime_epoch,
             "killswitch_on": str(cfg.get("EMERGENCY_KILLSWITCH", "false")).lower() == "true",
             "per_ticker_thresholds_enabled": _per_ticker_enabled(),
             "data_available": True,

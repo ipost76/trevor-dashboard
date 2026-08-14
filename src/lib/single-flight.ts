@@ -130,6 +130,16 @@ export class Semaphore {
   }
 }
 
+/**
+ * B2-RM-PROFIT: materiality floor for the SERVING-STALE trace below. A served
+ * value is only worth a line once it is well past its own TTL — under a normal
+ * poll every expired hit is a serve-stale by design and logging those buries
+ * the one that matters. 3× TTL, floored at 60s, so a 10s-TTL route stays quiet
+ * at 30s and speaks up at a minute; the 23h07m case is ~1,380× over.
+ */
+const STALE_SERVE_LOG_TTL_MULT = 3;
+const STALE_SERVE_LOG_MIN_MS = 60_000;
+
 export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
   const defaultTtl = options?.defaultTtl ?? 30_000;
   const clock = options?.clock ?? (() => Date.now());
@@ -179,6 +189,38 @@ export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
       // Single-flight collapses concurrent expired-hits to a single refresh; a
       // failed background refresh is swallowed so the stale value keeps serving
       // (no poison) until a later refresh succeeds.
+
+      // ─────────────────────────────────────────────────────────────────────
+      // 🚨 B2-RM-PROFIT (2026-08-14) — THE SERVE ITSELF NOW LEAVES A TRACE.
+      //
+      // The 2026-06-30 warn below covers a FAILED background refresh. It is not
+      // the path that hurt: a caller can be handed an arbitrarily old value on
+      // the ordinary SUCCESS path, because this branch returns the stale entry
+      // FIRST and refreshes behind it. After a long idle gap the "stale" value
+      // is not seconds old, it is however long nobody asked. Measured on this
+      // box: /api/auto/state returned a payload built 2026-08-13 09:04:45 when
+      // called at 2026-08-14 08:12:30 — 23h07m — with no error, no failure and
+      // NOT ONE LINE ANYWHERE. The next call was current, so the incident left
+      // no trace at all and could not be diagnosed after the fact.
+      //
+      // ⚠️ MATERIALITY GATE, STATED RATHER THAN HIDDEN. The ruling was "log
+      // every serve-stale with its age". Taken literally that is every expired
+      // hit — with a 10s TTL under a 15s client poll that is EVERY poll, ~4
+      // lines/min/route across 26 caches, and a journal nobody can read is how
+      // this box's real alert surface gets muted. So an ordinary sub-materiality
+      // serve (the designed SWR behaviour, and not a finding) is not logged;
+      // anything meaningfully beyond the TTL is, immediately and by name. If
+      // the intent was truly every hit, this constant is the one line to change.
+      // ─────────────────────────────────────────────────────────────────────
+      const servedAgeMs = clock() - entry.ts;
+      if (servedAgeMs > Math.max(STALE_SERVE_LOG_MIN_MS, ttl * STALE_SERVE_LOG_TTL_MULT)) {
+        console.warn(
+          `[swr] SERVING STALE key="${key}": value is ${servedAgeMs}ms old (ttl=${ttl}ms) — ` +
+            "returned to the caller as-is while a background refresh runs; any freshness " +
+            "figure inside this payload was measured when it was built, not now",
+        );
+      }
+
       void refresh(key, compute).catch((err) => {
         // B1 HEARTBEAT-FAILSAFE (2026-06-30): kill the SILENT keep-stale path —
         // the incident left no Hub trace. A swallowed background-refresh failure

@@ -48,6 +48,15 @@ interface ClosedTradesResponse {
   trades: ClosedTrade[];
   /** W4a: age of the replica this list came from. null => render no age claim. */
   replica_age_seconds?: number | null;
+  /** B2-RM-PROFIT: absolute replica watermark (real UTC epoch SECONDS) — the
+   *  term the freshness stamp derives from, because a duration cannot age. */
+  replica_mtime_epoch_s?: number | null;
+  /** B2-RM-PROFIT (T-5): the ET window this result was ACTUALLY queried over,
+   *  echoed by the server. Rendered instead of a client-derived "today" so a
+   *  list fetched yesterday cannot be captioned with today's date. null when
+   *  no range was applied (MAX) — there is then no single day to name. */
+  window_et_start?: string | null;
+  window_et_end?: string | null;
   // B2: present on ANY failure path (the route's runPython-throw catch, the
   // Python script's own error payloads, and the route's parse-failure fallback),
   // so the client can tell "fetch broke" from "no trades this day".
@@ -215,8 +224,14 @@ export function RecentTab() {
   // so B2's tradesUrl-as-effect-dep stale-closure fix is fully preserved.
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [customExpanded, setCustomExpanded] = React.useState(false);
-  // W4a: age of the replica the current list was read from.
-  const [replicaAge, setReplicaAge] = React.useState<number | null>(null);
+  // W4a / B2-RM-PROFIT: the replica watermark the current list was read from,
+  // as an absolute epoch. Held instead of the duration so a held payload ages.
+  const [replicaAsOf, setReplicaAsOf] = React.useState<number | null>(null);
+  // B2-RM-PROFIT (T-5): the ET window the CURRENT list was queried over, as
+  // echoed by the server — frozen with the rows, never re-derived from `now`.
+  const [queriedWindow, setQueriedWindow] = React.useState<
+    { start: string; end: string } | null
+  >(null);
 
   // B2: derive the fetch URL from the CURRENT range. This URL is the effect's SOLE
   // dependency (mirroring capital-hero's stateUrl), so a range change re-runs the
@@ -252,9 +267,18 @@ export function RecentTab() {
           return;
         }
         setTrades(j.trades ?? []);
-        // W4a: capture the replica's age alongside the rows. undefined (an older
-        // payload) => null => <ReplicaAge> renders nothing, never a false claim.
-        setReplicaAge(j.replica_age_seconds ?? null);
+        // W4a: capture the replica's watermark alongside the rows. undefined (an
+        // older payload) => null => <ReplicaAge> renders AGE UNKNOWN, never a
+        // false claim and — since B2-RM-PROFIT — never nothing at all.
+        setReplicaAsOf(j.replica_mtime_epoch_s ?? null);
+        // B2-RM-PROFIT (T-5): capture the window the SERVER queried, alongside
+        // the rows it returned. An older payload without the keys => null =>
+        // the caption is withheld, never filled in from the browser's clock.
+        setQueriedWindow(
+          j.window_et_start && j.window_et_end
+            ? { start: j.window_et_start, end: j.window_et_end }
+            : null,
+        );
         setError(null); // most recent fetch succeeded — clear any prior error
       } catch (e) {
         // B2: network / parse failure → honest error, NEVER a silent "no trades".
@@ -431,7 +455,19 @@ export function RecentTab() {
             list is empty. This is the line that stops an empty window reading as
             "nothing happened" when the truth is "the replica has not caught up".
             Always rendered here, never only in the empty state. */}
-        <ReplicaAge ageSeconds={replicaAge} className="mb-3 block" />
+        {/* B2-RM-PROFIT (T-5): the ET day(s) this list covers, echoed by the
+            server from the query it actually ran. The range chip says "TODAY";
+            this says WHICH day, so a list left open overnight cannot present
+            yesterday's trades under today's heading. */}
+        {queriedWindow && (
+          <p className="mb-1 font-sans text-micro uppercase tracking-wider text-accent-cyan-soft-strong">
+            {queriedWindow.start === queriedWindow.end
+              ? fmtDayHeader(queriedWindow.start)
+              : `${fmtDayHeader(queriedWindow.start)} – ${fmtDayHeader(queriedWindow.end)}`}
+          </p>
+        )}
+
+        <ReplicaAge asOfEpochS={replicaAsOf} className="mb-3 block" />
 
         {/* B2: transient refresh failure while last-good data is still shown. */}
         {error != null && trades !== null && (

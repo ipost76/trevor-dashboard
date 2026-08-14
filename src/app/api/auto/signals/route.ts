@@ -78,6 +78,12 @@ interface SignalRow {
 interface SignalsResponse {
   window_hours: number;
   replica_age_seconds: number | null;
+  /**
+   * B2-RM-PROFIT: the ABSOLUTE replica watermark (real UTC epoch SECONDS) the
+   * freshness stamp derives from — a duration cannot age, a watermark can.
+   * `null` on the fail-safe path => <ReplicaAge> renders AGE UNKNOWN.
+   */
+  replica_mtime_epoch_s: number | null;
   state: SignalState;
   replica_stale: boolean;
   /** Scanner quiet-time with replica lag subtracted; null when unknowable. */
@@ -112,6 +118,9 @@ interface SignalsResponse {
 const FALLBACK: SignalsResponse = {
   window_hours: 24,
   replica_age_seconds: null,
+  // B2-RM-PROFIT: null, never Date.now()/1000. A failed read has no watermark;
+  // stamping one would make the fail-safe payload the freshest thing on screen.
+  replica_mtime_epoch_s: null,
   state: "scanner_silent",
   replica_stale: false,
   scanner_silent_seconds: null,
