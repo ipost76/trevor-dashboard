@@ -42,6 +42,23 @@ export interface LoopsResponse {
     total: number;
   };
   error: string | null;
+  /**
+   * 🚨 [B2] (2026-08-17) — THE WATERMARK. Epoch-ms at which this payload was BUILT, stamped
+   * by the route from the SWR cache's own `ts`. An ABSOLUTE instant, never a duration:
+   * that distinction is the entire fix, and it is `replica-age.tsx`'s `asOfEpochS` law
+   * applied one layer down. A duration cannot age — `age_sec` below was measured when the
+   * payload was built and stays frozen at that number no matter how long the payload is
+   * afterwards held and re-served, which is how this surface reported `age_sec: 2107` on a
+   * 3h14m-old payload whose true age was 2968s.
+   *
+   * `null` means the payload carries no build stamp (a failed read, or a pre-[B2] server) —
+   * the consumer must then say so, never silently fall back to the frozen figure.
+   * OPTIONAL so the two locally-constructed UNKNOWN shapes in loop-heartbeat-card.tsx and
+   * any older cached payload still type-check; absent is handled identically to null.
+   */
+  built_at_epoch_ms?: number | null;
+  /** Epoch-ms this response left the route. Diagnostic only — nothing branches on it. */
+  served_at_epoch_ms?: number | null;
 }
 
 export interface StatePresentation {
@@ -127,18 +144,106 @@ export function fmtLoopAge(secs: number | null | undefined): string {
 }
 
 /**
+ * 🚨 [B2] A payload the consumer has been HOLDING for this long or more gets its hold time
+ * said out loud. Below it the clause is omitted, so a payload served inside its own TTL
+ * renders BYTE-IDENTICALLY to the pre-[B2] string — the honesty is additive, and the normal
+ * case is not made noisier to pay for the abnormal one.
+ */
+export const HELD_MATERIALITY_S = 60;
+
+/** Mirrors replica-age.tsx's MAX_FUTURE_SKEW_S — a build stamp slightly ahead of the
+ *  reader's clock is ordinary skew, not a finding; well ahead of it is unusable. */
+export const MAX_FUTURE_SKEW_S = 90;
+
+/**
+ * 🚨 [B2] THE RE-DERIVED AGE. A TOTAL UNION WITH NO DEFAULT BRANCH — the
+ * `resolveWedgeBadge` / `evaluateReplicaFreshness` / `loopStatePresentation` shape, so a
+ * fourth outcome fails the compiler rather than falling through to something reassuring.
+ *
+ * `derived` — age re-computed at READ time: the VM-measured age at build PLUS how long the
+ *   payload has been held since. Splitting it that way is deliberate: the base was computed
+ *   inside the VM's own SQLite clock and is free of cross-box skew, so only the hold term
+ *   crosses clocks, and that term is zero on a fresh payload.
+ * `at_build` — there is no usable watermark, so the frozen build-time figure is ALL that
+ *   exists. It is still shown, but explicitly labelled as a past measurement with a reason.
+ *   Never silently rendered as if it were current.
+ * `unknown` — the row has no age at all.
+ */
+export type LoopAge =
+  | { kind: "derived"; ageSeconds: number; heldSeconds: number }
+  | { kind: "at_build"; ageSeconds: number; reason: string }
+  | { kind: "unknown"; reason: string };
+
+export function resolveLoopAge(
+  row: LoopRow,
+  data: LoopsResponse | null,
+  nowMs: number,
+): LoopAge {
+  const base = row.age_sec;
+  if (base === null || base === undefined || !Number.isFinite(base)) {
+    return { kind: "unknown", reason: "no last-run time was recorded" };
+  }
+  const atBuild = Math.max(0, Math.round(base));
+
+  const built = data?.built_at_epoch_ms;
+  if (typeof built !== "number" || !Number.isFinite(built) || built <= 0) {
+    return {
+      kind: "at_build",
+      ageSeconds: atBuild,
+      reason: "this payload carries no build stamp, so its age cannot be re-derived",
+    };
+  }
+
+  const heldSeconds = (nowMs - built) / 1000;
+  if (heldSeconds < -MAX_FUTURE_SKEW_S) {
+    return {
+      kind: "at_build",
+      ageSeconds: atBuild,
+      reason: "the build stamp is in the future — clock skew",
+    };
+  }
+  const held = Math.max(0, heldSeconds);
+  return {
+    kind: "derived",
+    ageSeconds: Math.max(0, Math.round(base + held)),
+    heldSeconds: Math.round(held),
+  };
+}
+
+/**
  * The freshness phrase for one loop.
  *
  * 🚨 A NUMBER WITH NO FRESHNESS INDICATOR IS THE FAILURE `[B1]` FIXED ONE LAYER DOWN — a
  * frozen `iteration_count` read as a live one for a full day. Every count on this surface
  * is therefore rendered WITH its age, never alone.
+ *
+ * 🚨 [B2] AND THE AGE ITSELF IS NOW RE-DERIVED AT READ TIME. `row.age_sec` was measured when
+ * the payload was built and froze there — a staleness meter that could not detect its own
+ * staleness. It is now the BASE of a live computation, never the answer.
  */
-export function fmtLoopFreshness(row: LoopRow): string {
-  if (row.age_sec === null || row.age_sec === undefined) return "last run unknown";
-  const age = fmtLoopAge(row.age_sec);
+export function fmtLoopFreshness(
+  row: LoopRow,
+  data: LoopsResponse | null = null,
+  nowMs: number = Date.now(),
+): string {
+  const resolved = resolveLoopAge(row, data, nowMs);
+  if (resolved.kind === "unknown") return "last run unknown";
+
   const limit = fmtLoopAge(row.stale_threshold_sec);
-  if (row.state === "stale") return `last ran ${age} ago — past its ${limit} limit`;
-  return `last ran ${age} ago (limit ${limit})`;
+  const age = fmtLoopAge(resolved.ageSeconds);
+
+  if (resolved.kind === "at_build") {
+    // Mirrors replica-age.tsx: an absent watermark renders AGE UNKNOWN with its reason —
+    // never nothing, and never a fresh-looking stamp.
+    return `AGE UNKNOWN · last ran ${age} ago when this was read — ${resolved.reason}`;
+  }
+
+  const held =
+    resolved.heldSeconds >= HELD_MATERIALITY_S
+      ? ` · this reading is ${fmtLoopAge(resolved.heldSeconds)} old`
+      : "";
+  if (row.state === "stale") return `last ran ${age} ago — past its ${limit} limit${held}`;
+  return `last ran ${age} ago (limit ${limit})${held}`;
 }
 
 /**

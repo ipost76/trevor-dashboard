@@ -55,7 +55,17 @@ const FALLBACK: AutoConfigResponse = {
   data_available: false,
 };
 
-const cache = createSwrCache<AutoConfigResponse>({ defaultTtl: 20_000, concurrency: 1 });
+const CONFIG_TTL_MS = 20_000;
+// 🚨 [B2] (2026-08-17): 6× TTL = 120s — the OPEN_SET_STALENESS_CEILING_MS multiplier.
+// This was the WORST offender measured on this box: served 71,319,069ms old — 19h49m — at
+// HTTP 200, a config page rendering yesterday's thresholds as current. A config surface has
+// no freshness badge of its own, so nothing on screen could have contradicted it.
+const CONFIG_STALENESS_CEILING_MS = 6 * CONFIG_TTL_MS;
+const cache = createSwrCache<AutoConfigResponse>({
+  defaultTtl: CONFIG_TTL_MS,
+  concurrency: 1,
+  stalenessCeiling: CONFIG_STALENESS_CEILING_MS,
+});
 
 async function readConfig(): Promise<AutoConfigResponse> {
   const raw = await runPython("query_auto_config.py", [], { timeout: 12_000 });

@@ -52,6 +52,16 @@ export interface SwrCacheOptions {
   concurrency?: number;
   /** Injectable monotonic-ish clock (ms). Default `() => Date.now()`. Override in tests. */
   clock?: () => number;
+  /**
+   * B2 (2026-08-17): absolute staleness CEILING in ms — the age past which this cache
+   * REFUSES to serve a stale value at all. Per-call override via
+   * `swr(..., { stalenessCeiling })`. Default `DEFAULT_STALENESS_CEILING_MS` (30 min).
+   * 🚨 It must never be set BELOW the instance's TTL: a ceiling under the TTL can only
+   * ever be crossed by an already-expired entry, which silently turns the route into
+   * `staleWhileRevalidate:false` — disabling SWR inside what looks like a hardening
+   * option. The floor is 2× TTL. See the block above `swr()` for what happens past it.
+   */
+  stalenessCeiling?: number;
 }
 
 export interface SwrCache<T> {
@@ -67,13 +77,14 @@ export interface SwrCache<T> {
    *       Use this when staleness is unacceptable (e.g. a live proxy whose UI must show
    *       upstream errors) but same-tick bursts should still collapse to one upstream call.
    * - cold (no value)           → awaits the refresh; rejects if `compute` rejects.
+   * - B2: past `stalenessCeiling` → the entry is treated as COLD (see below).
    * `compute(prev)` receives the current cached value (the stale one on a refresh,
    * `undefined` when cold) so callers can fill gaps from the prior payload.
    */
   swr(
     key: string,
     compute: (prev: T | undefined) => Promise<T>,
-    opts?: { ttl?: number; staleWhileRevalidate?: boolean },
+    opts?: { ttl?: number; staleWhileRevalidate?: boolean; stalenessCeiling?: number },
   ): Promise<SwrResult<T>>;
   /** Non-mutating inspection of the cached entry (no compute). `stale` is judged
    *  against `defaultTtl`. Returns undefined when there is no value. */
@@ -140,8 +151,24 @@ export class Semaphore {
 const STALE_SERVE_LOG_TTL_MULT = 3;
 const STALE_SERVE_LOG_MIN_MS = 60_000;
 
+/**
+ * B2 (2026-08-17): THE GENEROUS DEFAULT STALENESS CEILING — 30 minutes.
+ *
+ * Not a round number picked for looks: it is `REPLICA_STALE_S` from `replica-age.tsx`
+ * (30 * 60), the age past which this repo's replica surfaces ALREADY refuse to render a
+ * reading at all. A cache serving a payload older than that is handing consumers something
+ * the freshness layer one floor up would have declined to show. One definition of "too old
+ * to be a reading", reused rather than re-invented.
+ *
+ * 26 routes share this cache, so the default is deliberately LOOSE — the ssh-vm-backed
+ * routes pass their own tight value. A ceiling too tight would turn a working dashboard
+ * into an awaited refresh on every idle visit, which is a different kind of wrong.
+ */
+export const DEFAULT_STALENESS_CEILING_MS = 30 * 60_000;
+
 export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
   const defaultTtl = options?.defaultTtl ?? 30_000;
+  const defaultCeiling = options?.stalenessCeiling ?? DEFAULT_STALENESS_CEILING_MS;
   const clock = options?.clock ?? (() => Date.now());
 
   const store = new Map<string, CacheEntry<T>>();
@@ -173,10 +200,11 @@ export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
   async function swr(
     key: string,
     compute: (prev: T | undefined) => Promise<T>,
-    opts?: { ttl?: number; staleWhileRevalidate?: boolean },
+    opts?: { ttl?: number; staleWhileRevalidate?: boolean; stalenessCeiling?: number },
   ): Promise<SwrResult<T>> {
     const ttl = opts?.ttl ?? defaultTtl;
     const allowStale = opts?.staleWhileRevalidate ?? true;
+    const ceiling = opts?.stalenessCeiling ?? defaultCeiling;
     const entry = store.get(key);
 
     if (entry && clock() - entry.ts < ttl) {
@@ -184,7 +212,43 @@ export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
       return { value: entry.value, stale: false, ts: entry.ts };
     }
 
-    if (entry && allowStale) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🚨 B2 (2026-08-17) — THE ABSOLUTE STALENESS CEILING. THE CACHE NOW REFUSES.
+    //
+    // Everything below this point used to be unreachable for a warm key: with an
+    // entry present, the SWR branch resolved with the stale value and NEVER threw,
+    // so a route's `unknown()` / fail-soft contract could only be reached on a COLD
+    // cache. Measured on this box 2026-08-17 (WSL, TrevorHub): `/api/health/loops`
+    // served a payload built 3h14m earlier at HTTP 200 / status "ok" / source
+    // "vm-live", reporting `age_sec: 2107` while the live VM row's true age was
+    // 2968s and its iteration count had moved 326 -> 329. `auto-config` served a
+    // 19h49m-old payload; `list` (chroma) 19h48m. Nothing failed. Nothing 500'd.
+    //
+    // 🚨 PAST THE CEILING THE ENTRY IS TREATED AS COLD — IT DOES NOT THROW. That
+    // distinction is load-bearing and it is what the measurement decided. The live
+    // trigger was NOT a dead upstream: it was an IDLE GAP. Nobody called the route
+    // for hours, the entry simply aged, and the background refresh then succeeded
+    // on the very next request. Throwing here would convert a recoverable cold
+    // start into a false outage on a healthy system. Falling through to the
+    // existing awaited single-flight refresh means a healthy upstream returns
+    // FRESH data (one slower request, the cold-start cost it already pays) and the
+    // route's UNKNOWN contract is reached ONLY when that refresh actually fails.
+    //
+    // The error that reaches the caller is the REFRESH's own error, deliberately
+    // unwrapped: "ssh to vm timed out after 20s" is the reason a human needs, and
+    // wrapping it in cache plumbing would bury the cause to advertise the guard.
+    // The refusal is named in the log line below instead.
+    // ─────────────────────────────────────────────────────────────────────────
+    const ceilingExpired = entry !== undefined && clock() - entry.ts > ceiling;
+    if (ceilingExpired && entry) {
+      console.warn(
+        `[swr] REFUSING STALE key="${key}": value is ${clock() - entry.ts}ms old ` +
+          `(ceiling=${ceiling}ms, ttl=${ttl}ms) — NOT served; awaiting a fresh compute. ` +
+          "If that compute fails the caller sees its error, which is the honest answer",
+      );
+    }
+
+    if (entry && allowStale && !ceilingExpired) {
       // Expired but present → serve stale immediately + ONE background refresh.
       // Single-flight collapses concurrent expired-hits to a single refresh; a
       // failed background refresh is swallowed so the stale value keeps serving
@@ -235,8 +299,11 @@ export function createSwrCache<T>(options?: SwrCacheOptions): SwrCache<T> {
       return { value: entry.value, stale: true, ts: entry.ts };
     }
 
-    // Cold, OR expired with staleWhileRevalidate:false → await a single-flighted
-    // refresh (concurrent callers still share ONE compute). A rejection propagates.
+    // Cold, OR expired with staleWhileRevalidate:false, OR past the B2 ceiling →
+    // await a single-flighted refresh (concurrent callers still share ONE compute).
+    // A rejection propagates. `compute(prev)` still receives the stale value on the
+    // ceiling path, exactly as it already does on the staleWhileRevalidate:false
+    // path — this reuses an existing branch rather than minting a new one.
     const value = await refresh(key, compute);
     const fresh = store.get(key);
     return { value, stale: false, ts: fresh ? fresh.ts : clock() };

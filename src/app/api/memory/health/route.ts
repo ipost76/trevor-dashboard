@@ -14,7 +14,19 @@ export const dynamic = "force-dynamic";
 // collapses to ONE collection. 10s is short for slowly-varying CPU/mem/disk/
 // service-state; the included `killswitch_enabled` is ≤10s fresh (and not the
 // live killswitch source — the UI reads /api/killswitch for that).
-const cache = createSwrCache<Record<string, unknown>>({ defaultTtl: 10_000, concurrency: 2 });
+const MEMORY_HEALTH_TTL_MS = 10_000;
+// 🚨 [B2] (2026-08-17): 6× TTL = 60s — the OPEN_SET_STALENESS_CEILING_MS multiplier applied
+// to this route's own 10s TTL, which is the identical arithmetic (6 × 10_000) that produced
+// that constant. It lands BELOW the 120s the other ssh-vm routes carry because its TTL is
+// half theirs — the value is derived per-route, never copied across routes.
+// Measured before the fix: served 11,731,113ms old (3h15m), snapshot_at 20:21:30Z; the
+// refresh it triggered returned 23:37:02Z.
+const MEMORY_HEALTH_STALENESS_CEILING_MS = 6 * MEMORY_HEALTH_TTL_MS;
+const cache = createSwrCache<Record<string, unknown>>({
+  defaultTtl: MEMORY_HEALTH_TTL_MS,
+  concurrency: 2,
+  stalenessCeiling: MEMORY_HEALTH_STALENESS_CEILING_MS,
+});
 
 async function computeHealth(): Promise<Record<string, unknown>> {
   const stdout = await runPython("query_system_health.py", []);
@@ -29,7 +41,19 @@ export async function GET() {
     return NextResponse.json(
       {
         snapshot_at: new Date().toISOString(),
-        killswitch_enabled: false,
+        // 🚨 [B2] (2026-08-17) — WAS `false`. A read that FAILED cannot report the
+        // killswitch as disengaged: that is a fabricated all-clear about a money-path
+        // control, pixel-identical to a real reading of "safe". `null` is the honest
+        // shape and it is already the ruling twice over in this repo —
+        // /api/memory/autotrader-toggle and /api/auto/partials-toggle both carry
+        // `killswitch_enabled: null` on their failure paths with a comment naming the
+        // `false` version "a confident all-clear about a money-path". Same law as
+        // QUAL-01's `{"active": null, "status": "unknown"}` on /api/system-health.
+        //
+        // The [B2] ceiling above is what makes this branch REACHABLE on a warm cache: it
+        // used to be cold-start-only. Shipping the ceiling without this token would have
+        // turned a stale-but-true reading into a fresh-looking fabricated one.
+        killswitch_enabled: null,
         services: [],
         collectors: [],
         sentinels: [],

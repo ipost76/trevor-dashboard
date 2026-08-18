@@ -30,7 +30,18 @@ interface HelperResult {
   error?: string;
 }
 
-const cache = createSwrCache<HelperResult>({ defaultTtl: 20_000, concurrency: 1 });
+const WEDGE_TTL_MS = 20_000;
+// 🚨 [B2] (2026-08-17): 6× TTL = 120s — the OPEN_SET_STALENESS_CEILING_MS multiplier.
+// This route reads a VM-only file over the ssh pipe and the tile above it computes
+// `stale_minutes` from `generated_at`, so a stale-served payload produced a stale-minutes
+// figure that was itself stale. Measured before the fix: served 11,731,132ms old (3h15m)
+// with `generated_at 16:16:47-04:00`; the refresh it triggered returned 19:27:46-04:00.
+const WEDGE_STALENESS_CEILING_MS = 6 * WEDGE_TTL_MS;
+const cache = createSwrCache<HelperResult>({
+  defaultTtl: WEDGE_TTL_MS,
+  concurrency: 1,
+  stalenessCeiling: WEDGE_STALENESS_CEILING_MS,
+});
 
 async function readWedgeMetrics(): Promise<HelperResult> {
   const stdout = await runPython("query_wedge_metrics.py", [], { timeout: 12_000 });

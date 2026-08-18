@@ -33,7 +33,27 @@ export const dynamic = "force-dynamic";
 // The helper makes one ssh round-trip (~1–2s). Single-flight + a 20s SWR so a page with
 // two mounts of this card — /health and the TRAINER line — collapses to ONE ssh call, and
 // a burst of polls cannot fan out into a pile of concurrent ssh sessions.
-const cache = createSwrCache<LoopsResponse>({ defaultTtl: 20_000, concurrency: 1 });
+const LOOPS_TTL_MS = 20_000;
+const cache = createSwrCache<LoopsResponse>({ defaultTtl: LOOPS_TTL_MS, concurrency: 1 });
+
+// 🚨 [B2] (2026-08-17) — THE TIGHT CEILING, AND WHY THIS ROUTE OF ALL ROUTES.
+//
+// 6× the TTL = 120s, the same multiplier as OPEN_SET_STALENESS_CEILING_MS in
+// heartbeat-open-set.ts. Past it the cache refuses to serve stale and the `unknown()`
+// contract below — which existed, was correct, and was structurally unreachable on a warm
+// entry — finally becomes reachable.
+//
+// This route earns the tightest tier because its payload IS a freshness claim. It exists
+// precisely because the ~21-min replica lag is too stale to answer "did a background loop
+// stop" (B6's ruling: no replica fallback, because a labelled-stale card is still a card
+// people read as current). A cache that serves this payload for two minutes past its TTL
+// is re-introducing, one layer up, the exact staleness the route was built to escape.
+//
+// Measured here 2026-08-17 23:36Z BEFORE the fix: this key served a payload built 3h14m
+// earlier (11,674,540ms) claiming `age_sec: 2107`, while the live VM row at that same
+// instant read iteration_count 329 / last_iteration 22:47:09Z / true age 2968s. The
+// payload said 326 / 19:46:54Z. Nothing errored.
+const LOOPS_STALENESS_CEILING_MS = 6 * LOOPS_TTL_MS;
 
 function unknown(reason: string): LoopsResponse {
   return {
@@ -43,6 +63,10 @@ function unknown(reason: string): LoopsResponse {
     loops: [],
     rollup: { worst: "unknown", counts: {}, active: 0, total: 0 },
     error: reason,
+    // No payload was built, so there is no build stamp. NULL, never `Date.now()` — a
+    // fresh-looking watermark on a failed read is the same lie in a new field.
+    built_at_epoch_ms: null,
+    served_at_epoch_ms: Date.now(),
   };
 }
 
@@ -55,8 +79,20 @@ async function computeLoops(): Promise<LoopsResponse> {
 
 export async function GET() {
   try {
-    const { value } = await cache.swr("health-loops", computeLoops);
-    return NextResponse.json(value);
+    // 🚨 [B2] `ts` IS THE WATERMARK, AND THE CACHE HAS ALWAYS RETURNED IT. `swr()` resolves
+    // `{ value, stale, ts }` — `ts` being the exact epoch-ms the served payload was stored.
+    // 28 of this repo's 31 swr call sites destructured `{ value }` and threw the rest away,
+    // this route included: the cache KNEW the payload was 3h old, SAID so on the wire, and
+    // the route discarded the sentence. Carrying `ts` through as `built_at_epoch_ms` is what
+    // lets the consumer re-derive the age instead of trusting a number frozen at build time.
+    const { value, ts } = await cache.swr("health-loops", computeLoops, {
+      stalenessCeiling: LOOPS_STALENESS_CEILING_MS,
+    });
+    return NextResponse.json({
+      ...value,
+      built_at_epoch_ms: ts,
+      served_at_epoch_ms: Date.now(),
+    });
   } catch (err) {
     // Never a 500: /health must render even when the pipe is down. Fail-open toward the
     // page, fail-loud toward the reader.

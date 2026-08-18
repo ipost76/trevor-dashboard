@@ -11,7 +11,23 @@ export const dynamic = "force-dynamic";
 // concurrent burst during the ~38s cold-start collapses to ONE Python child
 // instead of N. peek/search modes stay uncached passthrough. X-Cache HIT/MISS
 // preserved via peek (HIT = served from a stored value, MISS = freshly computed).
-const listCache = createSwrCache<unknown>({ defaultTtl: 5 * 60_000, concurrency: 2 });
+const CHROMA_LIST_TTL_MS = 5 * 60_000;
+// 🚨 [B2] (2026-08-17) — THE ONE ROUTE RAISED ABOVE THE 2-MINUTE TIER, AND THE REASON IS A
+// RULE, NOT AN EXCEPTION. Its TTL is 5 minutes, so the 120s the other four ssh-vm routes
+// carry would sit BELOW the TTL — a ceiling under the TTL can only ever be crossed by an
+// already-expired entry, which silently turns this route into `staleWhileRevalidate:false`
+// and disables SWR entirely, inside what is meant to be a hardening option. NO CEILING MAY
+// BE BELOW ITS ROUTE'S TTL; the floor is 2× TTL. 15 min = 3× TTL clears both bounds and is
+// still half the 30-min default. It is also the right tier on merit: this payload is a
+// ChromaDB collection listing, not a freshness claim — a 15-minute-old document count
+// misleads nobody, where a 15-minute-old loop heartbeat does.
+// Measured before the fix: served 71,315,764ms old (19h48m).
+const CHROMA_LIST_STALENESS_CEILING_MS = 3 * CHROMA_LIST_TTL_MS;
+const listCache = createSwrCache<unknown>({
+  defaultTtl: CHROMA_LIST_TTL_MS,
+  concurrency: 2,
+  stalenessCeiling: CHROMA_LIST_STALENESS_CEILING_MS,
+});
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);

@@ -201,7 +201,9 @@ export function LoopHeartbeatCompactLine({
       dot={p.dot}
       text={
         `Trainer: ${p.label.toLowerCase()} · ${row.iteration_count ?? "—"} runs · ` +
-        `${fmtLoopFreshness(row)}` +
+        // [B2]: `data` carries the build watermark, so the age re-derives on every render
+        // instead of reprinting the number that was true when the payload was made.
+        `${fmtLoopFreshness(row, data)}` +
         (row.degraded_reason ? ` · ${row.degraded_reason}` : "") +
         (row.state === "unpopulated" ? " · health field blank, not confirmed healthy" : "") +
         (witness ? ` · ${witness}` : "")
@@ -267,7 +269,12 @@ export function LoopHeartbeatBody({
             )}
             <ul className="space-y-2">
               {data.loops.map((row) => (
-                <LoopRowView key={row.loop_name} row={row} witness={witnesses[row.loop_name]} />
+                <LoopRowView
+                  key={row.loop_name}
+                  row={row}
+                  data={data}
+                  witness={witnesses[row.loop_name]}
+                />
               ))}
             </ul>
           </>
@@ -283,7 +290,17 @@ export function LoopHeartbeatBody({
   );
 }
 
-function LoopRowView({ row, witness }: { row: LoopRow; witness?: Witness }) {
+// [B2]: takes the whole payload, not just the row — the build watermark lives at payload
+// level (it describes the READ, not any one loop) and the age re-derives from it per render.
+function LoopRowView({
+  row,
+  data,
+  witness,
+}: {
+  row: LoopRow;
+  data: LoopsResponse | null;
+  witness?: Witness;
+}) {
   const p = loopStatePresentation(row.state);
   const seen = witnessLine(witness);
   return (
@@ -312,7 +329,7 @@ function LoopRowView({ row, witness }: { row: LoopRow; witness?: Witness }) {
       <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-micro text-fg-faint">
         <span>{row.iteration_count ?? "—"} runs</span>
         <span>{row.error_count ?? "—"} errors</span>
-        <span>{fmtLoopFreshness(row)}</span>
+        <span>{fmtLoopFreshness(row, data)}</span>
         <span>every {fmtLoopAge(row.cadence_seconds)}</span>
       </div>
     </li>
