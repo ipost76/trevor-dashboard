@@ -3,11 +3,23 @@
 # watcher_health.run_cycle — the ONLY module with a real daemon __main__). review/integrity
 # get NO unit of their own; they run in-process inside this one loop.
 #
-# INSTALL-ONLY today: NOT `enable`d, NOT `--now`. All WATCHER_* flags default OFF, so with
-# the flags off watcher_health.py's main() returns 0 immediately (MEASURED) — under Type=simple
-# the unit would run briefly and go `inactive (dead)`, NOT a live daemon. The real start is an
-# R13 go-live step AFTER `WATCHER_SURFACING_ENABLED=true` is set (+ the review/integrity flags),
-# run via `sudo systemctl enable --now trevor-watcher.service`, then the W15 arm-time check.
+# 🚨 LIVE — header corrected [B8] 2026-08-18 on TrevorHub (the WSL distro, ghost@Ghost).
+#    This block used to read "INSTALL-ONLY today: NOT `enable`d, NOT `--now`" — it asserted the
+#    OPPOSITE of this unit's own live state. MEASURED on 2026-08-18:
+#      UnitFileState=enabled · ActiveState=active (running) since 2026-08-12 09:35:06 EDT · NRestarts=0
+#      (`systemctl show trevor-watcher.service -p UnitFileState -p ActiveState -p ActiveEnterTimestamp -p NRestarts`)
+#
+# 🚨 The old header's MECHANISM was void too, not just its state. It argued the unit was inert
+#    because "all WATCHER_* flags default OFF", so watcher_health.py's main() returns 0 at once
+#    and Type=simple would drop it to `inactive (dead)`. All three flags are `true` in the
+#    EnvironmentFile below (WATCHER_SURFACING_ENABLED, WATCHER_REVIEW_ENABLED,
+#    WATCHER_INTEGRITY_ENABLED), so this IS a live daemon — not a briefly-running no-op. The R13
+#    go-live step the old text described as still pending HAS ALREADY HAPPENED.
+#
+# 🚨 This correction is TEXT ONLY: no directive changed, and nothing was enabled, disabled,
+#    started or stopped to make the words true. 🚨 The identical false header also lived in the
+#    TRACKED repo copy at deploy/systemd/wsl/trevor-watcher.service and was corrected in the SAME
+#    commit — fixing only the installed unit would let the next deploy re-infect it.
 [Unit]
 Description=TREVOR Watcher (oversight loop) — RF-2
 After=network-online.target tailscaled.service

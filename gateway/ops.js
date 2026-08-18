@@ -15,8 +15,26 @@
  * BEFORE ever forwarding to the VM — so every gateway-backed write route is dead
  * at the Hub choke point. The VM-side registry strip is the second layer (B4).
  *
- * The ONE survivor is `killswitch.set` — the emergency stop, intentionally
- * UNGATED (Ghost, 2026-06-06) and always actionable.
+ * 🚨 CORRECTED [B8] 2026-08-18 on TrevorHub — THIS HEADER USED TO SAY "The ONE survivor is
+ * `killswitch.set`". THAT HAS NOT BEEN TRUE SINCE 2026-07-22, and it mattered beyond this file:
+ * CLAUDE.md QUOTED THIS HEADER VERBATIM, so the stale comment propagated into the doc. Fixing
+ * the doc without fixing the source here would just let it regenerate on the next sync.
+ *
+ * The registry below holds FOUR ops:
+ *
+ *   killswitch.set      flag: null                        <- UNGATED BY DESIGN
+ *   promotion.approve   flag: HUB_PROMOTION_WRITE_ENABLED    (R12-B1, 2026-07-22)
+ *   trainer.pause       flag: HUB_PAUSE_CONTROL_ENABLED      (R12-B3, 2026-07-22)
+ *   trainer.resume      flag: HUB_PAUSE_CONTROL_ENABLED      (R12-B3, 2026-07-22)
+ *
+ * 🚨 ENUMERATE FROM THE CODE, NEVER FROM THIS COMMENT — a comment is what drifted:
+ *     node -e 'console.log(require("./gateway/ops.js").opNames())'
+ *
+ * `killswitch.set` is the one intentionally UNGATED (Ghost, 2026-06-06) — the emergency stop,
+ * always actionable. The other three ARE flag-gated, but do NOT read that as dormant: both
+ * gate flags read `true` in `auto_config` on the WSL read-only replica (measured [B8]
+ * 2026-08-18), so all four ops are LIVE-ARMED at this choke point. VM-side `gw_exec._flag_on`
+ * is the authoritative enforcement (423 when off); the `flag` field here is reference.
  *
  * Zero dependencies (Node built-ins only) so this loads inside the standalone
  * gateway process the same way `server.js` does.
