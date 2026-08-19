@@ -4,6 +4,7 @@ node_modules/
 # class as .next/ (~260MB each) — untracked and never staged.
 .next.build/
 .next.prev/
+.next.ship/
 data/
 *.log
 __pycache__/
